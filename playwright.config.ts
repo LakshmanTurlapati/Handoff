@@ -17,6 +17,7 @@ export default defineConfig({
   testDir: "./",
   testMatch: [
     "apps/web/tests/e2e/**/*.spec.ts",
+    "apps/web/tests/*.spec.ts",
     "apps/relay/tests/e2e/**/*.spec.ts",
   ],
   fullyParallel: false,
