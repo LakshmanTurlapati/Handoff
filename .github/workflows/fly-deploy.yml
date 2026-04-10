@@ -77,6 +77,14 @@ concurrency:
   group: fly-deploy-${{ github.ref }}
   cancel-in-progress: true
 
+# Minimum privilege: this workflow only needs to check out the repo
+# and call flyctl via an externally-scoped FLY_API_TOKEN. It does not
+# write to the repo, push images, or post comments. Scoping to
+# contents: read prevents a compromised step from abusing GITHUB_TOKEN.
+# (Addresses WR-04 from 01-REVIEW.md.)
+permissions:
+  contents: read
+
 jobs:
   deploy-web:
     if: github.event_name == 'push' || github.event.inputs.service == 'all' || github.event.inputs.service == 'web'
@@ -95,18 +103,30 @@ jobs:
         # performs one rolling restart for the whole batch instead of
         # one per secret. `--stage` stages the values without
         # restarting the machines; the deploy step below picks them up.
+        #
+        # Secrets must NEVER be interpolated into the run: command
+        # string — GitHub's expression engine substitutes BEFORE the
+        # shell parses, which is a textbook script-injection vector.
+        # Instead: map secrets to env vars on the step, and let the
+        # shell expand $VAR references at runtime. (CR-02 fix.)
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN:         ${{ secrets.FLY_API_TOKEN }}
+          AUTH_GITHUB_ID:        ${{ secrets.AUTH_GITHUB_ID }}
+          AUTH_GITHUB_SECRET:    ${{ secrets.AUTH_GITHUB_SECRET }}
+          SESSION_COOKIE_SECRET: ${{ secrets.SESSION_COOKIE_SECRET }}
+          PAIRING_TOKEN_SECRET:  ${{ secrets.PAIRING_TOKEN_SECRET }}
+          WS_TICKET_SECRET:      ${{ secrets.WS_TICKET_SECRET }}
+          DATABASE_URL:          ${{ secrets.DATABASE_URL }}
         run: |
           flyctl secrets set \
             --stage \
             --config apps/web/fly.toml \
-            AUTH_GITHUB_ID="${{ secrets.AUTH_GITHUB_ID }}" \
-            AUTH_GITHUB_SECRET="${{ secrets.AUTH_GITHUB_SECRET }}" \
-            SESSION_COOKIE_SECRET="${{ secrets.SESSION_COOKIE_SECRET }}" \
-            PAIRING_TOKEN_SECRET="${{ secrets.PAIRING_TOKEN_SECRET }}" \
-            WS_TICKET_SECRET="${{ secrets.WS_TICKET_SECRET }}" \
-            DATABASE_URL="${{ secrets.DATABASE_URL }}"
+            AUTH_GITHUB_ID="$AUTH_GITHUB_ID" \
+            AUTH_GITHUB_SECRET="$AUTH_GITHUB_SECRET" \
+            SESSION_COOKIE_SECRET="$SESSION_COOKIE_SECRET" \
+            PAIRING_TOKEN_SECRET="$PAIRING_TOKEN_SECRET" \
+            WS_TICKET_SECRET="$WS_TICKET_SECRET" \
+            DATABASE_URL="$DATABASE_URL"
 
       - name: Deploy apps/web
         env:
@@ -135,16 +155,24 @@ jobs:
         # Relay only needs the session and ws-ticket secrets plus the
         # shared Postgres connection string. GitHub OAuth credentials
         # are web-only.
+        #
+        # CR-02 fix: env-block indirection prevents shell injection.
+        # The expression engine only ever writes secrets into runner
+        # env vars, and the run: script references them via $VAR.
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN:         ${{ secrets.FLY_API_TOKEN }}
+          SESSION_COOKIE_SECRET: ${{ secrets.SESSION_COOKIE_SECRET }}
+          PAIRING_TOKEN_SECRET:  ${{ secrets.PAIRING_TOKEN_SECRET }}
+          WS_TICKET_SECRET:      ${{ secrets.WS_TICKET_SECRET }}
+          DATABASE_URL:          ${{ secrets.DATABASE_URL }}
         run: |
           flyctl secrets set \
             --stage \
             --config apps/relay/fly.toml \
-            SESSION_COOKIE_SECRET="${{ secrets.SESSION_COOKIE_SECRET }}" \
-            PAIRING_TOKEN_SECRET="${{ secrets.PAIRING_TOKEN_SECRET }}" \
-            WS_TICKET_SECRET="${{ secrets.WS_TICKET_SECRET }}" \
-            DATABASE_URL="${{ secrets.DATABASE_URL }}"
+            SESSION_COOKIE_SECRET="$SESSION_COOKIE_SECRET" \
+            PAIRING_TOKEN_SECRET="$PAIRING_TOKEN_SECRET" \
+            WS_TICKET_SECRET="$WS_TICKET_SECRET" \
+            DATABASE_URL="$DATABASE_URL"
 
       - name: Deploy apps/relay
         env:

@@ -65,7 +65,22 @@ COPY packages/protocol ./packages/protocol
 # Next.js production build. `--if-present` guards against the build
 # script being intentionally absent during Phase 1 scaffolding; in
 # normal operation this runs `next build` and produces `.next/`.
-RUN npm run build --workspace @codex-mobile/web --if-present || true
+#
+# CR-03 fix: the previous version swallowed a failing `next build` by
+# piping it to a shell-true fallback. --if-present still returns 0
+# when the script is genuinely absent, but now preserves the real
+# exit code when the script runs and fails. A broken `next build`
+# now fails the image build loudly instead of shipping a runtime-
+# broken container.
+RUN npm run build --workspace @codex-mobile/web --if-present
+
+# Fail the build if `.next/` was not produced. This is the exact
+# directory `npm start --workspace @codex-mobile/web` (i.e. `next start`)
+# will read from at container boot. A container without `.next/` would
+# crash on the first request in production — we prefer a loud build
+# failure over a green deploy that serves 500s.
+RUN test -d /repo/apps/web/.next \
+  || (echo "next build did not produce /repo/apps/web/.next" && exit 1)
 
 # -----------------------------------------------------------------------------
 # Stage 3: minimal production runtime

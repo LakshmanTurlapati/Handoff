@@ -258,6 +258,20 @@ Handoff's public services run on Fly.io. Phase 1 ships two separate Fly apps:
 
 Both services are built with multi-stage `node:22-alpine` Dockerfiles that `COPY` the repo root as the build context so the npm workspaces layout stays intact inside the image. The build context is set implicitly by `fly.toml` because the `dockerfile = "apps/<service>/Dockerfile"` path is relative to the repo root.
 
+### IMPORTANT: Single-machine pairing store constraint (Phase 1)
+
+Phase 1 ships with an **in-memory pairing store** (`apps/web/lib/pairing-service.ts` `InMemoryPairingStore`) for the `pairing_sessions` state machine. A pairing created on machine A is NOT visible to machine B, so `apps/web` **must run on exactly one Fly machine** until a Drizzle-backed store lands in a later phase.
+
+Required Fly configuration until the Drizzle-backed adapter ships:
+
+- `apps/web/fly.toml`: set `min_machines_running = 1` under `[http_service]` (the current value is `0`, which allows Fly to scale to zero and then cold-start a fresh second machine that has no pairing state).
+- `apps/web/fly.toml`: keep `auto_start_machines` as-is (`true` is acceptable because only ONE machine will ever run).
+- `apps/relay/fly.toml`: already sets `min_machines_running = 1` and `auto_start_machines = false`. No change needed.
+
+Symptom if this constraint is violated: the bridge CLI creates a pairing on machine A, the browser redeems it against machine B, and machine B returns `pairing_not_found` because its process-local Map has never seen the row. Operators will see confused "pairing disappeared" errors.
+
+This constraint is also why the in-memory rate limiter at `apps/web/lib/rate-limit.ts` is per-machine only; a multi-machine deploy needs a Redis-backed counter before scaling horizontally. Track both under the Phase 1 follow-ups.
+
 ### Prerequisites
 
 - A Fly.io organization and an account logged in via `fly auth login`.
