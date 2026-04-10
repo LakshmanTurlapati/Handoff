@@ -1,0 +1,84 @@
+# fly.toml for apps/web (Codex Mobile Phase 1 public web UI)
+#
+# This file is the source of truth for the Fly.io deployment of the
+# Next.js web app. Operator setup (Fly app creation, Postgres
+# attachment, secret provisioning) is documented in the repo README
+# under "Fly.io Deployment" and in .env.example.
+#
+# Load-bearing invariants:
+#   - `internal_port` MUST match the EXPOSE line in apps/web/Dockerfile
+#     and the PORT env var set in that Dockerfile's runtime stage.
+#   - `[[http_service.checks]]` targets /api/healthz, which is the
+#     liveness route added in plan 01-03 task 1 and allowlisted in
+#     apps/web/auth.config.ts so Fly's probe never hits GitHub OAuth.
+#   - The build context is the REPO ROOT, not apps/web, because the
+#     Dockerfile copies packages/auth, packages/db, and packages/protocol
+#     from the workspace layout.
+#
+# Replace `codex-mobile-web` with the real Fly app name from
+# `.env.example` (`FLY_APP_NAME_WEB`) before running `fly deploy`.
+
+app = "codex-mobile-web"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "15s"
+
+[build]
+  # Build from the repo root so the npm workspaces monorepo is visible
+  # to the Dockerfile COPY instructions. apps/web/Dockerfile does the
+  # heavy lifting of selecting the correct workspace packages.
+  dockerfile = "apps/web/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  HOSTNAME = "0.0.0.0"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+# -- HTTP service ----------------------------------------------------------
+#
+# The web app listens on internal port 3000 (see apps/web/Dockerfile).
+# Fly terminates TLS at the edge on 443 and proxies to the app port.
+# force_https rejects any plaintext request at the edge. auto_stop and
+# auto_start let Fly scale the app down when idle, which is desirable
+# for a Phase 1 public surface that sees light traffic.
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval = "15s"
+    method = "GET"
+    path = "/api/healthz"
+    protocol = "http"
+    timeout = "5s"
+    tls_skip_verify = false
+
+# -- Concurrency -----------------------------------------------------------
+
+[[http_service.concurrency]]
+  type = "requests"
+  soft_limit = 200
+  hard_limit = 250
+
+# -- VM -------------------------------------------------------------------
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"
+
+# -- Deploy hooks ---------------------------------------------------------
+
+[deploy]
+  # Fly runs this command on every machine right before it starts
+  # serving traffic. The web app has no Drizzle migrations of its own
+  # yet; Plan 01-03 will document `db:generate` in the README and
+  # operators run migrations out-of-band before deploy.
+  strategy = "rolling"

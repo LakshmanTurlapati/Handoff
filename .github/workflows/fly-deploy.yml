@@ -1,0 +1,157 @@
+# Fly.io deployment workflow for Codex Mobile Phase 1 services.
+#
+# This workflow deploys apps/web and apps/relay to Fly.io in sequence.
+# It is intentionally split into two jobs (web and relay) so a failing
+# deploy in one service does not block the other from being rolled
+# back independently.
+#
+# ---------------------------------------------------------------------------
+# REQUIRED GITHUB ACTIONS SECRETS (set under Settings -> Secrets and
+# variables -> Actions for this repository)
+#
+#   FLY_API_TOKEN
+#     Personal access token from the Fly.io dashboard -> Personal
+#     Access Tokens. Grants `flyctl` permission to deploy to the web
+#     and relay apps configured in apps/web/fly.toml and
+#     apps/relay/fly.toml. Treat as org-wide production credential.
+#
+#   AUTH_GITHUB_ID
+#     GitHub OAuth app Client ID (Auth.js GitHub provider). Set on the
+#     web app as a Fly secret by this workflow before deploy.
+#
+#   AUTH_GITHUB_SECRET
+#     GitHub OAuth app Client Secret. Set on the web app as a Fly
+#     secret by this workflow before deploy.
+#
+#   SESSION_COOKIE_SECRET
+#     32+ byte random signing key for cm_web_session and
+#     cm_device_session cookies. Set on both web and relay.
+#
+#   PAIRING_TOKEN_SECRET
+#     32+ byte random signing key for single-use pairing tokens minted
+#     by POST /api/pairings. Set on the web app.
+#
+#   WS_TICKET_SECRET
+#     32+ byte random signing key for short-lived cm_ws_ticket WebSocket
+#     upgrade tickets. MUST be distinct from SESSION_COOKIE_SECRET so
+#     leaked cookies cannot be replayed as WebSocket tickets (SEC-01).
+#     Set on both web (for minting) and relay (for verification).
+#
+#   DATABASE_URL
+#     Shared Postgres connection string. Attach Postgres to the web
+#     and relay apps via the Fly dashboard (or `fly postgres attach`)
+#     and re-use the same connection string across both services.
+#
+# All of the above are pushed to Fly as app secrets via
+# `flyctl secrets set` before `flyctl deploy` so a production image
+# never has to bake secrets into a layer.
+# ---------------------------------------------------------------------------
+
+name: fly-deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/web/**"
+      - "apps/relay/**"
+      - "packages/**"
+      - ".github/workflows/fly-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Which service to deploy"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - web
+          - relay
+
+concurrency:
+  # Only one deploy at a time per service branch. A later push
+  # cancels an in-flight deploy so the repo always reflects the newest
+  # commit on main.
+  group: fly-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-web:
+    if: github.event_name == 'push' || github.event.inputs.service == 'all' || github.event.inputs.service == 'web'
+    name: Deploy apps/web to Fly.io
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Push web app secrets to Fly
+        # Secrets are set in a single `flyctl secrets set` call so Fly
+        # performs one rolling restart for the whole batch instead of
+        # one per secret. `--stage` stages the values without
+        # restarting the machines; the deploy step below picks them up.
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl secrets set \
+            --stage \
+            --config apps/web/fly.toml \
+            AUTH_GITHUB_ID="${{ secrets.AUTH_GITHUB_ID }}" \
+            AUTH_GITHUB_SECRET="${{ secrets.AUTH_GITHUB_SECRET }}" \
+            SESSION_COOKIE_SECRET="${{ secrets.SESSION_COOKIE_SECRET }}" \
+            PAIRING_TOKEN_SECRET="${{ secrets.PAIRING_TOKEN_SECRET }}" \
+            WS_TICKET_SECRET="${{ secrets.WS_TICKET_SECRET }}" \
+            DATABASE_URL="${{ secrets.DATABASE_URL }}"
+
+      - name: Deploy apps/web
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy \
+            --config apps/web/fly.toml \
+            --dockerfile apps/web/Dockerfile \
+            --remote-only \
+            --wait-timeout 300
+
+  deploy-relay:
+    if: github.event_name == 'push' || github.event.inputs.service == 'all' || github.event.inputs.service == 'relay'
+    name: Deploy apps/relay to Fly.io
+    runs-on: ubuntu-latest
+    environment: production
+    needs: deploy-web
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Push relay secrets to Fly
+        # Relay only needs the session and ws-ticket secrets plus the
+        # shared Postgres connection string. GitHub OAuth credentials
+        # are web-only.
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl secrets set \
+            --stage \
+            --config apps/relay/fly.toml \
+            SESSION_COOKIE_SECRET="${{ secrets.SESSION_COOKIE_SECRET }}" \
+            PAIRING_TOKEN_SECRET="${{ secrets.PAIRING_TOKEN_SECRET }}" \
+            WS_TICKET_SECRET="${{ secrets.WS_TICKET_SECRET }}" \
+            DATABASE_URL="${{ secrets.DATABASE_URL }}"
+
+      - name: Deploy apps/relay
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy \
+            --config apps/relay/fly.toml \
+            --dockerfile apps/relay/Dockerfile \
+            --remote-only \
+            --wait-timeout 300

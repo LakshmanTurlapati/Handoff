@@ -1,0 +1,108 @@
+# fly.toml for apps/relay (Codex Mobile Phase 1 control plane)
+#
+# This file is the source of truth for the Fly.io deployment of the
+# Fastify relay service. Operator setup (Fly app creation, shared
+# Postgres attachment, secret provisioning) is documented in the repo
+# README under "Fly.io Deployment" and in .env.example.
+#
+# Load-bearing invariants:
+#   - `internal_port` MUST match the EXPOSE line in apps/relay/Dockerfile
+#     and the PORT env var set in that Dockerfile's runtime stage.
+#   - `[[http_service.checks]]` targets /readyz, which is the readiness
+#     route in apps/relay/src/routes/readyz.ts. /healthz is liveness
+#     and is wired as the machine check below for the finer-grained
+#     "process is alive" distinction.
+#   - The build context is the REPO ROOT, not apps/relay, because the
+#     Dockerfile copies packages/auth, packages/db, and packages/protocol
+#     from the workspace layout.
+#
+# Replace `codex-mobile-relay` with the real Fly app name from
+# `.env.example` (`FLY_APP_NAME_RELAY`) before running `fly deploy`.
+
+app = "codex-mobile-relay"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "15s"
+
+[build]
+  # Build from the repo root so the npm workspaces monorepo is visible
+  # to the Dockerfile COPY instructions. apps/relay/Dockerfile does the
+  # heavy lifting of selecting the correct workspace packages.
+  dockerfile = "apps/relay/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+  RELAY_HOST = "0.0.0.0"
+
+# -- HTTP service ----------------------------------------------------------
+#
+# The relay listens on internal port 8080 (see apps/relay/Dockerfile).
+# Fly terminates TLS at the edge on 443 and proxies to the app port.
+# force_https rejects plaintext at the edge. Phase 1 only exposes the
+# health and readiness probes; Plan 02-01 will add WebSocket upgrade
+# routes on top of the same internal port.
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # The relay must stay up to receive bridge connections once Plan
+  # 02-01 lands, so we disable idle stop and keep at least one machine
+  # running. Phase 1 bills this as minimal memory so the cost is
+  # dominated by a single shared-cpu-1x instance.
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "15s"
+    interval = "15s"
+    method = "GET"
+    path = "/readyz"
+    protocol = "http"
+    timeout = "5s"
+    tls_skip_verify = false
+
+# -- Machine liveness check ------------------------------------------------
+#
+# Fly supports a separate lower-level liveness probe in addition to the
+# HTTP service check above. We point it at /healthz so Fly distinguishes
+# "process is alive" (healthz) from "ready for new traffic" (readyz).
+# Plan 02-01 / Plan 05-02 will make readyz ownership-aware without
+# touching this liveness wiring.
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+    force_https = true
+
+  [[services.http_checks]]
+    grace_period = "15s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    protocol = "http"
+    restart_limit = 0
+    timeout = "5s"
+
+# -- Concurrency -----------------------------------------------------------
+
+[[http_service.concurrency]]
+  type = "connections"
+  soft_limit = 200
+  hard_limit = 250
+
+# -- VM -------------------------------------------------------------------
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"
+
+[deploy]
+  strategy = "rolling"
