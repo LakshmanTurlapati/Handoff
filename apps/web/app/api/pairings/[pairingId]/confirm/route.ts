@@ -66,6 +66,22 @@ export async function POST(
     );
   }
 
+  // Extract the one-time pairing bearer from the Authorization header
+  // (SEC-06 / plan 01-05). The bridge CLI stores this token in process
+  // memory from the POST /api/pairings response and carries it here on
+  // the confirm call. Missing or malformed header is a hard 401 — a
+  // bad bearer must never reach confirmPairing's state machine.
+  const authHeader = request.headers.get("authorization") ?? "";
+  const bearer = authHeader.toLowerCase().startsWith("bearer ")
+    ? authHeader.slice(7).trim()
+    : "";
+  if (!bearer) {
+    return NextResponse.json(
+      { error: "missing_pairing_token" },
+      { status: 401 },
+    );
+  }
+
   const userId =
     (session.user as { id?: string }).id ??
     session.user.email ??
@@ -81,6 +97,7 @@ export async function POST(
       userId,
       verificationPhrase: parsed.data.verificationPhrase,
       deviceLabel: parsed.data.deviceLabel,
+      pairingToken: bearer,
     });
 
     const validated = PairingConfirmResponseSchema.safeParse({
@@ -112,6 +129,12 @@ export async function POST(
     const message = error instanceof Error ? error.message : "unknown_error";
     if (message.includes("not found")) {
       return NextResponse.json({ error: "pairing_not_found" }, { status: 404 });
+    }
+    if (message.includes("verification_failed")) {
+      return NextResponse.json(
+        { error: "invalid_pairing_token" },
+        { status: 403 },
+      );
     }
     if (message.includes("cannot confirm")) {
       return NextResponse.json(

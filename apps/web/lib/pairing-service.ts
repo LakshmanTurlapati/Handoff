@@ -28,7 +28,12 @@
  *     terminal is shown before confirmation.
  *   - Raw pairing tokens never land in Postgres — only a SHA-256 hash.
  */
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 import {
   PAIRING_STATUS_VALUES,
   type PairingCreateResponse,
@@ -219,7 +224,9 @@ export interface CreatePairingInput {
 export async function createPairing(
   input: CreatePairingInput,
   ctx?: PairingServiceContext,
-): Promise<PairingCreateResponse & { pairingTokenHash: string }> {
+): Promise<
+  PairingCreateResponse & { pairingTokenHash: string; pairingToken: string }
+> {
   const { store, auditStore, now, hostname } = resolveCtx(ctx);
 
   const createdAt = now();
@@ -272,7 +279,31 @@ export async function createPairing(
     userCode,
     expiresAt: expiresAt.toISOString(),
     pairingTokenHash,
+    pairingToken: rawPairingToken,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Pairing-token verification helper (SEC-06 / IN-02 / plan 01-05)
+// ---------------------------------------------------------------------------
+
+/**
+ * Constant-time comparison between sha256(raw) and the stored hex hash.
+ * Returns false on any length mismatch or null/undefined input so callers
+ * can fail closed without leaking which branch tripped. Used by
+ * `confirmPairing` to verify the one-time bearer token the bridge presents
+ * in the Authorization header on `/api/pairings/[id]/confirm`.
+ */
+export function verifyPairingTokenHash(
+  rawToken: string | null | undefined,
+  storedHashHex: string,
+): boolean {
+  if (!rawToken) return false;
+  const computedHex = createHash("sha256").update(rawToken).digest("hex");
+  const a = Buffer.from(computedHex, "hex");
+  const b = Buffer.from(storedHashHex, "hex");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 // ---------------------------------------------------------------------------
@@ -347,6 +378,17 @@ export interface ConfirmPairingInput {
   userId: string;
   verificationPhrase: string;
   deviceLabel?: string;
+  /**
+   * One-time raw pairing token minted by createPairing. Required by the
+   * HTTP confirm route (extracted from the Authorization: Bearer header)
+   * and verified server-side via `verifyPairingTokenHash`. The field is
+   * optional on the interface so existing in-process test callers that
+   * exercise non-bearer failure paths (expiry, state transitions) can
+   * continue to compile — confirmPairing still fails closed at runtime
+   * when the token is missing or mismatched for a pairing that would
+   * otherwise be eligible for confirmation.
+   */
+  pairingToken?: string;
 }
 
 export interface ConfirmPairingResult {
@@ -382,6 +424,29 @@ export async function confirmPairing(
     throw new Error(
       `cannot confirm pairing in state ${row.status}; expected pending or redeemed`,
     );
+  }
+
+  // Bearer verification (SEC-06 / plan 01-05).
+  //
+  // Fail closed for a missing or mismatched one-time pairing token BEFORE
+  // the phrase comparison and BEFORE `issueDeviceSession` so a bad bearer
+  // can never mint a `cm_device_session` cookie. The HTTP confirm route
+  // (`apps/web/app/api/pairings/[pairingId]/confirm/route.ts`) extracts
+  // the bearer from the Authorization header and 401s on missing, so at
+  // runtime this branch only catches the bearer-tampering / invalid-token
+  // paths. In-process test callers that deliberately exercise non-bearer
+  // failure branches (expiry, state transitions) hit the state check
+  // above and never reach this point.
+  if (!verifyPairingTokenHash(input.pairingToken, row.pairingTokenHash)) {
+    await auditStore.record({
+      eventType: PAIRING_AUDIT_EVENTS.confirmFailed,
+      userId: input.userId,
+      subject: input.pairingId,
+      outcome: "failure",
+      metadata: { reason: "invalid_pairing_token" },
+      createdAt: confirmedAt,
+    });
+    throw new Error("pairing token verification_failed");
   }
 
   if (!row.verificationPhrase) {
@@ -582,12 +647,10 @@ function generateVerificationPhrase(): string {
 }
 
 function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
+  const ab = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
 }
 
 // ---------------------------------------------------------------------------

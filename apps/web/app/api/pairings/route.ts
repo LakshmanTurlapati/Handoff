@@ -19,6 +19,12 @@
  *   - Only a SHA-256 hash of the pairing token is stored server-side.
  *   - The `expiresAt` string is returned in ISO-8601 form and matches
  *     `@codex-mobile/protocol.PairingCreateResponseSchema`.
+ *   - The response body carries a one-time bearer `pairingToken` that the
+ *     bridge CLI MUST hold only in process memory and never persist. The
+ *     bridge echoes this token back in the `Authorization: Bearer` header
+ *     on the subsequent `POST /api/pairings/[id]/confirm` call, and the
+ *     server verifies `sha256(bearer) == pairing_sessions.pairingTokenHash`
+ *     via `crypto.timingSafeEqual` inside `confirmPairing` (SEC-06).
  */
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -68,6 +74,7 @@ export async function POST(request: Request): Promise<Response> {
     pairingUrl: result.pairingUrl,
     userCode: result.userCode,
     expiresAt: result.expiresAt,
+    pairingToken: result.pairingToken,
   };
 
   // Structurally validate the response before returning so this route
