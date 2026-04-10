@@ -1,0 +1,32 @@
+{
+  "name": "codex-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codex Mobile - secure remote-control layer for local Codex sessions, optimized for phone-sized browsers",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "npm@10.9.3",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc -p tsconfig.base.json --noEmit && npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:phase-01:quick": "vitest run --project phase-01-unit",
+    "test:phase-01:full": "vitest run --project phase-01-unit && playwright test --project=phase-01-e2e-mobile",
+    "db:generate": "npm run db:generate --workspace packages/db"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "@types/node": "22.10.5",
+    "drizzle-kit": "0.45.2",
+    "typescript": "5.7.3",
+    "vitest": "2.1.8"
+  }
+}
