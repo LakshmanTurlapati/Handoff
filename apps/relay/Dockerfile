@@ -62,7 +62,20 @@ COPY packages/protocol ./packages/protocol
 # Build the relay (tsc -p apps/relay/tsconfig.json). If the relay build
 # script is a noop on a fresh monorepo, this still succeeds because npm
 # run build --if-present returns exit 0 when the target is missing.
-RUN npm run build --workspace @codex-mobile/relay --if-present || true
+#
+# CR-03 fix: the previous version piped this step to a shell-true
+# fallback so a failing `tsc` produced a green image. The fallback
+# is gone; if `tsc` fails the image build fails.
+RUN npm run build --workspace @codex-mobile/relay --if-present
+
+# The relay still uses `node --experimental-strip-types` at runtime
+# (see the CMD line below) so a compiled `dist/` tree is not STRICTLY
+# required for the container to boot. However, the source entry point
+# MUST exist, otherwise `node --experimental-strip-types apps/relay/src/index.ts`
+# will crash on start. If a future plan lands a real tsc build, change
+# this assertion to `test -d /repo/apps/relay/dist`.
+RUN test -f /repo/apps/relay/src/index.ts \
+  || (echo "relay entry file apps/relay/src/index.ts missing after build" && exit 1)
 
 # -----------------------------------------------------------------------------
 # Stage 3: minimal production runtime
