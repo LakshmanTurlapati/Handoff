@@ -120,6 +120,231 @@ Just Handoff is being built in five phases, each one gated on the security and U
 
 The full phase breakdown, requirement traceability, and success criteria live in [`.planning/ROADMAP.md`](./.planning/ROADMAP.md), [`.planning/REQUIREMENTS.md`](./.planning/REQUIREMENTS.md), and [`AGENTS.md`](./AGENTS.md).
 
+---
+
+> The sections below are the operator contract for Phase 1. They describe how to run the web app, relay, and bridge locally, how to configure authentication, how the pairing handshake works, and how to deploy the public services to Fly.io. If something in this section drifts from the code, the code wins and this README needs a follow-up edit.
+
+## Local Development
+
+Handoff is an npm workspaces monorepo. Everything under `apps/` and `packages/` is installed in a single top-level `npm ci`, and Phase 1 only needs Node.js 22 and a reachable Postgres instance.
+
+### Prerequisites
+
+- **Node.js 22 or newer.** The repo declares `"engines": { "node": ">=22.0.0" }` and the Dockerfiles pin `node:22-alpine`. Older versions will fail `npm ci`.
+- **npm 10 or newer.** Comes with Node 22. The repo pins `"packageManager": "npm@10.9.3"` so other package managers are not supported.
+- **A Postgres database** reachable from the web app and the relay. For local development this is usually a single `postgres://` URL pointing at Docker, Fly Postgres, or a shared dev instance.
+- **A GitHub OAuth application** — see [Authentication Setup](#authentication-setup) below. Phase 1 only supports GitHub as a sign-in provider.
+
+### Installing and building
+
+```bash
+# Install every workspace and hoist root dev deps (vitest, playwright, drizzle-kit, typescript).
+npm ci
+
+# Type-check every workspace that has a typecheck script.
+npm run typecheck
+
+# Run the Phase 1 quick suite (unit tests only, no Playwright).
+npm run test:phase-01:quick
+
+# Run the Phase 1 full suite (unit tests + mobile e2e smoke).
+npm run test:phase-01:full
+```
+
+The repo uses TypeScript path aliases declared in [`tsconfig.base.json`](./tsconfig.base.json) so the apps can import `@codex-mobile/{protocol,auth,db}` directly from source in development. Production Docker images rebuild those packages with `tsc` inside the build stage.
+
+### Running the services locally
+
+Each app is runnable as its own npm workspace. Run them in separate terminals so you can watch each log stream:
+
+```bash
+# apps/web -- Next.js 16 on http://localhost:3000
+npm run dev --workspace @codex-mobile/web
+
+# apps/relay -- Fastify + ws on http://localhost:8080
+npm run dev --workspace @codex-mobile/relay
+
+# apps/bridge -- local CLI daemon (only needed once you are pairing a device)
+npm run dev --workspace @codex-mobile/bridge
+```
+
+Health endpoints are served by the first two:
+
+- **Web app liveness:** `GET http://localhost:3000/api/healthz` returns `{"status":"ok","service":"codex-mobile-web",...}`. This path is explicitly allowlisted in `apps/web/auth.config.ts` so it never redirects to GitHub OAuth.
+- **Relay liveness:** `GET http://localhost:8080/healthz` returns `{"status":"ok","service":"codex-mobile-relay",...}`.
+- **Relay readiness:** `GET http://localhost:8080/readyz` returns `{"status":"ready","service":"codex-mobile-relay",...}`. Phase 1 treats this as identical to liveness; Plan 02-01 will make it ownership-aware once bridges start connecting.
+
+### Environment variables
+
+Copy `.env.example` to `.env.local` at the repo root (Next.js will pick it up automatically) and fill in real values. Every key documented in `.env.example` is required for the web app and relay to boot with correct auth:
+
+| Key | Who uses it | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | apps/web, apps/relay, packages/db | Shared Postgres connection string. Attach the same database to both Fly apps. |
+| `AUTH_GITHUB_ID` | apps/web | GitHub OAuth app Client ID. |
+| `AUTH_GITHUB_SECRET` | apps/web | GitHub OAuth app Client Secret. |
+| `NEXTAUTH_URL` | apps/web | Absolute URL the web app is reachable at (e.g. `https://app.example.com`). Used for Auth.js callbacks. |
+| `SESSION_COOKIE_SECRET` | apps/web, apps/relay | 32+ byte random signing key for `cm_web_session` and `cm_device_session` cookies. |
+| `PAIRING_TOKEN_SECRET` | apps/web | 32+ byte signing key for single-use pairing tokens minted by `POST /api/pairings`. |
+| `WS_TICKET_SECRET` | apps/web, apps/relay | 32+ byte signing key for short-lived `cm_ws_ticket` WebSocket upgrade tickets. MUST be distinct from `SESSION_COOKIE_SECRET`. |
+| `FLY_APP_NAME_WEB` | deploys | Fly app slug used by `apps/web/fly.toml`. |
+| `FLY_APP_NAME_RELAY` | deploys | Fly app slug used by `apps/relay/fly.toml`. |
+
+The three random secrets (`SESSION_COOKIE_SECRET`, `PAIRING_TOKEN_SECRET`, `WS_TICKET_SECRET`) **must be different values**. Compromising one cannot be allowed to replay as another. Generate each one with `openssl rand -base64 48` or equivalent.
+
+## Authentication Setup
+
+Handoff uses Auth.js (next-auth v5) with GitHub as the only Phase 1 sign-in provider. The sign-in flow is:
+
+1. The user visits any authenticated path on the web app.
+2. Middleware redirects them to `/sign-in?callbackUrl=<original-path>`.
+3. They click **Continue with GitHub** and complete the OAuth handshake.
+4. Auth.js writes a short-lived `cm_web_session` cookie (12-hour rolling JWT).
+5. The user returns to their original path (typically `/pair/<pairingId>`).
+
+### Creating the GitHub OAuth app
+
+1. In your GitHub account, go to **Settings -> Developer settings -> OAuth Apps -> New OAuth App**.
+2. Set **Homepage URL** to your public web origin (for example `https://app.example.com` for Fly.io or `http://localhost:3000` locally).
+3. Set **Authorization callback URL** to `${NEXTAUTH_URL}/api/auth/callback/github`. For example:
+   - Locally: `http://localhost:3000/api/auth/callback/github`
+   - On Fly.io: `https://app.example.com/api/auth/callback/github`
+4. Click **Register application**, then copy the **Client ID** into `AUTH_GITHUB_ID` and generate a **Client Secret** into `AUTH_GITHUB_SECRET`.
+5. Restart the web app so Auth.js picks up the new env vars.
+
+### Database migration
+
+Before the first sign-in, apply the Drizzle schema to your Postgres instance:
+
+```bash
+npm run db:generate
+```
+
+This emits SQL migration files from `packages/db/src/schema.ts`. Apply them with your preferred Postgres migration tool, or use `drizzle-kit push --config packages/db/drizzle.config.ts` for a fast local dev loop. Plan 01-03 does not automate production migrations — operators run them out-of-band before deploy.
+
+## Pairing Flow
+
+Pairing is how a phone browser proves it is allowed to remote-control a local Codex session. Phase 1 implements the full handshake without any inbound port on the developer machine.
+
+The end-to-end flow is:
+
+1. On the laptop, the operator runs the bridge CLI pair command (or any entry point that invokes `runPairCommand`).
+2. The bridge calls `POST /api/pairings` on the web app, receives `{ pairingId, pairingUrl, userCode, expiresAt }`, and prints a QR code plus the fallback `userCode` to the terminal using `renderTerminalQr`.
+3. The operator scans the QR with their phone. The phone browser opens `${NEXTAUTH_URL}/pair/<pairingId>`.
+4. If the phone is not already signed in, middleware redirects to `/sign-in?callbackUrl=/pair/<pairingId>`. After GitHub OAuth completes, the phone lands back on the pairing screen.
+5. The phone calls `POST /api/pairings/<pairingId>/redeem`, which moves the pairing from `pending` to `redeemed` and generates a three-word `verificationPhrase`.
+6. The browser and the terminal both render the same `verificationPhrase`. The operator confirms they match and answers `y` in the terminal.
+7. The bridge calls `POST /api/pairings/<pairingId>/confirm`, which performs a constant-time phrase comparison, writes an audit row, transitions the pairing to `confirmed`, and issues a `cm_device_session` cookie (7-day absolute expiry) on the phone.
+8. Any subsequent terminal-less pairing attempt with the same `pairingId` is rejected because the row is terminal.
+
+Pairing tokens are single-use and expire five minutes after creation (`PAIRING_TTL_SECONDS = 300`). A failed phrase comparison writes a `pairing.confirm_failed` audit row but does NOT issue a device session.
+
+**Verification endpoints to use while debugging:**
+
+- `curl -i http://localhost:3000/api/healthz` — confirms the web app is serving.
+- `curl -i http://localhost:8080/readyz` — confirms the relay is serving.
+- `curl -i http://localhost:3000/sign-in` — unauthenticated should land on the Auth.js sign-in page, not a redirect loop.
+
+The bridge is **outbound connectivity only**. It never opens an inbound port on the developer laptop. The relay is a hosted service on Fly.io, not a tunnel for general shell access — its sole job in Phase 2 will be to route Codex app-server events between an authenticated phone browser and the local bridge, and it refuses any traffic that cannot produce a short-lived `cm_ws_ticket`.
+
+## Fly.io Deployment
+
+Handoff's public services run on Fly.io. Phase 1 ships two separate Fly apps:
+
+| Fly app (slug) | Source | Fly config | Internal port | Fly health check path |
+| --- | --- | --- | --- | --- |
+| `${FLY_APP_NAME_WEB}` (example: `codex-mobile-web`) | `apps/web` | [`apps/web/fly.toml`](./apps/web/fly.toml) | 3000 | `/api/healthz` |
+| `${FLY_APP_NAME_RELAY}` (example: `codex-mobile-relay`) | `apps/relay` | [`apps/relay/fly.toml`](./apps/relay/fly.toml) | 8080 | `/readyz` (HTTP service) plus `/healthz` (machine liveness) |
+
+Both services are built with multi-stage `node:22-alpine` Dockerfiles that `COPY` the repo root as the build context so the npm workspaces layout stays intact inside the image. The build context is set implicitly by `fly.toml` because the `dockerfile = "apps/<service>/Dockerfile"` path is relative to the repo root.
+
+### Prerequisites
+
+- A Fly.io organization and an account logged in via `fly auth login`.
+- Two Fly apps created (`fly apps create <slug>` for web and relay). The slugs go into `FLY_APP_NAME_WEB` and `FLY_APP_NAME_RELAY`, and also into the `app = "..."` line at the top of each `fly.toml`.
+- A shared Postgres database. Create it with `fly postgres create` and attach it to both apps with `fly postgres attach --app <slug>`. The attach command injects `DATABASE_URL` as a Fly secret for the target app.
+- A personal access token from the Fly dashboard under **Personal Access Tokens**. Store it as the `FLY_API_TOKEN` GitHub Actions secret (see below).
+
+### Secrets to push before first deploy
+
+On both Fly apps (or via the GitHub Actions workflow below), set:
+
+```bash
+# Web app
+fly secrets set \
+  --app ${FLY_APP_NAME_WEB} \
+  AUTH_GITHUB_ID=... \
+  AUTH_GITHUB_SECRET=... \
+  SESSION_COOKIE_SECRET=... \
+  PAIRING_TOKEN_SECRET=... \
+  WS_TICKET_SECRET=... \
+  NEXTAUTH_URL=https://<your-web-domain>
+
+# Relay
+fly secrets set \
+  --app ${FLY_APP_NAME_RELAY} \
+  SESSION_COOKIE_SECRET=... \
+  PAIRING_TOKEN_SECRET=... \
+  WS_TICKET_SECRET=...
+```
+
+`DATABASE_URL` is expected to be set automatically by `fly postgres attach` on both apps.
+
+### Deploying manually
+
+```bash
+# Web app
+fly deploy \
+  --config apps/web/fly.toml \
+  --dockerfile apps/web/Dockerfile \
+  --remote-only
+
+# Relay
+fly deploy \
+  --config apps/relay/fly.toml \
+  --dockerfile apps/relay/Dockerfile \
+  --remote-only
+```
+
+`--remote-only` uses Fly's build machines so no local Docker daemon is required. Deployment order does not matter for Phase 1 (the two services are independent), but by convention web is deployed first because it owns the pairing API.
+
+### Deploying from CI
+
+The repo ships [`.github/workflows/fly-deploy.yml`](./.github/workflows/fly-deploy.yml), which deploys both services from `main`. It runs on every push that touches `apps/web/**`, `apps/relay/**`, `packages/**`, or the workflow file itself, and it can also be triggered manually via **Actions -> fly-deploy -> Run workflow**.
+
+Required GitHub Actions secrets (set under **Settings -> Secrets and variables -> Actions**):
+
+- `FLY_API_TOKEN`
+- `AUTH_GITHUB_ID`
+- `AUTH_GITHUB_SECRET`
+- `SESSION_COOKIE_SECRET`
+- `PAIRING_TOKEN_SECRET`
+- `WS_TICKET_SECRET`
+- `DATABASE_URL`
+
+The workflow stages secrets via `flyctl secrets set --stage` before each deploy so the rolling release uses the new values on the first machine.
+
+### Security posture on Fly.io
+
+- TLS is terminated at the Fly edge (`force_https = true` in both fly.toml files). Both services refuse plaintext connections.
+- The local developer machine uses **outbound connectivity only**. The bridge talks outbound to the relay over WSS; no inbound port is ever opened on the laptop. This is the product's load-bearing security invariant.
+- The relay is a hosted service, not a tunnel for general shell access. It only routes pre-authenticated Codex app-server traffic between a paired phone and a bridge whose ownership has been verified by the control plane.
+- Phase 1 does not expose the `codex app-server` process directly to the internet, and no code path in this repo is allowed to. See [`docs/adr/0001-phase-1-trust-boundary.md`](./docs/adr/0001-phase-1-trust-boundary.md) for the binding trust-boundary rules.
+
+### Verifying a deploy
+
+Once both services are deployed, hit the health endpoints from anywhere on the public internet:
+
+```bash
+curl -i https://<your-web-domain>/api/healthz
+curl -i https://<your-relay-domain>/healthz
+curl -i https://<your-relay-domain>/readyz
+```
+
+All three should return HTTP 200 with a JSON body containing `status` and `service`. Fly's deploy will mark the release healthy only after its own probes succeed against these same paths.
+
+---
+
 ## Contributing
 
 The project is being built in the open using a spec-driven workflow, so every phase lives in `.planning/` before any code gets written. If you want to read the spec, argue with a decision, or follow the build, that is all public.
