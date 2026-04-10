@@ -19,11 +19,21 @@
  *   - Only a SHA-256 hash of the pairing token is stored server-side.
  *   - The `expiresAt` string is returned in ISO-8601 form and matches
  *     `@codex-mobile/protocol.PairingCreateResponseSchema`.
+ *   - The response body carries a one-time bearer `pairingToken` that the
+ *     bridge CLI MUST hold only in process memory and never persist. The
+ *     bridge echoes this token back in the `Authorization: Bearer` header
+ *     on the subsequent `POST /api/pairings/[id]/confirm` call, and the
+ *     server verifies `sha256(bearer) == pairing_sessions.pairingTokenHash`
+ *     via `crypto.timingSafeEqual` inside `confirmPairing` (SEC-06).
  */
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { PairingCreateResponseSchema } from "@codex-mobile/protocol";
 import { createPairing } from "../../../lib/pairing-service";
+import {
+  checkPairingCreateRateLimit,
+  extractClientIp,
+} from "../../../lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +51,26 @@ const CreatePairingBodySchema = z
   .strict();
 
 export async function POST(request: Request): Promise<Response> {
+  // Per-IP token bucket abuse floor (WR-11 from 01-REVIEW.md).
+  // Process-local — documented as a single-machine Phase 1 caveat in
+  // lib/rate-limit.ts and called out in README.md by plan 01-06.
+  const clientIp = extractClientIp(request);
+  const rl = checkPairingCreateRateLimit(clientIp);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "rate_limited" },
+      {
+        status: 429,
+        headers: {
+          "retry-after": Math.max(
+            1,
+            Math.ceil((rl.resetAt - Date.now()) / 1000),
+          ).toString(),
+        },
+      },
+    );
+  }
+
   let body: z.infer<typeof CreatePairingBodySchema> = {};
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
@@ -68,6 +98,7 @@ export async function POST(request: Request): Promise<Response> {
     pairingUrl: result.pairingUrl,
     userCode: result.userCode,
     expiresAt: result.expiresAt,
+    pairingToken: result.pairingToken,
   };
 
   // Structurally validate the response before returning so this route

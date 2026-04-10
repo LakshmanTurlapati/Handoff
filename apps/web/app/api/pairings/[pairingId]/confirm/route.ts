@@ -49,6 +49,31 @@ export async function POST(
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
 
+  // Same-origin CSRF guard (WR-02 from 01-REVIEW.md). This is the ONLY
+  // route that mints a `cm_device_session` cookie, so a top-level
+  // cross-origin POST that slips past SameSite=Lax must be rejected.
+  // A missing Origin header is permitted — Node fetch and curl do not
+  // send Origin, and the bearer + cm_web_session cookie already gate
+  // the route. Only a PRESENT Origin whose host differs from Host is
+  // treated as hostile.
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+  if (origin && host) {
+    try {
+      if (new URL(origin).host !== host) {
+        return NextResponse.json(
+          { error: "cross_origin_not_allowed" },
+          { status: 403 },
+        );
+      }
+    } catch {
+      return NextResponse.json(
+        { error: "cross_origin_not_allowed" },
+        { status: 403 },
+      );
+    }
+  }
+
   const { pairingId } = await context.params;
   if (!pairingId) {
     return NextResponse.json(
@@ -63,6 +88,22 @@ export async function POST(
     return NextResponse.json(
       { error: "invalid_body", details: parsed.error.issues },
       { status: 400 },
+    );
+  }
+
+  // Extract the one-time pairing bearer from the Authorization header
+  // (SEC-06 / plan 01-05). The bridge CLI stores this token in process
+  // memory from the POST /api/pairings response and carries it here on
+  // the confirm call. Missing or malformed header is a hard 401 — a
+  // bad bearer must never reach confirmPairing's state machine.
+  const authHeader = request.headers.get("authorization") ?? "";
+  const bearer = authHeader.toLowerCase().startsWith("bearer ")
+    ? authHeader.slice(7).trim()
+    : "";
+  if (!bearer) {
+    return NextResponse.json(
+      { error: "missing_pairing_token" },
+      { status: 401 },
     );
   }
 
@@ -81,6 +122,7 @@ export async function POST(
       userId,
       verificationPhrase: parsed.data.verificationPhrase,
       deviceLabel: parsed.data.deviceLabel,
+      pairingToken: bearer,
     });
 
     const validated = PairingConfirmResponseSchema.safeParse({
@@ -112,6 +154,12 @@ export async function POST(
     const message = error instanceof Error ? error.message : "unknown_error";
     if (message.includes("not found")) {
       return NextResponse.json({ error: "pairing_not_found" }, { status: 404 });
+    }
+    if (message.includes("verification_failed")) {
+      return NextResponse.json(
+        { error: "invalid_pairing_token" },
+        { status: 403 },
+      );
     }
     if (message.includes("cannot confirm")) {
       return NextResponse.json(

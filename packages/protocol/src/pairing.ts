@@ -45,12 +45,23 @@ export const PairingStatusSchema = z.enum(PAIRING_STATUS_VALUES);
  * - `userCode`: short human-friendly fallback code shown alongside the QR
  * - `expiresAt`: absolute ISO-8601 timestamp after which the pairing is
  *   auto-expired and cannot be redeemed
+ * - `pairingToken`: one-time raw pairing token returned exactly once, at
+ *   create time. The bridge carries it in an `Authorization: Bearer`
+ *   header on the subsequent `/confirm` call. The server stores only
+ *   `sha256(pairingToken)` as `pairing_sessions.pairingTokenHash` and
+ *   verifies it with `crypto.timingSafeEqual` inside `confirmPairing`.
+ *   Optional on the interface so older bridges keep parsing, but the
+ *   server will always populate it after plan 01-05 lands.
  */
 export interface PairingCreateResponse {
   pairingId: string;
   pairingUrl: string;
   userCode: string;
   expiresAt: string;
+  /**
+   * One-time raw pairing token. See interface-level comment above.
+   */
+  pairingToken?: string;
 }
 
 export const PairingCreateResponseSchema: z.ZodType<PairingCreateResponse> = z
@@ -59,6 +70,7 @@ export const PairingCreateResponseSchema: z.ZodType<PairingCreateResponse> = z
     pairingUrl: z.string().url(),
     userCode: z.string().min(4),
     expiresAt: z.string().datetime(),
+    pairingToken: z.string().min(32).optional(),
   })
   .strict();
 
