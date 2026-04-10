@@ -20,8 +20,17 @@ import type { NextAuthConfig } from "next-auth";
 /**
  * Paths that do not require an authenticated session. Everything else —
  * including the pairing UI — is guarded by middleware.
+ *
+ * `/api/healthz` is public so Fly.io's machine health checks (see
+ * `apps/web/fly.toml` in plan 01-03) can probe the process without
+ * round-tripping through GitHub OAuth. The handler itself is
+ * dependency-free and reveals nothing sensitive.
  */
-export const PUBLIC_PATHS = ["/sign-in", "/api/auth"] as const;
+export const PUBLIC_PATHS = [
+  "/sign-in",
+  "/api/auth",
+  "/api/healthz",
+] as const;
 
 export const authConfig = {
   providers: [
