@@ -30,12 +30,15 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Local terminal can display a short-lived QR code and fallback code for pairing
   3. Terminal and browser both show a verification phrase before a 7-day device session is granted
   4. Pairing and web access work over Fly.io-hosted services without any inbound port on the developer machine
-**Plans**: 3 plans
+**Plans**: 6 plans (3 original + 3 gap closure)
 
 Plans:
-- [ ] 01-01: Define trust boundaries, shared protocol contracts, and auth/session model
-- [ ] 01-02: Implement web auth, pairing APIs, terminal QR flow, and confirmation UX
-- [ ] 01-03: Deploy baseline web/control services to Fly.io with TLS, secrets, and health checks
+- [x] 01-01: Define trust boundaries, shared protocol contracts, and auth/session model
+- [x] 01-02: Implement web auth, pairing APIs, terminal QR flow, and confirmation UX
+- [x] 01-03: Deploy baseline web/control services to Fly.io with TLS, secrets, and health checks
+- [ ] 01-04 (gap): Fix middleware CR-01 + add missing GET /api/pairings/[pairingId] handler
+- [ ] 01-05 (gap): Pairing token bearer verification, Origin/CSRF, rate limit, waitForRedeem error propagation, 32-byte cookie secret
+- [ ] 01-06 (gap): Harden fly-deploy.yml (CR-02), Dockerfiles (CR-03), README single-machine callout
 
 ### Phase 2: Bridge & Codex Session Adapter
 **Goal**: Build the local bridge that connects outbound to the relay and maps Codex app-server semantics into the product protocol
