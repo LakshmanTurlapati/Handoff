@@ -61,15 +61,70 @@ export interface ConfirmPairingRequest {
   cookie?: string;
 }
 
+/**
+ * Thrown by `getPairingStatus` (and therefore observed by `waitForRedeem`)
+ * when the hosted API returns a non-2xx response. Carries the HTTP status
+ * code and the request path so the caller can distinguish transient
+ * 5xx errors (retry) from hard 4xx errors (surface to operator).
+ *
+ * WR-09 from 01-REVIEW.md: the previous polling loop silently swallowed
+ * every failure mode by catching and coercing to null, which collapsed
+ * auth, schema, and network errors into the same "timed out" symptom as
+ * normal pending polls. With PairingPollError the bridge CLI's outer
+ * error handler now reports the real HTTP status so operators can fix
+ * the root cause instead of guessing at the timeout.
+ */
+export class PairingPollError extends Error {
+  readonly status: number;
+  readonly path: string;
+  constructor(message: string, status: number, path: string) {
+    super(message);
+    this.name = "PairingPollError";
+    this.status = status;
+    this.path = path;
+  }
+}
+
 export class PairingClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly userAgent: string;
+  /**
+   * One-time pairing bearer returned by `POST /api/pairings` in the
+   * `pairingToken` response field. Held in process memory only — NEVER
+   * written to disk, NEVER logged, NEVER sent as a query parameter.
+   * Sent as `Authorization: Bearer <token>` on subsequent
+   * `getPairingStatus` and `confirmPairing` calls so the server can
+   * verify sha256(bearer) against `pairing_sessions.pairingTokenHash`
+   * inside `confirmPairing` (SEC-06 / plan 01-05).
+   */
+  private pairingToken: string | null = null;
 
   constructor(options: PairingClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.userAgent = options.userAgent ?? "codex-mobile-bridge/0.1.0";
+  }
+
+  /**
+   * Store (or clear) the one-time pairing bearer. Called automatically
+   * by `createPairing` when the server provides a `pairingToken`, and
+   * exposed as a public setter so tests can drive the field directly.
+   */
+  setPairingToken(token: string | null): void {
+    this.pairingToken = token;
+  }
+
+  /**
+   * Build the Authorization header fragment for a call that needs the
+   * one-time pairing bearer. Returns `{}` when the token has not yet
+   * been set so callers can unconditionally spread the return value
+   * into their headers object.
+   */
+  private authHeaders(): Record<string, string> {
+    return this.pairingToken
+      ? { authorization: `Bearer ${this.pairingToken}` }
+      : {};
   }
 
   /** POST /api/pairings */
@@ -101,6 +156,9 @@ export class PairingClient {
         `POST ${PAIRING_COLLECTION_PATH} returned an invalid payload: ${parsed.error.message}`,
       );
     }
+    if (parsed.data.pairingToken) {
+      this.setPairingToken(parsed.data.pairingToken);
+    }
     return parsed.data;
   }
 
@@ -112,11 +170,14 @@ export class PairingClient {
       headers: {
         "user-agent": this.userAgent,
         accept: "application/json",
+        ...this.authHeaders(),
       },
     });
     if (!response.ok) {
-      throw new Error(
+      throw new PairingPollError(
         `GET ${PAIRING_COLLECTION_PATH}/${pairingId} failed: ${response.status} ${response.statusText}`,
+        response.status,
+        `${PAIRING_COLLECTION_PATH}/${pairingId}`,
       );
     }
     const raw = await response.json();
@@ -143,6 +204,7 @@ export class PairingClient {
         "content-type": "application/json",
         "user-agent": this.userAgent,
         accept: "application/json",
+        ...this.authHeaders(),
         ...(request.cookie ? { cookie: request.cookie } : {}),
       },
       body: JSON.stringify({
@@ -188,7 +250,22 @@ export class PairingClient {
       if (options.signal?.aborted) {
         throw new Error("pairing wait cancelled");
       }
-      const status = await this.getPairingStatus(pairingId).catch(() => null);
+      let status: PairingStatusResponse | null = null;
+      try {
+        status = await this.getPairingStatus(pairingId);
+      } catch (err) {
+        if (err instanceof PairingPollError && err.status >= 500) {
+          // Transient server error — retry until deadline.
+          status = null;
+        } else {
+          // 4xx (auth, not found, rate limited) or schema/network errors:
+          // surface to the operator instead of swallowing as null. This is
+          // the WR-09 fix — previously every error collapsed to a generic
+          // "timed out" symptom and operators couldn't tell a real auth
+          // failure from normal polling latency.
+          throw err;
+        }
+      }
       if (status && status.status !== "pending") {
         if (status.status === "expired" || status.status === "cancelled") {
           throw new Error(`pairing ${status.status} before redeem completed`);
