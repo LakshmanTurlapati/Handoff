@@ -25,12 +25,32 @@ import type { NextAuthConfig } from "next-auth";
  * `apps/web/fly.toml` in plan 01-03) can probe the process without
  * round-tripping through GitHub OAuth. The handler itself is
  * dependency-free and reveals nothing sensitive.
+ *
+ * NOTE: this list is deliberately NARROW. The bridge-facing pairing
+ * endpoints are NOT in this list — they are allowlisted separately
+ * below by METHOD + PATHNAME EQUALITY so the authenticated
+ * `/api/pairings/[id]/redeem` and `/api/pairings/[id]/confirm`
+ * subpaths are not accidentally exposed by a prefix match.
  */
 export const PUBLIC_PATHS = [
   "/sign-in",
   "/api/auth",
   "/api/healthz",
 ] as const;
+
+/**
+ * Exact pathnames for unauthenticated POST requests from the bridge CLI.
+ * These are allowlisted by METHOD + PATHNAME EQUALITY in middleware.ts
+ * so the `/redeem` and `/confirm` subpaths are NOT accidentally exposed.
+ * (CR-01 fix from 01-VERIFICATION.md)
+ *
+ * Pair with the method=GET regex `/^\/api\/pairings\/[^\/]+$/` in
+ * middleware.ts, which lets the bridge poll `GET /api/pairings/[id]`
+ * without letting `GET /api/pairings/[id]/redeem` through.
+ */
+export const UNAUTHENTICATED_API_POST_PATHS = new Set<string>([
+  "/api/pairings",
+]);
 
 export const authConfig = {
   providers: [
@@ -53,9 +73,27 @@ export const authConfig = {
      * Middleware-friendly authorization gate. Called from `middleware.ts`
      * via the Auth.js `auth` wrapper — it must return a boolean or a
      * `Response` without touching any Node-only APIs.
+     *
+     * Order of checks (CR-01):
+     *   1. Method+pathname-equality allowlist for unauthenticated bridge
+     *      POSTs (`POST /api/pairings`).
+     *   2. Method+regex allowlist for unauthenticated bridge GETs on the
+     *      pairing status endpoint (`GET /api/pairings/[id]`). The regex
+     *      has exactly ONE path segment after `/api/pairings/`, so
+     *      `/api/pairings/abc-123/redeem` and `/api/pairings/abc-123/confirm`
+     *      are NOT matched and stay auth-gated.
+     *   3. `PUBLIC_PATHS` prefix allowlist (sign-in, auth callback, healthz).
+     *   4. Fall through to the browser session check.
      */
     authorized({ auth, request }) {
       const { pathname } = request.nextUrl;
+      const method = request.method;
+      if (method === "POST" && UNAUTHENTICATED_API_POST_PATHS.has(pathname)) {
+        return true;
+      }
+      if (method === "GET" && /^\/api\/pairings\/[^\/]+$/.test(pathname)) {
+        return true;
+      }
       const isPublic = PUBLIC_PATHS.some((prefix) => pathname.startsWith(prefix));
       if (isPublic) {
         return true;
