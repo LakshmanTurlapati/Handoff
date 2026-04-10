@@ -30,6 +30,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { PairingCreateResponseSchema } from "@codex-mobile/protocol";
 import { createPairing } from "../../../lib/pairing-service";
+import {
+  checkPairingCreateRateLimit,
+  extractClientIp,
+} from "../../../lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,6 +51,26 @@ const CreatePairingBodySchema = z
   .strict();
 
 export async function POST(request: Request): Promise<Response> {
+  // Per-IP token bucket abuse floor (WR-11 from 01-REVIEW.md).
+  // Process-local — documented as a single-machine Phase 1 caveat in
+  // lib/rate-limit.ts and called out in README.md by plan 01-06.
+  const clientIp = extractClientIp(request);
+  const rl = checkPairingCreateRateLimit(clientIp);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "rate_limited" },
+      {
+        status: 429,
+        headers: {
+          "retry-after": Math.max(
+            1,
+            Math.ceil((rl.resetAt - Date.now()) / 1000),
+          ).toString(),
+        },
+      },
+    );
+  }
+
   let body: z.infer<typeof CreatePairingBodySchema> = {};
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {

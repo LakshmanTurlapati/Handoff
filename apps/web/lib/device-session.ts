@@ -92,15 +92,25 @@ export const WEB_SESSION_COOKIE_OPTIONS = {
  * Load the raw signing secret for session cookies from the environment.
  * Callers must ensure `SESSION_COOKIE_SECRET` is populated in the runtime
  * environment (see `.env.example`).
+ *
+ * Gates on the UTF-8 byte length of the encoded secret (not the JS string
+ * length) and requires at least 32 bytes — HS256 best practice and the
+ * WR-03 fix from .planning/phases/01-identity-pairing-foundation/01-REVIEW.md.
+ * An operator who supplies a 16-character password-style secret will now
+ * crash at first cookie operation instead of silently minting weak HMACs.
  */
 export function loadSessionCookieSecret(): Uint8Array {
   const raw = process.env.SESSION_COOKIE_SECRET;
-  if (!raw || raw.length < 16) {
+  if (!raw) {
+    throw new Error("SESSION_COOKIE_SECRET is not set");
+  }
+  const bytes = new TextEncoder().encode(raw);
+  if (bytes.byteLength < 32) {
     throw new Error(
-      "SESSION_COOKIE_SECRET is not set or is too short for HS256 signing",
+      "SESSION_COOKIE_SECRET must be at least 32 bytes after UTF-8 encoding (HS256 best practice)",
     );
   }
-  return new TextEncoder().encode(raw);
+  return bytes;
 }
 
 // ---------------------------------------------------------------------------

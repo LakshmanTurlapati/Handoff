@@ -49,6 +49,31 @@ export async function POST(
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
 
+  // Same-origin CSRF guard (WR-02 from 01-REVIEW.md). This is the ONLY
+  // route that mints a `cm_device_session` cookie, so a top-level
+  // cross-origin POST that slips past SameSite=Lax must be rejected.
+  // A missing Origin header is permitted — Node fetch and curl do not
+  // send Origin, and the bearer + cm_web_session cookie already gate
+  // the route. Only a PRESENT Origin whose host differs from Host is
+  // treated as hostile.
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+  if (origin && host) {
+    try {
+      if (new URL(origin).host !== host) {
+        return NextResponse.json(
+          { error: "cross_origin_not_allowed" },
+          { status: 403 },
+        );
+      }
+    } catch {
+      return NextResponse.json(
+        { error: "cross_origin_not_allowed" },
+        { status: 403 },
+      );
+    }
+  }
+
   const { pairingId } = await context.params;
   if (!pairingId) {
     return NextResponse.json(

@@ -41,6 +41,31 @@ export async function POST(
     );
   }
 
+  // Same-origin CSRF guard (WR-02 from 01-REVIEW.md). The redeem
+  // transition is stateful (generates the verificationPhrase) so a
+  // cross-origin top-level POST must not be allowed to burn it. A
+  // missing Origin header is permitted — only a PRESENT Origin whose
+  // host differs from Host is hostile. This route stays bearer-free
+  // (Option A) and is still authenticated by the cm_web_session cookie
+  // via auth() above.
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+  if (origin && host) {
+    try {
+      if (new URL(origin).host !== host) {
+        return NextResponse.json(
+          { error: "cross_origin_not_allowed" },
+          { status: 403 },
+        );
+      }
+    } catch {
+      return NextResponse.json(
+        { error: "cross_origin_not_allowed" },
+        { status: 403 },
+      );
+    }
+  }
+
   const { pairingId } = await context.params;
   if (!pairingId) {
     return NextResponse.json(
