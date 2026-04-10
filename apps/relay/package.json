@@ -1,0 +1,31 @@
+{
+  "name": "@codex-mobile/relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codex Mobile control plane and relay service (Fastify + ws) deployed on Fly.io",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(lint placeholder for apps/relay)\"",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@codex-mobile/auth": "0.1.0",
+    "@codex-mobile/db": "0.1.0",
+    "@codex-mobile/protocol": "0.1.0",
+    "fastify": "5.8.4",
+    "jose": "6.2.2",
+    "ws": "8.20.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.5",
+    "@types/ws": "8.5.14",
+    "typescript": "5.7.3",
+    "vitest": "2.1.8"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@codex-mobile/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codex Mobile Postgres schema and Drizzle client for users, sessions, pairings, and audit",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./schema": {
+      "types": "./src/schema.ts",
+      "default": "./src/schema.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(lint placeholder for packages/db)\"",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.2",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.5",
+    "drizzle-kit": "0.45.2",
+    "typescript": "5.7.3",
+    "vitest": "2.1.8"
+  }
+}

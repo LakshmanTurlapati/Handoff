@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "allowJs": false,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": false,
+    "incremental": true,
+    "baseUrl": ".",
+    "paths": {
+      "@codex-mobile/protocol": ["packages/protocol/src/index.ts"],
+      "@codex-mobile/protocol/*": ["packages/protocol/src/*"],
+      "@codex-mobile/auth": ["packages/auth/src/index.ts"],
+      "@codex-mobile/auth/*": ["packages/auth/src/*"],
+      "@codex-mobile/db": ["packages/db/src/index.ts"],
+      "@codex-mobile/db/*": ["packages/db/src/*"]
+    }
+  },
+  "exclude": ["**/node_modules", "**/dist", "**/.next", "**/build"]
+}

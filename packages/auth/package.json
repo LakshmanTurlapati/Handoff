@@ -1,0 +1,40 @@
+{
+  "name": "@codex-mobile/auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Codex Mobile session, device-session, and WebSocket ticket primitives",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./device-session": {
+      "types": "./src/device-session.ts",
+      "default": "./src/device-session.ts"
+    },
+    "./ws-ticket": {
+      "types": "./src/ws-ticket.ts",
+      "default": "./src/ws-ticket.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(lint placeholder for packages/auth)\"",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@codex-mobile/db": "0.1.0",
+    "@codex-mobile/protocol": "0.1.0",
+    "jose": "6.2.2",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.5",
+    "typescript": "5.7.3",
+    "vitest": "2.1.8"
+  }
+}
