@@ -115,6 +115,9 @@ export async function POST(
     if (message.includes("cannot redeem")) {
       return NextResponse.json({ error: "invalid_state" }, { status: 409 });
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    // WR-GAP-02: do NOT echo raw error.message to the caller.
+    // Log the actual error internally so operators can diagnose.
+    console.error("pairing redeem internal_error", error);
+    return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }
