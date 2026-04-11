@@ -102,6 +102,15 @@ export interface PairingStatusResponse {
   status: PairingStatus;
   expiresAt: string;
   verificationPhrase?: string;
+  /**
+   * Short human-friendly fallback code also returned at create
+   * time. Present on the status response so the phone browser's
+   * pair page can render it without a second round trip. Optional
+   * so bridges that only care about status/phrase can ignore it.
+   * (WR-GAP-03: previously the strict schema silently dropped this
+   * field even though `toStatusResponse` returned it.)
+   */
+  userCode?: string;
 }
 
 export const PairingStatusResponseSchema: z.ZodType<PairingStatusResponse> = z
@@ -110,5 +119,6 @@ export const PairingStatusResponseSchema: z.ZodType<PairingStatusResponse> = z
     status: PairingStatusSchema,
     expiresAt: z.string().datetime(),
     verificationPhrase: z.string().min(3).optional(),
+    userCode: z.string().min(4).max(12).optional(),
   })
   .strict();
