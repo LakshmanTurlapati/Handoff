@@ -3,7 +3,11 @@
  *
  * The ONLY path that issues a `cm_device_session` cookie. The route:
  *
- *   1. Requires an authenticated `cm_web_session` from Auth.js.
+ *   1. Requires only a valid `Authorization: Bearer <pairingToken>` header
+ *      — the one-time token returned from POST /api/pairings. Cookie-based
+ *      auth has been removed (CR-GAP-01) because the bridge CLI has no
+ *      browser context. The bearer is verified inside `confirmPairing` via
+ *      `verifyPairingTokenHash` against `pairing_sessions.pairingTokenHash`.
  *   2. Validates that the pairing exists and is `pending` or `redeemed`.
  *   3. Compares the request's `verificationPhrase` against the phrase
  *      stored on the pairing row using constant-time comparison.
@@ -22,7 +26,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { PairingConfirmResponseSchema } from "@codex-mobile/protocol";
-import { auth } from "../../../../../auth";
 import { DEVICE_SESSION_COOKIE_NAME } from "../../../../../lib/device-session";
 import { confirmPairing } from "../../../../../lib/pairing-service";
 
@@ -44,18 +47,13 @@ export async function POST(
   request: Request,
   context: RouteContext,
 ): Promise<Response> {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
-
   // Same-origin CSRF guard (WR-02 from 01-REVIEW.md). This is the ONLY
   // route that mints a `cm_device_session` cookie, so a top-level
   // cross-origin POST that slips past SameSite=Lax must be rejected.
   // A missing Origin header is permitted — Node fetch and curl do not
-  // send Origin, and the bearer + cm_web_session cookie already gate
-  // the route. Only a PRESENT Origin whose host differs from Host is
-  // treated as hostile.
+  // send Origin, and the one-time pairing bearer already gates this
+  // route at the Authorization header check below. Only a PRESENT
+  // Origin whose host differs from Host is treated as hostile.
   const origin = request.headers.get("origin");
   const host = request.headers.get("host");
   if (origin && host) {
@@ -107,10 +105,23 @@ export async function POST(
     );
   }
 
-  const userId =
-    (session.user as { id?: string }).id ??
-    session.user.email ??
-    "unknown-user";
+  // CR-GAP-01: the Auth.js session check above was removed because
+  // /confirm is now bearer-only. The bridge CLI (the sole real-world
+  // caller of this route) runs in a terminal and has no
+  // `cm_web_session` cookie. Authorization is enforced entirely by
+  // the one-time pairing bearer verified inside confirmPairing via
+  // verifyPairingTokenHash — possession of a 32-byte secret bound
+  // to the specific pairing row is strictly stronger than cookie
+  // auth.
+  //
+  // IMPORTANT (deferred follow-up): we no longer know which human
+  // user is confirming, so we pass a stable bearer-derived sentinel
+  // as `userId`. The in-memory pairing store tolerates any string;
+  // the eventual Drizzle-backed store will need a real user-binding
+  // path (see the <deferred> block in 01-07-PLAN.md). The audit
+  // row's `subject` still captures the pairingId so traceability
+  // is intact.
+  const userId = `pairing-bearer:${pairingId}`;
 
   try {
     // NOTE: `confirmPairing` writes the `cm_device_session` cookie via
@@ -179,6 +190,9 @@ export async function POST(
         { status: 409 },
       );
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    // WR-GAP-02: do NOT echo raw error.message on the 500 fallthrough.
+    // Log internally for operators; return a generic code for the caller.
+    console.error("pairing confirm internal_error", error);
+    return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }

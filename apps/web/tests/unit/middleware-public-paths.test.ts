@@ -1,14 +1,25 @@
 /**
- * Regression tests for the middleware allowlist (CR-01 fix, Plan 01-04).
+ * Regression tests for the middleware allowlist (CR-01 + CR-GAP-01 fixes,
+ * Plans 01-04 and 01-07).
  *
- * These tests pin the CR-01 fix from 01-REVIEW.md / 01-VERIFICATION.md:
+ * These tests pin the allowlist invariants from 01-REVIEW.md,
+ * 01-VERIFICATION.md, and 01-REVIEW-GAP.md:
  *
- *   - POST /api/pairings               MUST be let through (bridge create)
- *   - GET  /api/pairings/[id]          MUST be let through (bridge status poll)
- *   - POST /api/pairings/[id]/redeem   MUST be redirected to /sign-in
- *                                      (the single-segment regex must NOT
- *                                      wildcard-leak subpaths)
- *   - POST /api/pairings/[id]/confirm  MUST be redirected to /sign-in
+ *   - POST /api/pairings                     MUST be let through (bridge create)
+ *   - GET  /api/pairings/[id]                MUST be let through (bridge status poll)
+ *   - POST /api/pairings/[id]/confirm        MUST be let through (bridge
+ *                                            confirm; bearer-gated at the
+ *                                            route-handler level, NOT by
+ *                                            middleware). CR-GAP-01 inverts
+ *                                            the previous "redirect to
+ *                                            /sign-in" behavior.
+ *   - POST /api/pairings/[id]/redeem         MUST be redirected to /sign-in
+ *                                            (stays browser-cookie-gated
+ *                                            per the Option A lock)
+ *   - POST /api/pairings/[id]/confirm/extra  MUST be redirected to /sign-in
+ *                                            (confirm regex is strict
+ *                                            single-segment and must NOT
+ *                                            wildcard-leak subpaths)
  *
  * The tests do NOT spin up a Next.js dev server and do NOT mock Auth.js
  * internals. They invoke the middleware handler directly with a
@@ -99,15 +110,17 @@ describe("middleware · CR-01 bridge-facing allowlist", () => {
     expect(isSignInRedirect(res)).toBe(true);
   });
 
-  it("POST /api/pairings/abc-123/confirm is BLOCKED (sign-in redirect)", async () => {
-    // Negative case: /confirm is the ONLY cookie-minting route and must
-    // remain auth-gated even though it shares the /api/pairings prefix.
+  it("POST /api/pairings/abc-123/confirm is now bearer-gated (allowed through by middleware; auth is at the route handler level)", async () => {
+    // CR-GAP-01: the confirm route no longer calls auth(). The bearer
+    // check happens inside the route handler, so middleware must let
+    // the request pass. A blocked middleware here would make the
+    // bridge CLI unable to complete pairing from a terminal.
     const req = new NextRequest(
       new URL("http://localhost:3000/api/pairings/abc-123/confirm"),
       { method: "POST" },
     );
     const res = await invokeMiddleware(req);
-    expect(isSignInRedirect(res)).toBe(true);
+    expect(isSignInRedirect(res)).toBe(false);
   });
 
   it("GET /api/pairings/abc-123/redeem is BLOCKED (sign-in redirect)", async () => {
@@ -116,6 +129,30 @@ describe("middleware · CR-01 bridge-facing allowlist", () => {
     const req = new NextRequest(
       new URL("http://localhost:3000/api/pairings/abc-123/redeem"),
       { method: "GET" },
+    );
+    const res = await invokeMiddleware(req);
+    expect(isSignInRedirect(res)).toBe(true);
+  });
+
+  it("POST /api/pairings/abc-123/confirm/extra is BLOCKED (confirm regex is strict single-segment)", async () => {
+    // CR-GAP-01 negative case: `pairingConfirmPostRegex` must not
+    // wildcard-leak to a longer subpath. Anything under `/confirm/...`
+    // must still hit the redirect.
+    const req = new NextRequest(
+      new URL("http://localhost:3000/api/pairings/abc-123/confirm/extra"),
+      { method: "POST" },
+    );
+    const res = await invokeMiddleware(req);
+    expect(isSignInRedirect(res)).toBe(true);
+  });
+
+  it("POST /api/pairings/abc-123/redeem is still BLOCKED after the confirm allowlist lands", async () => {
+    // Belt-and-braces: even though confirm is now allowed, redeem
+    // must stay browser-cookie-gated because it is called by the
+    // phone browser's server component, not the bridge.
+    const req = new NextRequest(
+      new URL("http://localhost:3000/api/pairings/abc-123/redeem"),
+      { method: "POST" },
     );
     const res = await invokeMiddleware(req);
     expect(isSignInRedirect(res)).toBe(true);

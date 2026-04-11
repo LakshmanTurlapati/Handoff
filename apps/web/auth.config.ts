@@ -52,6 +52,20 @@ export const UNAUTHENTICATED_API_POST_PATHS = new Set<string>([
   "/api/pairings",
 ]);
 
+/**
+ * Regex allowlist for unauthenticated POST requests on the
+ * parameterized pairing confirm subpath. The bridge CLI calls
+ * POST /api/pairings/[pairingId]/confirm with only an
+ * `Authorization: Bearer <pairingToken>` header (no browser cookie),
+ * so the route must pass middleware and be authenticated by the
+ * handler itself via `verifyPairingTokenHash`. The regex is strict
+ * single-segment: it matches `/api/pairings/abc-123/confirm` but
+ * NOT `/api/pairings/abc-123/confirm/extra` and NOT
+ * `/api/pairings/abc-123/redeem`, so the /redeem subpath stays
+ * browser-cookie-gated. (CR-GAP-01 fix from 01-REVIEW-GAP.md.)
+ */
+export const pairingConfirmPostRegex = /^\/api\/pairings\/[^\/]+\/confirm$/;
+
 export const authConfig = {
   providers: [
     GitHub({
@@ -74,21 +88,28 @@ export const authConfig = {
      * via the Auth.js `auth` wrapper — it must return a boolean or a
      * `Response` without touching any Node-only APIs.
      *
-     * Order of checks (CR-01):
+     * Order of checks (CR-01 + CR-GAP-01):
      *   1. Method+pathname-equality allowlist for unauthenticated bridge
      *      POSTs (`POST /api/pairings`).
-     *   2. Method+regex allowlist for unauthenticated bridge GETs on the
+     *   2. Method+regex allowlist for unauthenticated bridge POSTs on the
+     *      parameterized confirm subpath (`POST /api/pairings/[id]/confirm`).
+     *      The `pairingConfirmPostRegex` is strict single-segment so
+     *      `/confirm/extra` and `/redeem` are NOT matched. (CR-GAP-01.)
+     *   3. Method+regex allowlist for unauthenticated bridge GETs on the
      *      pairing status endpoint (`GET /api/pairings/[id]`). The regex
      *      has exactly ONE path segment after `/api/pairings/`, so
      *      `/api/pairings/abc-123/redeem` and `/api/pairings/abc-123/confirm`
      *      are NOT matched and stay auth-gated.
-     *   3. `PUBLIC_PATHS` prefix allowlist (sign-in, auth callback, healthz).
-     *   4. Fall through to the browser session check.
+     *   4. `PUBLIC_PATHS` prefix allowlist (sign-in, auth callback, healthz).
+     *   5. Fall through to the browser session check.
      */
     authorized({ auth, request }) {
       const { pathname } = request.nextUrl;
       const method = request.method;
       if (method === "POST" && UNAUTHENTICATED_API_POST_PATHS.has(pathname)) {
+        return true;
+      }
+      if (method === "POST" && pairingConfirmPostRegex.test(pathname)) {
         return true;
       }
       if (method === "GET" && /^\/api\/pairings\/[^\/]+$/.test(pathname)) {
