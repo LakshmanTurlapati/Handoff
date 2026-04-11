@@ -23,11 +23,56 @@ interface Bucket {
   windowStart: number;
 }
 
+/**
+ * Hard cap on the number of buckets the in-memory Map will hold.
+ * WR-GAP-01: the map is keyed by client IP, so without a cap an
+ * attacker rotating source IPs (botnet, IPv6 churn, DHCP pool)
+ * can grow the Map unboundedly and OOM the container.
+ *
+ * When the cap is reached, the oldest bucket (smallest
+ * `windowStart`) is evicted before a new one is inserted. This is
+ * sufficient because we only insert on the fresh-key branch and
+ * we insert at most one bucket per limiter call.
+ *
+ * The number is chosen to be large enough that a legitimate
+ * spike of unique callers (e.g., a burst of users on a shared
+ * corporate NAT) never trips eviction in practice, while still
+ * being small enough to keep the Map's memory footprint in the
+ * single-digit megabyte range.
+ */
+export const RATE_LIMIT_MAX_BUCKETS = 10_000;
+
 const buckets = new Map<string, Bucket>();
 
 /** Exported for tests to reset state between cases. */
 export function __resetRateLimitBuckets(): void {
   buckets.clear();
+}
+
+/**
+ * If the map is at or above the hard cap, evict the single bucket
+ * with the smallest `windowStart`. Runs in O(n) over the map but
+ * only fires on the fresh-key insert branch, so the amortized
+ * cost is bounded: once the map saturates at
+ * RATE_LIMIT_MAX_BUCKETS, every new insert evicts exactly one
+ * entry.
+ *
+ * Exported for tests only — production callers should use
+ * `checkPairingCreateRateLimit`, which wires this in automatically.
+ */
+export function evictOldestIfOverCap(): void {
+  if (buckets.size < RATE_LIMIT_MAX_BUCKETS) return;
+  let oldestKey: string | null = null;
+  let oldestWindowStart = Number.POSITIVE_INFINITY;
+  for (const [key, bucket] of buckets) {
+    if (bucket.windowStart < oldestWindowStart) {
+      oldestWindowStart = bucket.windowStart;
+      oldestKey = key;
+    }
+  }
+  if (oldestKey !== null) {
+    buckets.delete(oldestKey);
+  }
 }
 
 /**
@@ -45,6 +90,11 @@ export function checkPairingCreateRateLimit(
 
   const bucket = buckets.get(key);
   if (!bucket || now - bucket.windowStart >= windowMs) {
+    // WR-GAP-01: cap the map size BEFORE inserting so a fresh-key
+    // branch can never grow past RATE_LIMIT_MAX_BUCKETS. Only fires
+    // on the fresh-key insert path — existing-bucket increments
+    // never touch the cap.
+    evictOldestIfOverCap();
     buckets.set(key, { count: 1, windowStart: now });
     return { allowed: true, remaining: limit - 1, resetAt: now + windowMs };
   }

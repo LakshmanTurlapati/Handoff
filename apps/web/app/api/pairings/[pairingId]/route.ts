@@ -46,12 +46,12 @@ export async function GET(
   try {
     const status = await loadPairingStatus(pairingId);
 
-    const validated = PairingStatusResponseSchema.safeParse({
-      pairingId: status.pairingId,
-      status: status.status,
-      expiresAt: status.expiresAt,
-      verificationPhrase: status.verificationPhrase,
-    });
+    // WR-GAP-03: the schema now models `userCode` as optional, so we
+    // can pass the full toStatusResponse output through safeParse
+    // directly. No more manual subset construction — that workaround
+    // existed only because the strict schema silently dropped the
+    // field.
+    const validated = PairingStatusResponseSchema.safeParse(status);
     if (!validated.success) {
       // Log internally; do NOT leak zod issues to the unauthenticated caller.
       console.error(
