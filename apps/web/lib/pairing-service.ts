@@ -524,6 +524,47 @@ export async function loadPairingStatus(
 }
 
 // ---------------------------------------------------------------------------
+// Low-level helpers for the /claim route handler (Phase 01.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Load the raw PairingRow for direct field access. Used by the /claim
+ * handler which needs redeemedByUserId and claimedAt -- fields not
+ * exposed on PairingStatusResponse.
+ */
+export async function loadPairingRow(
+  pairingId: string,
+  ctx?: PairingServiceContext,
+): Promise<PairingRow> {
+  return loadOrExpire(pairingId, ctx);
+}
+
+/**
+ * Update a pairing row with a partial patch. Thin wrapper over
+ * store.update for the /claim handler.
+ */
+export async function updatePairingRow(
+  pairingId: string,
+  patch: Partial<PairingRow>,
+  ctx?: PairingServiceContext,
+): Promise<PairingRow> {
+  const { store } = resolveCtx(ctx);
+  return store.update(pairingId, patch);
+}
+
+/**
+ * Record an audit event. Thin wrapper over auditStore.record for
+ * the /claim handler.
+ */
+export async function recordAuditEvent(
+  row: AuditRow,
+  ctx?: PairingServiceContext,
+): Promise<void> {
+  const { auditStore } = resolveCtx(ctx);
+  await auditStore.record(row);
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
