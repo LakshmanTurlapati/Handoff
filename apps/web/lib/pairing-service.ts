@@ -40,7 +40,7 @@ import {
   type PairingStatus,
   type PairingStatusResponse,
 } from "@codex-mobile/protocol";
-import { issueDeviceSession, type IssuedDeviceSession } from "./device-session";
+// issueDeviceSession moved to /claim route handler (Phase 01.1, D-09)
 
 // ---------------------------------------------------------------------------
 // Audit event constants
@@ -57,6 +57,7 @@ export const PAIRING_AUDIT_EVENTS = {
   confirmed: "pairing.confirmed",
   expired: "pairing.expired",
   confirmFailed: "pairing.confirm_failed",
+  claimed: "pairing.claimed",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -100,6 +101,8 @@ export interface PairingRow {
   redeemedAt: Date | null;
   confirmedAt: Date | null;
   confirmedByUserId: string | null;
+  redeemedByUserId: string | null;
+  claimedAt: Date | null;
   cancelledAt: Date | null;
 }
 
@@ -251,6 +254,8 @@ export async function createPairing(
     redeemedAt: null,
     confirmedAt: null,
     confirmedByUserId: null,
+    redeemedByUserId: null,
+    claimedAt: null,
     cancelledAt: null,
   };
 
@@ -352,6 +357,7 @@ export async function redeemPairing(
     status: "redeemed",
     verificationPhrase,
     redeemedAt,
+    redeemedByUserId: input.userId,
   });
 
   await auditStore.record({
@@ -394,12 +400,13 @@ export interface ConfirmPairingInput {
 export interface ConfirmPairingResult {
   pairingId: string;
   verificationPhrase: string;
-  deviceSession: IssuedDeviceSession;
+  confirmedAt: Date;
 }
 
 /**
- * Transition a pairing from `redeemed` -> `confirmed`. This is the only
- * path that issues a `cm_device_session` cookie. The browser MUST include
+ * Transition a pairing from `redeemed` -> `confirmed`. This is a pure
+ * state-transition function -- cookie issuance moved to POST
+ * /api/pairings/[id]/claim (Phase 01.1, D-09). The browser MUST include
  * the verification phrase in the request body, and it must equal the
  * phrase stored on the row; otherwise the call is rejected and a failed
  * audit row is written.
@@ -477,36 +484,29 @@ export async function confirmPairing(
     throw new Error("verification phrase mismatch");
   }
 
-  const deviceSession = await issueDeviceSession({
-    userId: input.userId,
-    deviceLabel: input.deviceLabel ?? row.deviceLabel ?? "codex-mobile device",
-    issuedFromPairingId: row.id,
-    now: confirmedAt,
-  });
-
+  const confirmedByUserId = row.redeemedByUserId ?? input.userId;
   await store.update(row.id, {
     status: "confirmed",
     confirmedAt,
-    confirmedByUserId: input.userId,
+    confirmedByUserId,
   });
 
   await auditStore.record({
     eventType: PAIRING_AUDIT_EVENTS.confirmed,
-    userId: input.userId,
+    userId: confirmedByUserId,
     subject: row.id,
     outcome: "success",
     metadata: {
-      deviceSessionId: deviceSession.deviceSessionId,
-      devicePublicId: deviceSession.devicePublicId,
-      deviceLabel: deviceSession.deviceLabel,
+      confirmedByUserId,
+      bridgeUserId: input.userId,
     },
     createdAt: confirmedAt,
   });
 
   return {
     pairingId: row.id,
-    verificationPhrase: row.verificationPhrase,
-    deviceSession,
+    verificationPhrase: row.verificationPhrase!,
+    confirmedAt,
   };
 }
 
@@ -521,6 +521,47 @@ export async function loadPairingStatus(
 ): Promise<PairingStatusResponse & { userCode: string }> {
   const row = await loadOrExpire(pairingId, ctx);
   return toStatusResponse(row);
+}
+
+// ---------------------------------------------------------------------------
+// Low-level helpers for the /claim route handler (Phase 01.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Load the raw PairingRow for direct field access. Used by the /claim
+ * handler which needs redeemedByUserId and claimedAt -- fields not
+ * exposed on PairingStatusResponse.
+ */
+export async function loadPairingRow(
+  pairingId: string,
+  ctx?: PairingServiceContext,
+): Promise<PairingRow> {
+  return loadOrExpire(pairingId, ctx);
+}
+
+/**
+ * Update a pairing row with a partial patch. Thin wrapper over
+ * store.update for the /claim handler.
+ */
+export async function updatePairingRow(
+  pairingId: string,
+  patch: Partial<PairingRow>,
+  ctx?: PairingServiceContext,
+): Promise<PairingRow> {
+  const { store } = resolveCtx(ctx);
+  return store.update(pairingId, patch);
+}
+
+/**
+ * Record an audit event. Thin wrapper over auditStore.record for
+ * the /claim handler.
+ */
+export async function recordAuditEvent(
+  row: AuditRow,
+  ctx?: PairingServiceContext,
+): Promise<void> {
+  const { auditStore } = resolveCtx(ctx);
+  await auditStore.record(row);
 }
 
 // ---------------------------------------------------------------------------
