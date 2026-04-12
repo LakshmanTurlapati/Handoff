@@ -57,6 +57,7 @@ export const PAIRING_AUDIT_EVENTS = {
   confirmed: "pairing.confirmed",
   expired: "pairing.expired",
   confirmFailed: "pairing.confirm_failed",
+  claimed: "pairing.claimed",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -100,6 +101,8 @@ export interface PairingRow {
   redeemedAt: Date | null;
   confirmedAt: Date | null;
   confirmedByUserId: string | null;
+  redeemedByUserId: string | null;
+  claimedAt: Date | null;
   cancelledAt: Date | null;
 }
 
@@ -251,6 +254,8 @@ export async function createPairing(
     redeemedAt: null,
     confirmedAt: null,
     confirmedByUserId: null,
+    redeemedByUserId: null,
+    claimedAt: null,
     cancelledAt: null,
   };
 
@@ -352,6 +357,7 @@ export async function redeemPairing(
     status: "redeemed",
     verificationPhrase,
     redeemedAt,
+    redeemedByUserId: input.userId,
   });
 
   await auditStore.record({

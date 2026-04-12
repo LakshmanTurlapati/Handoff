@@ -162,10 +162,14 @@ export const pairing_sessions = pgTable(
       .notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     redeemedAt: timestamp("redeemed_at", { withTimezone: true }),
+    redeemedByUserId: uuid("redeemed_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
     confirmedByUserId: uuid("confirmed_by_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
   },
   (table) => ({
