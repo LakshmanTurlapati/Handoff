@@ -43,19 +43,20 @@ Plans:
 
 ### Phase 01.1: Browser device session claim flow (D-07-01 hotfix) (INSERTED)
 
-**Goal**: Close the D-07-01 gap discovered during Phase 1 verification iteration 2 — the phone browser currently never receives the `cm_device_session` cookie because `/confirm` is called by the bridge CLI, not the browser, so the `Set-Cookie` header returns to the wrong process.
+**Goal**: Close the D-07-01 gap discovered during Phase 1 verification iteration 2 -- the phone browser currently never receives the `cm_device_session` cookie because `/confirm` is called by the bridge CLI, not the browser, so the `Set-Cookie` header returns to the wrong process.
 **Depends on**: Phase 1
 **Requirements**: AUTH-02, PAIR-04, SEC-01
 **UI hint**: yes
 **Success Criteria** (what must be TRUE):
   1. After the bridge CLI calls `POST /api/pairings/[id]/confirm`, the phone browser's `/pair/[id]` page detects the `confirmed` state and successfully obtains a `cm_device_session` cookie without a second sign-in round-trip.
-  2. `redeemPairing` persists the redeeming user's identity onto the pairing row so the browser claim path can mint a session for the correct user (Option A lock is explicitly lifted for this phase — the justification that protected it in Phase 1 no longer holds).
+  2. `redeemPairing` persists the redeeming user's identity onto the pairing row so the browser claim path can mint a session for the correct user (Option A lock is explicitly lifted for this phase -- the justification that protected it in Phase 1 no longer holds).
   3. The existing Playwright `auth-pairing.spec.ts` continues to pass, updated to cover the new claim flow.
-  4. The end-to-end happy path is verified on a real Fly deploy: bridge creates pairing → phone pairs → verification phrase matches → bridge confirms → phone receives cookie → phone shows paired state.
-**Plans**: TBD (run /gsd-plan-phase 01.1 to break down)
+  4. The end-to-end happy path is verified on a real Fly deploy: bridge creates pairing -> phone pairs -> verification phrase matches -> bridge confirms -> phone receives cookie -> phone shows paired state.
+**Plans**: 2 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 01.1 to break down)
+- [ ] 01.1-01-PLAN.md -- Backend: redeemedByUserId on PairingRow + schema, confirmPairing cleanup (drop issueDeviceSession, remove sentinel, update return type), new /claim route handler, protocol schema update
+- [ ] 01.1-02-PLAN.md -- Frontend: refactor pair page (server + client component split), client-side polling at 2s, auto-claim on confirmed detection, error states, Playwright test update
 
 ### Phase 2: Bridge & Codex Session Adapter
 **Goal**: Build the local bridge that connects outbound to the relay and maps Codex app-server semantics into the product protocol
@@ -128,11 +129,12 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
+Phases execute in numeric order: 1 -> 01.1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Identity & Pairing Foundation | 0/3 | Not started | - |
+| 1. Identity & Pairing Foundation | 7/7 | Complete | - |
+| 01.1 Browser device session claim flow | 0/2 | Planning complete | - |
 | 2. Bridge & Codex Session Adapter | 0/3 | Not started | - |
 | 3. Live Remote UI & Control | 0/3 | Not started | - |
 | 4. Approval, Audit & Device Safety | 0/3 | Not started | - |
