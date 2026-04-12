@@ -39,7 +39,23 @@ Plans:
 - [x] 01-04 (gap): Fix middleware CR-01 + add missing GET /api/pairings/[pairingId] handler
 - [x] 01-05 (gap): Pairing token bearer verification, Origin/CSRF, rate limit, waitForRedeem error propagation, 32-byte cookie secret
 - [x] 01-06 (gap): Harden fly-deploy.yml (CR-02), Dockerfiles (CR-03), README single-machine callout
-- [ ] 01-07 (gap): Remove auth() from /confirm (CR-GAP-01), rate-limit eviction (WR-GAP-01), generic 500 fallthroughs (WR-GAP-02), PairingStatusResponseSchema userCode (WR-GAP-03)
+- [x] 01-07 (gap): Remove auth() from /confirm (CR-GAP-01), rate-limit eviction (WR-GAP-01), generic 500 fallthroughs (WR-GAP-02), PairingStatusResponseSchema userCode (WR-GAP-03)
+
+### Phase 01.1: Browser device session claim flow (D-07-01 hotfix) (INSERTED)
+
+**Goal**: Close the D-07-01 gap discovered during Phase 1 verification iteration 2 — the phone browser currently never receives the `cm_device_session` cookie because `/confirm` is called by the bridge CLI, not the browser, so the `Set-Cookie` header returns to the wrong process.
+**Depends on**: Phase 1
+**Requirements**: AUTH-02, PAIR-04, SEC-01
+**UI hint**: yes
+**Success Criteria** (what must be TRUE):
+  1. After the bridge CLI calls `POST /api/pairings/[id]/confirm`, the phone browser's `/pair/[id]` page detects the `confirmed` state and successfully obtains a `cm_device_session` cookie without a second sign-in round-trip.
+  2. `redeemPairing` persists the redeeming user's identity onto the pairing row so the browser claim path can mint a session for the correct user (Option A lock is explicitly lifted for this phase — the justification that protected it in Phase 1 no longer holds).
+  3. The existing Playwright `auth-pairing.spec.ts` continues to pass, updated to cover the new claim flow.
+  4. The end-to-end happy path is verified on a real Fly deploy: bridge creates pairing → phone pairs → verification phrase matches → bridge confirms → phone receives cookie → phone shows paired state.
+**Plans**: TBD (run /gsd-plan-phase 01.1 to break down)
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 01.1 to break down)
 
 ### Phase 2: Bridge & Codex Session Adapter
 **Goal**: Build the local bridge that connects outbound to the relay and maps Codex app-server semantics into the product protocol

@@ -72,6 +72,10 @@ None yet.
 - QR/device pairing must defend against hijack and replay from day one
 - Multi-instance relay routing on Fly.io must be proven before broad rollout
 
+### Roadmap Evolution
+
+- Phase 01.1 inserted after Phase 1 on 2026-04-11: Browser device session claim flow (D-07-01 hotfix) — URGENT. The cookie-to-browser delivery was surfaced by Phase 1 verification iteration 2 after CR-GAP-01 made the bridge→/confirm path actually reachable. Phase 01.1 explicitly lifts the Option A lock that protected `redeemPairing` and `pair/[pairingId]/page.tsx` during earlier gap iterations.
+
 ## Session Continuity
 
 Last session: 2026-04-06 12:00
