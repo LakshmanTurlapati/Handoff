@@ -55,8 +55,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01.1-01-PLAN.md -- Backend: redeemedByUserId on PairingRow + schema, confirmPairing cleanup (drop issueDeviceSession, remove sentinel, update return type), new /claim route handler, protocol schema update
-- [ ] 01.1-02-PLAN.md -- Frontend: refactor pair page (server + client component split), client-side polling at 2s, auto-claim on confirmed detection, error states, Playwright test update
+- [x] 01.1-01-PLAN.md -- Backend: redeemedByUserId on PairingRow + schema, confirmPairing cleanup (drop issueDeviceSession, remove sentinel, update return type), new /claim route handler, protocol schema update
+- [x] 01.1-02-PLAN.md -- Frontend: refactor pair page (server + client component split), client-side polling at 2s, auto-claim on confirmed detection, error states, Playwright test update
 
 ### Phase 2: Bridge & Codex Session Adapter
 **Goal**: Build the local bridge that connects outbound to the relay and maps Codex app-server semantics into the product protocol
@@ -134,7 +134,7 @@ Phases execute in numeric order: 1 -> 01.1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Identity & Pairing Foundation | 7/7 | Complete | - |
-| 01.1 Browser device session claim flow | 0/2 | Planning complete | - |
+| 01.1 Browser device session claim flow | 2/2 | Complete    | 2026-04-12 |
 | 2. Bridge & Codex Session Adapter | 0/3 | Not started | - |
 | 3. Live Remote UI & Control | 0/3 | Not started | - |
 | 4. Approval, Audit & Device Safety | 0/3 | Not started | - |
