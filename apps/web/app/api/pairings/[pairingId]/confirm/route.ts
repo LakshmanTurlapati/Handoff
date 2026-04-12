@@ -1,32 +1,29 @@
 /**
  * POST /api/pairings/[pairingId]/confirm
  *
- * The ONLY path that issues a `cm_device_session` cookie. The route:
+ * Transitions a pairing from redeemed to confirmed. Cookie issuance moved
+ * to POST /api/pairings/[id]/claim (Phase 01.1, D-09). The route:
  *
  *   1. Requires only a valid `Authorization: Bearer <pairingToken>` header
- *      — the one-time token returned from POST /api/pairings. Cookie-based
+ *      -- the one-time token returned from POST /api/pairings. Cookie-based
  *      auth has been removed (CR-GAP-01) because the bridge CLI has no
  *      browser context. The bearer is verified inside `confirmPairing` via
  *      `verifyPairingTokenHash` against `pairing_sessions.pairingTokenHash`.
  *   2. Validates that the pairing exists and is `pending` or `redeemed`.
  *   3. Compares the request's `verificationPhrase` against the phrase
  *      stored on the pairing row using constant-time comparison.
- *   4. On success, issues a fresh `cm_device_session` cookie with a 7-day
- *      absolute expiry via `issueDeviceSession`, writes `pairing.confirmed`
- *      to the audit trail, and transitions the row to `confirmed`.
- *   5. Returns a `PairingConfirmResponse` containing the (already-sent)
- *      verification phrase and the new device session id — never the raw
- *      cookie value.
+ *   4. On success, writes `pairing.confirmed` to the audit trail and
+ *      transitions the row to `confirmed`.
+ *   5. Returns a `PairingConfirmResponse` containing the verification
+ *      phrase and confirmedAt timestamp.
  *
  * Security rules enforced here are documented in
  * `docs/adr/0001-phase-1-trust-boundary.md` under the Phase 1 pairing
- * boundary: the device-session cookie is the only long-lived credential
- * in the system, and it is only ever created by this handler.
+ * boundary.
  */
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { PairingConfirmResponseSchema } from "@codex-mobile/protocol";
-import { DEVICE_SESSION_COOKIE_NAME } from "../../../../../lib/device-session";
 import { confirmPairing } from "../../../../../lib/pairing-service";
 
 export const runtime = "nodejs";
@@ -110,24 +107,19 @@ export async function POST(
   // caller of this route) runs in a terminal and has no
   // `cm_web_session` cookie. Authorization is enforced entirely by
   // the one-time pairing bearer verified inside confirmPairing via
-  // verifyPairingTokenHash — possession of a 32-byte secret bound
-  // to the specific pairing row is strictly stronger than cookie
-  // auth.
+  // verifyPairingTokenHash -- possession of a 32-byte secret bound
+  // to the specific pairing row is strictly stronger than cookie auth.
   //
-  // IMPORTANT (deferred follow-up): we no longer know which human
-  // user is confirming, so we pass a stable bearer-derived sentinel
-  // as `userId`. The in-memory pairing store tolerates any string;
-  // the eventual Drizzle-backed store will need a real user-binding
-  // path (see the <deferred> block in 01-07-PLAN.md). The audit
-  // row's `subject` still captures the pairingId so traceability
-  // is intact.
-  const userId = `pairing-bearer:${pairingId}`;
+  // D-12 (Phase 01.1): confirmPairing now uses row.redeemedByUserId
+  // (set during redeemPairing) for the real user identity. The bridge
+  // userId below is only used as a fallback and for audit attribution.
+  // D-12: the bridge has no browser session, so userId is bridge-scoped.
+  // confirmPairing uses row.redeemedByUserId for the real user binding.
+  const userId = `bridge:${pairingId}`;
 
   try {
-    // NOTE: `confirmPairing` writes the `cm_device_session` cookie via
-    // `issueDeviceSession` as a side effect. This comment is load-bearing
-    // because the plan's `<verify>` block greps for "cm_device_session"
-    // inside this file to prove the cookie issuance path lives here.
+    // D-09 (Phase 01.1): confirmPairing is now a pure state transition.
+    // Cookie issuance moved to POST /api/pairings/[id]/claim.
     const result = await confirmPairing({
       pairingId,
       userId,
@@ -138,7 +130,7 @@ export async function POST(
 
     const validated = PairingConfirmResponseSchema.safeParse({
       verificationPhrase: result.verificationPhrase,
-      deviceSessionId: result.deviceSession.deviceSessionId,
+      confirmedAt: result.confirmedAt.toISOString(),
     });
     if (!validated.success) {
       return NextResponse.json(
@@ -150,17 +142,7 @@ export async function POST(
       );
     }
 
-    return NextResponse.json(
-      {
-        ...validated.data,
-        // Browsers already received the cm_device_session cookie via the
-        // Set-Cookie header written by issueDeviceSession(); we echo the
-        // cookie name in metadata so client code can surface a generic
-        // "device paired" message without having to parse cookies.
-        cookie: DEVICE_SESSION_COOKIE_NAME,
-      },
-      { status: 200 },
-    );
+    return NextResponse.json(validated.data, { status: 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown_error";
     if (message.includes("not found")) {

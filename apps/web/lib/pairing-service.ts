@@ -40,7 +40,7 @@ import {
   type PairingStatus,
   type PairingStatusResponse,
 } from "@codex-mobile/protocol";
-import { issueDeviceSession, type IssuedDeviceSession } from "./device-session";
+// issueDeviceSession moved to /claim route handler (Phase 01.1, D-09)
 
 // ---------------------------------------------------------------------------
 // Audit event constants
@@ -400,12 +400,13 @@ export interface ConfirmPairingInput {
 export interface ConfirmPairingResult {
   pairingId: string;
   verificationPhrase: string;
-  deviceSession: IssuedDeviceSession;
+  confirmedAt: Date;
 }
 
 /**
- * Transition a pairing from `redeemed` -> `confirmed`. This is the only
- * path that issues a `cm_device_session` cookie. The browser MUST include
+ * Transition a pairing from `redeemed` -> `confirmed`. This is a pure
+ * state-transition function -- cookie issuance moved to POST
+ * /api/pairings/[id]/claim (Phase 01.1, D-09). The browser MUST include
  * the verification phrase in the request body, and it must equal the
  * phrase stored on the row; otherwise the call is rejected and a failed
  * audit row is written.
@@ -483,36 +484,29 @@ export async function confirmPairing(
     throw new Error("verification phrase mismatch");
   }
 
-  const deviceSession = await issueDeviceSession({
-    userId: input.userId,
-    deviceLabel: input.deviceLabel ?? row.deviceLabel ?? "codex-mobile device",
-    issuedFromPairingId: row.id,
-    now: confirmedAt,
-  });
-
+  const confirmedByUserId = row.redeemedByUserId ?? input.userId;
   await store.update(row.id, {
     status: "confirmed",
     confirmedAt,
-    confirmedByUserId: input.userId,
+    confirmedByUserId,
   });
 
   await auditStore.record({
     eventType: PAIRING_AUDIT_EVENTS.confirmed,
-    userId: input.userId,
+    userId: confirmedByUserId,
     subject: row.id,
     outcome: "success",
     metadata: {
-      deviceSessionId: deviceSession.deviceSessionId,
-      devicePublicId: deviceSession.devicePublicId,
-      deviceLabel: deviceSession.deviceLabel,
+      confirmedByUserId,
+      bridgeUserId: input.userId,
     },
     createdAt: confirmedAt,
   });
 
   return {
     pairingId: row.id,
-    verificationPhrase: row.verificationPhrase,
-    deviceSession,
+    verificationPhrase: row.verificationPhrase!,
+    confirmedAt,
   };
 }
 

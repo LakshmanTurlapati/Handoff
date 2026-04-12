@@ -75,21 +75,44 @@ export const PairingCreateResponseSchema: z.ZodType<PairingCreateResponse> = z
   .strict();
 
 /**
- * Response returned after the browser redeems a pairing and the local
- * terminal confirms it. The browser uses `verificationPhrase` to show the
- * same phrase the terminal is rendering so the developer can verify they
- * are confirming the correct device. `deviceSessionId` is the opaque
- * identifier of the freshly issued 7-day device session.
+ * Response returned after the bridge confirms a pairing. The bridge
+ * receives only the state-transition result. Device session cookie
+ * issuance is handled by the browser-side /claim endpoint (Phase 01.1).
+ *
+ * `deviceSessionId` is optional for backward compatibility during the
+ * monorepo transition. New code should not rely on it.
  */
 export interface PairingConfirmResponse {
   verificationPhrase: string;
-  deviceSessionId: string;
+  confirmedAt?: string;
+  deviceSessionId?: string;
 }
 
 export const PairingConfirmResponseSchema: z.ZodType<PairingConfirmResponse> = z
   .object({
     verificationPhrase: z.string().min(3),
+    confirmedAt: z.string().datetime().optional(),
+    deviceSessionId: z.string().min(1).optional(),
+  })
+  .strict();
+
+/**
+ * Response returned by POST /api/pairings/[id]/claim when the browser
+ * successfully claims the device session cookie. The Set-Cookie header
+ * on the HTTP response carries the actual cm_device_session JWT;
+ * this body is informational.
+ */
+export interface PairingClaimResponse {
+  status: "claimed";
+  deviceSessionId: string;
+  deviceLabel?: string;
+}
+
+export const PairingClaimResponseSchema: z.ZodType<PairingClaimResponse> = z
+  .object({
+    status: z.literal("claimed"),
     deviceSessionId: z.string().min(1),
+    deviceLabel: z.string().optional(),
   })
   .strict();
 
