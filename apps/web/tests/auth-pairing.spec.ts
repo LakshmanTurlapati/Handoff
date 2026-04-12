@@ -21,9 +21,11 @@
 import { test, expect } from "@playwright/test";
 import {
   PAIRING_TTL_SECONDS,
+  PAIRING_AUDIT_EVENTS,
   confirmPairing,
   createIsolatedPairingContext,
   createPairing,
+  loadPairingRow,
   loadPairingStatus,
   redeemPairing,
 } from "../lib/pairing-service";
@@ -98,5 +100,50 @@ test.describe("Phase 1 · auth + pairing", () => {
         ctx,
       ),
     ).rejects.toThrow(/expired/);
+  });
+
+  test("claim flow: redeem persists redeemedByUserId and confirm uses real user", async () => {
+    const ctx = createIsolatedPairingContext();
+    const created = await createPairing(
+      { deviceLabel: "test phone" },
+      ctx,
+    );
+
+    // Redeem as a specific user
+    const redeemed = await redeemPairing(
+      { pairingId: created.pairingId, userId: "claim_test_user" },
+      ctx,
+    );
+    expect(redeemed.status).toBe("redeemed");
+    expect(redeemed.verificationPhrase).toBeTruthy();
+
+    // Load the raw row and verify redeemedByUserId is set
+    const row = await loadPairingRow(created.pairingId, ctx);
+    expect(row.redeemedByUserId).toBe("claim_test_user");
+    expect(row.claimedAt).toBeNull();
+
+    // Confirm as the bridge (with the pairing token)
+    const result = await confirmPairing(
+      {
+        pairingId: created.pairingId,
+        userId: "bridge:test",
+        verificationPhrase: redeemed.verificationPhrase!,
+        pairingToken: created.pairingToken,
+      },
+      ctx,
+    );
+
+    // D-10: confirm returns confirmedAt, not deviceSession
+    expect(result.confirmedAt).toBeInstanceOf(Date);
+    expect((result as Record<string, unknown>).deviceSession).toBeUndefined();
+
+    // D-12: confirmedByUserId should be the redeeming user, not the bridge sentinel
+    const confirmedRow = await loadPairingRow(created.pairingId, ctx);
+    expect(confirmedRow.status).toBe("confirmed");
+    expect(confirmedRow.confirmedByUserId).toBe("claim_test_user");
+  });
+
+  test("PAIRING_AUDIT_EVENTS includes claimed event", () => {
+    expect(PAIRING_AUDIT_EVENTS.claimed).toBe("pairing.claimed");
   });
 });
