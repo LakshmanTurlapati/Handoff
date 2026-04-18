@@ -32,9 +32,9 @@
 ### Live Activity
 
 - [ ] **LIVE-01**: Remote UI streams Codex agent events, progress, and assistant output in near real time
-- [ ] **LIVE-02**: Remote UI distinguishes agent messages, tool activity, command execution, and approval state instead of showing one undifferentiated log
+- [x] **LIVE-02**: Remote UI distinguishes agent messages, tool activity, command execution, and approval state instead of showing one undifferentiated log
 - [ ] **LIVE-03**: Remote UI can recover from short network interruptions and resume the live stream without creating a new session
-- [ ] **LIVE-04**: Remote UI is usable on phone-sized screens without requiring a full desktop terminal layout
+- [x] **LIVE-04**: Remote UI is usable on phone-sized screens without requiring a full desktop terminal layout
 
 ### Security & Policy
 
@@ -98,9 +98,9 @@
 | SESS-05 | Phase 3 | Pending |
 | SESS-06 | Phase 4 | Pending |
 | LIVE-01 | Phase 3 | Pending |
-| LIVE-02 | Phase 3 | Pending |
+| LIVE-02 | Phase 3 | Complete |
 | LIVE-03 | Phase 4 | Pending |
-| LIVE-04 | Phase 3 | Pending |
+| LIVE-04 | Phase 3 | Complete |
 | SEC-01 | Phase 1 | Pending |
 | SEC-02 | Phase 2 | Pending |
 | SEC-03 | Phase 4 | Pending |
@@ -119,4 +119,4 @@
 
 ---
 *Requirements defined: 2026-04-06*
-*Last updated: 2026-04-06 after initialization*
+*Last updated: 2026-04-18 after Phase 03-01 progress update*

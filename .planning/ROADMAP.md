@@ -88,7 +88,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: Build the mobile session shell, timeline, and structured activity renderer
+- [x] 03-01: Build the mobile session shell, timeline, and structured activity renderer
 - [ ] 03-02: Implement live stream transport plus prompt, steer, and interrupt controls
 - [ ] 03-03: Polish small-screen interaction patterns and Codex-specific control affordances
 
@@ -136,6 +136,6 @@ Phases execute in numeric order: 1 -> 01.1 -> 2 -> 3 -> 4 -> 5
 | 1. Identity & Pairing Foundation | 7/7 | Complete | - |
 | 01.1 Browser device session claim flow | 2/2 | Complete    | 2026-04-12 |
 | 2. Bridge & Codex Session Adapter | 0/3 | Not started | - |
-| 3. Live Remote UI & Control | 0/3 | Not started | - |
+| 3. Live Remote UI & Control | 1/3 | In Progress | - |
 | 4. Approval, Audit & Device Safety | 0/3 | Not started | - |
 | 5. Multi-Instance Routing & Production Hardening | 0/3 | Not started | - |
