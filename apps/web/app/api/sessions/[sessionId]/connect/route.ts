@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { SessionConnectResponseSchema } from "@codex-mobile/protocol/live-session";
+import { recordWsTicketAudit } from "../../../../../lib/session-audit";
 import {
   assertSameOrigin,
   mintRelayTicket,
@@ -18,16 +19,27 @@ export async function POST(
   request: Request,
   context: RouteContext,
 ): Promise<Response> {
-  try {
-    assertSameOrigin(request);
+  let sessionId: string | null = null;
+  let principal: { userId: string; deviceSessionId: string } | null = null;
 
-    const { sessionId } = await context.params;
+  try {
+    const params = await context.params;
+    sessionId = params.sessionId;
     if (!sessionId) {
       return NextResponse.json({ error: "missing_session_id" }, { status: 400 });
     }
 
-    const principal = await requireRemotePrincipal();
+    assertSameOrigin(request);
+
+    principal = await requireRemotePrincipal();
     const { ticket, expiresAt } = await mintRelayTicket(principal);
+    await recordWsTicketAudit({
+      outcome: "success",
+      userId: principal.userId,
+      sessionId,
+      deviceSessionId: principal.deviceSessionId,
+      expiresAt,
+    });
 
     const payload = SessionConnectResponseSchema.parse({
       relayUrl: resolveRelayPublicWebSocketUrl(),
@@ -40,6 +52,26 @@ export async function POST(
     return NextResponse.json(payload, { status: 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown_error";
+
+    if (
+      sessionId &&
+      [
+        "cross_origin_not_allowed",
+        "unauthenticated",
+        "device_session_required",
+        "device_session_expired",
+        "device_session_revoked",
+        "user_mismatch",
+      ].includes(message)
+    ) {
+      await recordWsTicketAudit({
+        outcome: "failure",
+        userId: principal?.userId ?? null,
+        sessionId,
+        deviceSessionId: principal?.deviceSessionId ?? null,
+        failureCode: message,
+      });
+    }
 
     if (message === "cross_origin_not_allowed") {
       return NextResponse.json({ error: message }, { status: 403 });

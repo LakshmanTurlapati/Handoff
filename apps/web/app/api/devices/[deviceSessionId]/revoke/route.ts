@@ -3,6 +3,7 @@ import {
   appendAuditEvent,
   revokeDeviceSession,
 } from "@codex-mobile/db";
+import { AUDIT_EVENT_TYPES } from "@codex-mobile/protocol";
 import {
   assertSameOrigin,
   relayInternalFetch,
@@ -45,7 +46,7 @@ export async function POST(
 
     await appendAuditEvent({
       userId: principal.userId,
-      eventType: "device.revoked",
+      eventType: AUDIT_EVENT_TYPES.deviceRevoked,
       subject: deviceSessionId,
       outcome: "success",
       metadata: {

@@ -3,6 +3,7 @@ import {
   SessionCommandResponseSchema,
   SessionCommandSchema,
 } from "@codex-mobile/protocol/live-session";
+import { recordApprovalDecisionAudit } from "../../../../../lib/session-audit";
 import {
   assertSameOrigin,
   relayInternalFetch,
@@ -35,6 +36,15 @@ export async function POST(
     }
 
     const principal = await requireRemotePrincipal();
+    if (command.data.kind === "approval") {
+      await recordApprovalDecisionAudit({
+        userId: principal.userId,
+        sessionId,
+        deviceSessionId: principal.deviceSessionId,
+        requestId: command.data.requestId,
+        decision: command.data.decision,
+      });
+    }
     const relayResponse = await relayInternalFetch(
       `/internal/browser/sessions/${encodeURIComponent(sessionId)}/command`,
       principal,
