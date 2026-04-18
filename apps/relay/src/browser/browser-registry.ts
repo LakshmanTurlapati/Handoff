@@ -12,6 +12,7 @@ export interface BrowserEntry {
 export class BrowserRegistry {
   private readonly entries = new Map<string, BrowserEntry>();
   private readonly idsBySession = new Map<string, Set<string>>();
+  private readonly idsByDeviceSession = new Map<string, Set<string>>();
 
   register(entry: Omit<BrowserEntry, "id">): string {
     const id = crypto.randomUUID();
@@ -21,6 +22,11 @@ export class BrowserRegistry {
     const sessionIds = this.idsBySession.get(record.sessionId) ?? new Set<string>();
     sessionIds.add(id);
     this.idsBySession.set(record.sessionId, sessionIds);
+
+    const deviceSessionIds =
+      this.idsByDeviceSession.get(record.deviceSessionId) ?? new Set<string>();
+    deviceSessionIds.add(id);
+    this.idsByDeviceSession.set(record.deviceSessionId, deviceSessionIds);
 
     return id;
   }
@@ -37,6 +43,14 @@ export class BrowserRegistry {
     sessionIds.delete(id);
     if (sessionIds.size === 0) {
       this.idsBySession.delete(entry.sessionId);
+    }
+
+    const deviceSessionIds = this.idsByDeviceSession.get(entry.deviceSessionId);
+    if (!deviceSessionIds) return;
+
+    deviceSessionIds.delete(id);
+    if (deviceSessionIds.size === 0) {
+      this.idsByDeviceSession.delete(entry.deviceSessionId);
     }
   }
 
@@ -68,6 +82,50 @@ export class BrowserRegistry {
   clear(): void {
     this.entries.clear();
     this.idsBySession.clear();
+    this.idsByDeviceSession.clear();
+  }
+
+  countByDeviceSessionId(deviceSessionId: string): number {
+    const deviceSessionIds = this.idsByDeviceSession.get(deviceSessionId);
+    return deviceSessionIds?.size ?? 0;
+  }
+
+  closeByDeviceSessionId(
+    deviceSessionId: string,
+    options: {
+      code?: number;
+      reason?: string;
+      predicate?: (entry: BrowserEntry) => boolean;
+      beforeClose?: (entry: BrowserEntry) => void;
+    } = {},
+  ): number {
+    const deviceSessionIds = this.idsByDeviceSession.get(deviceSessionId);
+    if (!deviceSessionIds) return 0;
+
+    let closed = 0;
+
+    for (const id of [...deviceSessionIds]) {
+      const entry = this.entries.get(id);
+      if (!entry) continue;
+      if (options.predicate && !options.predicate(entry)) continue;
+
+      try {
+        options.beforeClose?.(entry);
+      } catch {
+        // Closing the socket still takes priority over the pre-close hook.
+      }
+
+      try {
+        entry.socket.close(options.code ?? 1008, options.reason);
+      } catch {
+        // Ignore close transport errors and continue unregistering.
+      }
+
+      this.unregister(id);
+      closed += 1;
+    }
+
+    return closed;
   }
 
   get size(): number {

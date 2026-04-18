@@ -237,4 +237,43 @@ export async function registerBrowserWsRoutes(
       return reply.code(accepted ? 202 : 503).send(body);
     },
   );
+
+  app.post(
+    "/internal/browser/devices/:deviceSessionId/revoke",
+    {
+      preValidation: authenticateBrowserTicket,
+    },
+    async (request, reply) => {
+      const claims = (
+        request as FastifyRequest & {
+          _wsTicketClaims?: {
+            userId: string;
+          };
+          params: { deviceSessionId?: string };
+        }
+      )._wsTicketClaims;
+      const deviceSessionId = (
+        request as FastifyRequest & { params: { deviceSessionId?: string } }
+      ).params.deviceSessionId;
+
+      if (!claims) {
+        return reply.code(401).send({ error: "missing ws-ticket" });
+      }
+
+      if (!deviceSessionId) {
+        return reply.code(400).send({ error: "missing_device_session_id" });
+      }
+
+      const closedConnections = sessionRouter.revokeDeviceSession(
+        claims.userId,
+        deviceSessionId,
+      );
+
+      return reply.send({
+        status: "revoked",
+        deviceSessionId,
+        closedConnections,
+      });
+    },
+  );
 }

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "../auth";
 import {
@@ -111,6 +112,38 @@ export default async function HomePage() {
             table, or raw terminal chrome in this flow.
           </p>
         </section>
+
+        <Link
+          href="/devices"
+          style={{
+            textDecoration: "none",
+            color: "inherit",
+            borderRadius: "24px",
+            border: "1px solid #D7CEC0",
+            background: "#E4DED4",
+            padding: "20px 24px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+          }}
+        >
+          <span style={{ fontSize: "14px", lineHeight: 1.35, fontWeight: 600 }}>
+            Device access
+          </span>
+          <span
+            style={{
+              fontSize: "20px",
+              lineHeight: 1.2,
+              fontWeight: 600,
+            }}
+          >
+            Manage paired devices
+          </span>
+          <span style={{ fontSize: "16px", lineHeight: 1.5, color: "#635541" }}>
+            Review active paired phones and revoke any device that should no longer
+            control this Codex account.
+          </span>
+        </Link>
 
         <section style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>

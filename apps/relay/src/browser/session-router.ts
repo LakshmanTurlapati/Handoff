@@ -285,6 +285,31 @@ export class SessionRouter {
     this.browserRegistry.unregister(browserId);
   }
 
+  revokeDeviceSession(userId: string, deviceSessionId: string): number {
+    const matchingBrowserCount =
+      this.browserRegistry.countByDeviceSessionId(deviceSessionId);
+    if (matchingBrowserCount === 0) {
+      return 0;
+    }
+
+    return this.browserRegistry.closeByDeviceSessionId(deviceSessionId, {
+      code: 1008,
+      reason: "device_session_revoked",
+      predicate: (entry) => entry.userId === userId,
+      beforeClose: (entry) => {
+        const event: LiveSessionEvent = {
+          kind: "session.ended",
+          sessionId: entry.sessionId,
+          cursor: this.sessionBuffer.getLatestCursor(entry.sessionId),
+          occurredAt: new Date().toISOString(),
+          reason: "device_session_revoked",
+        };
+
+        this.sendEventToSocket(entry.socket, event);
+      },
+    });
+  }
+
   private publishEvent(event: LiveSessionEvent): void {
     this.sessionBuffer.append(event);
     this.browserRegistry.broadcast(event.sessionId, JSON.stringify(event));
@@ -332,7 +357,7 @@ export class SessionRouter {
       }, BRIDGE_REQUEST_TIMEOUT_MS);
 
       this.pending.set(id, {
-        resolve,
+        resolve: (value) => resolve(value as T),
         reject,
         schema,
         timeout,
