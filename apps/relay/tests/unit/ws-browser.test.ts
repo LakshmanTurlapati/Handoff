@@ -1,6 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mintWsTicket } from "@codex-mobile/auth/ws-ticket";
 import { SessionCommandResponseSchema } from "@codex-mobile/protocol/live-session";
+
+const relayDbMocks = vi.hoisted(() => ({
+  appendAuditEvent: vi.fn(async () => undefined),
+  findDeviceSessionForPrincipal: vi.fn(),
+  upsertBridgeLease: vi.fn(async () => undefined),
+  refreshBridgeLease: vi.fn(async () => undefined),
+  markBridgeLeaseDisconnected: vi.fn(async () => undefined),
+  findActiveBridgeLeaseForUser: vi.fn(),
+  findActiveBridgeLeaseForSession: vi.fn(),
+  setAttachedSessionOnLease: vi.fn(async () => undefined),
+}));
+
+vi.mock("@codex-mobile/db", () => ({
+  appendAuditEvent: relayDbMocks.appendAuditEvent,
+  findDeviceSessionForPrincipal: relayDbMocks.findDeviceSessionForPrincipal,
+  upsertBridgeLease: relayDbMocks.upsertBridgeLease,
+  refreshBridgeLease: relayDbMocks.refreshBridgeLease,
+  markBridgeLeaseDisconnected: relayDbMocks.markBridgeLeaseDisconnected,
+  findActiveBridgeLeaseForUser: relayDbMocks.findActiveBridgeLeaseForUser,
+  findActiveBridgeLeaseForSession: relayDbMocks.findActiveBridgeLeaseForSession,
+  setAttachedSessionOnLease: relayDbMocks.setAttachedSessionOnLease,
+}));
+
 import { sessionRouter } from "../../src/browser/session-router.js";
 import { bridgeRegistry } from "../../src/bridge/bridge-registry.js";
 import { buildRelayServer } from "../../src/server.js";
@@ -26,11 +49,37 @@ async function mintTicket(userId: string, deviceSessionId: string): Promise<stri
   return minted.ticket;
 }
 
+function createLease(userId: string, sessionId: string | null = null) {
+  return {
+    id: `${userId}-lease`,
+    userId,
+    deviceSessionId: `${userId}-device`,
+    bridgeInstanceId: `${userId}-bridge`,
+    relayMachineId: "local-dev-machine",
+    relayRegion: "local",
+    attachedSessionId: sessionId,
+    leaseVersion: 1,
+    connectedAt: new Date("2026-04-18T07:30:00.000Z"),
+    lastHeartbeatAt: new Date("2026-04-18T07:30:00.000Z"),
+    expiresAt: new Date("2026-04-25T07:31:30.000Z"),
+    disconnectedAt: null,
+    replacedByLeaseId: null,
+  };
+}
+
 describe("relay ws-browser auth and routing", () => {
   beforeEach(() => {
     process.env.WS_TICKET_SECRET = WS_TICKET_SECRET;
     bridgeRegistry.clear();
     sessionRouter.clear();
+    relayDbMocks.appendAuditEvent.mockClear();
+    relayDbMocks.findDeviceSessionForPrincipal.mockReset();
+    relayDbMocks.upsertBridgeLease.mockClear();
+    relayDbMocks.refreshBridgeLease.mockClear();
+    relayDbMocks.markBridgeLeaseDisconnected.mockClear();
+    relayDbMocks.findActiveBridgeLeaseForUser.mockReset();
+    relayDbMocks.findActiveBridgeLeaseForSession.mockReset();
+    relayDbMocks.setAttachedSessionOnLease.mockClear();
   });
 
   afterEach(() => {
@@ -42,6 +91,17 @@ describe("relay ws-browser auth and routing", () => {
     const app = await buildRelayServer();
 
     try {
+      bridgeRegistry.register({
+        userId: "user-list",
+        deviceSessionId: "device-list",
+        bridgeInstanceId: "bridge-list",
+        relayMachineId: "local-dev-machine",
+        socket: createBridgeSocket() as never,
+        connectedAt: new Date("2026-04-18T07:30:00.000Z"),
+      });
+      relayDbMocks.findActiveBridgeLeaseForUser.mockResolvedValue(
+        createLease("user-list"),
+      );
       const ticket = await mintTicket("user-list", "device-list");
 
       const first = await app.inject({
@@ -81,6 +141,7 @@ describe("relay ws-browser auth and routing", () => {
         userId: "user-owner",
         deviceSessionId: "device-owner",
         bridgeInstanceId: "bridge-owner",
+        relayMachineId: "local-dev-machine",
         socket: ownerSocket as never,
         connectedAt: new Date("2026-04-18T07:30:00.000Z"),
       });
@@ -89,9 +150,16 @@ describe("relay ws-browser auth and routing", () => {
         userId: "user-other",
         deviceSessionId: "device-other",
         bridgeInstanceId: "bridge-other",
+        relayMachineId: "local-dev-machine",
         socket: otherSocket as never,
         connectedAt: new Date("2026-04-18T07:30:00.000Z"),
       });
+      relayDbMocks.findActiveBridgeLeaseForUser.mockImplementation(
+        async ({ userId }: { userId: string }) => createLease(userId),
+      );
+      relayDbMocks.findActiveBridgeLeaseForSession.mockResolvedValue(
+        createLease("user-owner", "session-alpha"),
+      );
 
       const ticket = await mintTicket("user-owner", "device-owner");
       const response = await app.inject({

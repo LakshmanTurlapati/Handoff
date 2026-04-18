@@ -5,10 +5,16 @@ import { SessionBuffer } from "../../src/browser/session-buffer.js";
 
 const relayAuditMocks = vi.hoisted(() => ({
   appendAuditEvent: vi.fn(),
+  findActiveBridgeLeaseForUser: vi.fn(),
+  findActiveBridgeLeaseForSession: vi.fn(),
+  setAttachedSessionOnLease: vi.fn(),
 }));
 
 vi.mock("@codex-mobile/db", () => ({
   appendAuditEvent: relayAuditMocks.appendAuditEvent,
+  findActiveBridgeLeaseForUser: relayAuditMocks.findActiveBridgeLeaseForUser,
+  findActiveBridgeLeaseForSession: relayAuditMocks.findActiveBridgeLeaseForSession,
+  setAttachedSessionOnLease: relayAuditMocks.setAttachedSessionOnLease,
 }));
 
 import { SessionRouter } from "../../src/browser/session-router.js";
@@ -35,6 +41,10 @@ describe("SessionRouter audit capture", () => {
       } as never,
       browserRegistry: new BrowserRegistry(),
       sessionBuffer: new SessionBuffer(),
+      ownershipService: {
+        recordAttachedSession: vi.fn(async () => undefined),
+        clearAttachedSession: vi.fn(async () => undefined),
+      } as never,
     });
 
     await router.handleBridgeMessage(
@@ -84,6 +94,10 @@ describe("SessionRouter audit capture", () => {
       } as never,
       browserRegistry: new BrowserRegistry(),
       sessionBuffer,
+      ownershipService: {
+        recordAttachedSession: vi.fn(async () => undefined),
+        clearAttachedSession: vi.fn(async () => undefined),
+      } as never,
     });
 
     sessionBuffer.append({
@@ -139,6 +153,10 @@ describe("SessionRouter audit capture", () => {
       } as never,
       browserRegistry,
       sessionBuffer: new SessionBuffer(),
+      ownershipService: {
+        recordAttachedSession: vi.fn(async () => undefined),
+        clearAttachedSession: vi.fn(async () => undefined),
+      } as never,
     });
 
     await router.handleBridgeMessage(

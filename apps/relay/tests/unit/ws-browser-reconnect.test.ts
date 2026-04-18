@@ -6,11 +6,23 @@ import { mintWsTicket } from "@codex-mobile/auth/ws-ticket";
 const relayDbMocks = vi.hoisted(() => ({
   appendAuditEvent: vi.fn(async () => undefined),
   findDeviceSessionForPrincipal: vi.fn(),
+  upsertBridgeLease: vi.fn(async () => undefined),
+  refreshBridgeLease: vi.fn(async () => undefined),
+  markBridgeLeaseDisconnected: vi.fn(async () => undefined),
+  findActiveBridgeLeaseForUser: vi.fn(),
+  findActiveBridgeLeaseForSession: vi.fn(),
+  setAttachedSessionOnLease: vi.fn(async () => undefined),
 }));
 
 vi.mock("@codex-mobile/db", () => ({
   appendAuditEvent: relayDbMocks.appendAuditEvent,
   findDeviceSessionForPrincipal: relayDbMocks.findDeviceSessionForPrincipal,
+  upsertBridgeLease: relayDbMocks.upsertBridgeLease,
+  refreshBridgeLease: relayDbMocks.refreshBridgeLease,
+  markBridgeLeaseDisconnected: relayDbMocks.markBridgeLeaseDisconnected,
+  findActiveBridgeLeaseForUser: relayDbMocks.findActiveBridgeLeaseForUser,
+  findActiveBridgeLeaseForSession: relayDbMocks.findActiveBridgeLeaseForSession,
+  setAttachedSessionOnLease: relayDbMocks.setAttachedSessionOnLease,
 }));
 
 import { sessionRouter } from "../../src/browser/session-router.js";
@@ -90,6 +102,24 @@ function waitForSessionEnded(socket: WebSocket): Promise<{ reason: string }> {
   });
 }
 
+function createLease(userId: string, sessionId: string | null = null) {
+  return {
+    id: `${userId}-lease`,
+    userId,
+    deviceSessionId: "device-alpha",
+    bridgeInstanceId: "bridge-alpha",
+    relayMachineId: "local-dev-machine",
+    relayRegion: "local",
+    attachedSessionId: sessionId,
+    leaseVersion: 1,
+    connectedAt: new Date("2026-04-18T07:30:00.000Z"),
+    lastHeartbeatAt: new Date("2026-04-18T07:30:00.000Z"),
+    expiresAt: new Date("2026-04-25T12:00:00.000Z"),
+    disconnectedAt: null,
+    replacedByLeaseId: null,
+  };
+}
+
 describe("relay ws-browser reconnect safety", () => {
   beforeEach(() => {
     process.env.WS_TICKET_SECRET = WS_TICKET_SECRET;
@@ -103,6 +133,18 @@ describe("relay ws-browser reconnect safety", () => {
       revokedAt: null,
       expiresAt: new Date("2026-04-25T12:00:00.000Z"),
     });
+    relayDbMocks.upsertBridgeLease.mockClear();
+    relayDbMocks.refreshBridgeLease.mockClear();
+    relayDbMocks.markBridgeLeaseDisconnected.mockClear();
+    relayDbMocks.findActiveBridgeLeaseForUser.mockReset();
+    relayDbMocks.findActiveBridgeLeaseForSession.mockReset();
+    relayDbMocks.setAttachedSessionOnLease.mockClear();
+    relayDbMocks.findActiveBridgeLeaseForUser.mockResolvedValue(
+      createLease("user-alpha"),
+    );
+    relayDbMocks.findActiveBridgeLeaseForSession.mockResolvedValue(
+      createLease("user-alpha", "session-alpha"),
+    );
   });
 
   afterEach(() => {

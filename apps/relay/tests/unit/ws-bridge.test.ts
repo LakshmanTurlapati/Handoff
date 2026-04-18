@@ -2,6 +2,29 @@ import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { mintWsTicket } from "@codex-mobile/auth/ws-ticket";
+
+const relayDbMocks = vi.hoisted(() => ({
+  appendAuditEvent: vi.fn(async () => undefined),
+  findDeviceSessionForPrincipal: vi.fn(),
+  upsertBridgeLease: vi.fn(async () => undefined),
+  refreshBridgeLease: vi.fn(async () => undefined),
+  markBridgeLeaseDisconnected: vi.fn(async () => undefined),
+  findActiveBridgeLeaseForUser: vi.fn(),
+  findActiveBridgeLeaseForSession: vi.fn(),
+  setAttachedSessionOnLease: vi.fn(async () => undefined),
+}));
+
+vi.mock("@codex-mobile/db", () => ({
+  appendAuditEvent: relayDbMocks.appendAuditEvent,
+  findDeviceSessionForPrincipal: relayDbMocks.findDeviceSessionForPrincipal,
+  upsertBridgeLease: relayDbMocks.upsertBridgeLease,
+  refreshBridgeLease: relayDbMocks.refreshBridgeLease,
+  markBridgeLeaseDisconnected: relayDbMocks.markBridgeLeaseDisconnected,
+  findActiveBridgeLeaseForUser: relayDbMocks.findActiveBridgeLeaseForUser,
+  findActiveBridgeLeaseForSession: relayDbMocks.findActiveBridgeLeaseForSession,
+  setAttachedSessionOnLease: relayDbMocks.setAttachedSessionOnLease,
+}));
+
 import { sessionRouter } from "../../src/browser/session-router.js";
 import { bridgeRegistry } from "../../src/bridge/bridge-registry.js";
 import { buildRelayServer } from "../../src/server.js";
@@ -42,6 +65,29 @@ describe("relay ws-bridge route", () => {
     process.env.WS_TICKET_SECRET = WS_TICKET_SECRET;
     bridgeRegistry.clear();
     sessionRouter.clear();
+    relayDbMocks.appendAuditEvent.mockClear();
+    relayDbMocks.findDeviceSessionForPrincipal.mockReset();
+    relayDbMocks.upsertBridgeLease.mockClear();
+    relayDbMocks.refreshBridgeLease.mockClear();
+    relayDbMocks.markBridgeLeaseDisconnected.mockClear();
+    relayDbMocks.findActiveBridgeLeaseForUser.mockReset();
+    relayDbMocks.findActiveBridgeLeaseForSession.mockReset();
+    relayDbMocks.setAttachedSessionOnLease.mockClear();
+    relayDbMocks.findActiveBridgeLeaseForUser.mockResolvedValue({
+      id: "lease-1",
+      userId: "user-bridge",
+      deviceSessionId: "device-bridge",
+      bridgeInstanceId: "bridge-alpha",
+      relayMachineId: "local-dev-machine",
+      relayRegion: "local",
+      attachedSessionId: null,
+      leaseVersion: 1,
+      connectedAt: new Date("2026-04-18T07:30:00.000Z"),
+      lastHeartbeatAt: new Date("2026-04-18T07:30:00.000Z"),
+      expiresAt: new Date("2026-04-18T07:31:30.000Z"),
+      disconnectedAt: null,
+      replacedByLeaseId: null,
+    });
   });
 
   afterEach(() => {
@@ -75,6 +121,13 @@ describe("relay ws-bridge route", () => {
       expect(bridgeRegistry.get("user-bridge")?.bridgeInstanceId).toBe(
         "bridge-alpha",
       );
+      expect(relayDbMocks.upsertBridgeLease).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "user-bridge",
+          bridgeInstanceId: "bridge-alpha",
+          leaseVersion: 1,
+        }),
+      );
 
       socket.send(
         JSON.stringify({
@@ -100,6 +153,10 @@ describe("relay ws-bridge route", () => {
       });
       await flush();
       expect(bridgeRegistry.has("user-bridge")).toBe(false);
+      expect(relayDbMocks.markBridgeLeaseDisconnected).toHaveBeenCalledWith({
+        userId: "user-bridge",
+        bridgeInstanceId: "bridge-alpha",
+      });
     } finally {
       routerSpy.mockRestore();
       await app.close();
