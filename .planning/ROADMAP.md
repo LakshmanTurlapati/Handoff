@@ -71,7 +71,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 02-01: Build local bridge daemon lifecycle and relay registration
+- [x] 02-01: Build local bridge daemon lifecycle and relay registration
 - [ ] 02-02: Integrate local `codex app-server` and normalize core thread/turn/session events
 - [ ] 02-03: Implement session listing, attach/resume behavior, and local failure handling
 
@@ -135,7 +135,7 @@ Phases execute in numeric order: 1 -> 01.1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Identity & Pairing Foundation | 7/7 | Complete | - |
 | 01.1 Browser device session claim flow | 2/2 | Complete    | 2026-04-12 |
-| 2. Bridge & Codex Session Adapter | 0/3 | Not started | - |
+| 2. Bridge & Codex Session Adapter | 1/3 | In Progress | - |
 | 3. Live Remote UI & Control | 3/3 | Complete | 2026-04-18 |
 | 4. Approval, Audit & Device Safety | 0/3 | Not started | - |
 | 5. Multi-Instance Routing & Production Hardening | 0/3 | Not started | - |
