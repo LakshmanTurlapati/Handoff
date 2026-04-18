@@ -2,6 +2,7 @@ import type { LiveActivity, LiveActionOption } from "../../lib/live-session/sess
 
 interface ActivityCardProps {
   activity: LiveActivity;
+  onAction?: (actionId: string) => void;
 }
 
 const CARD_TONES: Record<
@@ -44,7 +45,10 @@ const CARD_TONES: Record<
   },
 };
 
-function renderActions(actions: LiveActionOption[] | undefined) {
+function renderActions(
+  actions: LiveActionOption[] | undefined,
+  onAction?: (actionId: string) => void,
+) {
   if (!actions || actions.length === 0) {
     return null;
   }
@@ -66,8 +70,10 @@ function renderActions(actions: LiveActionOption[] | undefined) {
               : { background: "#F6F3ED", color: "#3F372B", border: "#B8AE9F" };
 
         return (
-          <span
+          <button
             key={action.id}
+            type="button"
+            onClick={() => onAction?.(action.id)}
             style={{
               minHeight: "44px",
               padding: "10px 14px",
@@ -80,20 +86,20 @@ function renderActions(actions: LiveActionOption[] | undefined) {
               fontWeight: 600,
               display: "inline-flex",
               alignItems: "center",
+              justifyContent: "center",
             }}
           >
             {action.label}
-          </span>
+          </button>
         );
       })}
     </div>
   );
 }
 
-export function ActivityCard({ activity }: ActivityCardProps) {
+export function ActivityCard({ activity, onAction }: ActivityCardProps) {
   const tone = CARD_TONES[activity.kind];
   const errorActions = activity.kind === "error" ? activity.actions : undefined;
-  const approvalActions = activity.kind === "approval" ? activity.actions : undefined;
 
   return (
     <article
@@ -161,7 +167,7 @@ export function ActivityCard({ activity }: ActivityCardProps) {
         </code>
       ) : null}
 
-      {renderActions(approvalActions ?? errorActions)}
+      {renderActions(errorActions, onAction)}
     </article>
   );
 }

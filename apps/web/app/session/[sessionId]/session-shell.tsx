@@ -1,13 +1,29 @@
 "use client";
 
-import { useReducer } from "react";
+import { startTransition, useEffect, useEffectEvent, useReducer, useRef } from "react";
 import { Composer } from "../../../components/session/composer";
+import { JumpToLive } from "../../../components/session/jump-to-live";
+import { ReconnectBanner } from "../../../components/session/reconnect-banner";
 import { TurnCard } from "../../../components/session/turn-card";
 import {
   createInitialLiveSessionState,
   liveSessionReducer,
 } from "../../../lib/live-session/reducer";
-import type { LiveConnectionState } from "../../../lib/live-session/session-model";
+import {
+  connectLiveSession,
+  sendSessionCommand,
+  type LiveSessionTransport,
+} from "../../../lib/live-session/transport";
+import type {
+  FollowMode,
+  LiveActionOption,
+  LiveActivity,
+  LiveConnectionState,
+} from "../../../lib/live-session/session-model";
+import type {
+  LiveSessionEvent,
+  SessionCommand,
+} from "@codex-mobile/protocol/live-session";
 
 interface SessionShellProps {
   sessionId: string;
@@ -18,6 +34,8 @@ export function SessionShell({
   sessionId,
   initialConnection,
 }: SessionShellProps) {
+  const transportRef = useRef<LiveSessionTransport | null>(null);
+  const liveAnchorRef = useRef<HTMLDivElement | null>(null);
   const [state, dispatch] = useReducer(
     liveSessionReducer,
     createInitialLiveSessionState(
@@ -26,10 +44,17 @@ export function SessionShell({
     ),
   );
 
-  const handleLocalMessage = (
-    kind: "assistant" | "system",
+  const appendLocalActivity = (
+    kind: "assistant" | "system" | "error",
     title: string,
     preview: string,
+    options?: {
+      detail?: string;
+      status?: "pending" | "running" | "completed" | "failed";
+      actions?: LiveActionOption[];
+      stateLabel?: string;
+      actorDetail?: string;
+    },
   ) => {
     if (!state.liveTurnId) return;
 
@@ -41,21 +66,182 @@ export function SessionShell({
         turnId: state.liveTurnId,
         title,
         preview,
-        detail:
-          kind === "assistant"
-            ? "The live transport is not attached yet, so this uses local fixture state."
-            : undefined,
-        status: "running",
+        detail: options?.detail,
+        status: options?.status ?? "running",
         createdAt: new Date().toISOString(),
+        ...(kind === "error" ? { actions: options?.actions } : {}),
       },
-      stateLabel: kind === "assistant" ? "Running bash" : "System update",
+      stateLabel: options?.stateLabel ?? (kind === "assistant" ? "Running bash" : "System update"),
       actorDetail:
-        kind === "assistant"
+        options?.actorDetail ??
+        (kind === "assistant"
           ? "Assistant drafted a new mobile follow-up"
-          : "Local session shell updated its pending state",
+          : kind === "error"
+            ? "The live transport surfaced a recoverable error"
+            : "Local session shell updated its pending state"),
       isLive: true,
     });
   };
+
+  const applyTransportEvent = useEffectEvent((event: LiveSessionEvent) => {
+    startTransition(() => {
+      switch (event.kind) {
+        case "session.history":
+          dispatch({
+            type: "hydrate_history",
+            turns: event.turns,
+            connection: "connected",
+          });
+          break;
+        case "activity.appended":
+          dispatch({
+            type: "append_activity",
+            activity: event.activity,
+            stateLabel: event.stateLabel,
+            actorDetail: event.actorDetail,
+            isLive: event.isLive,
+          });
+          break;
+        case "interrupt.finished":
+          dispatch({
+            type: "interrupt_finished",
+            stateLabel: event.stateLabel,
+            actorDetail: event.actorDetail,
+          });
+          break;
+        case "session.reconnected":
+          dispatch({
+            type: "mark_reconnected",
+            activity: event.activity,
+          });
+          break;
+        case "session.error":
+          appendLocalActivity(
+            "error",
+            "Live transport error",
+            event.message,
+            {
+              status: "failed",
+              actions: [
+                { id: "retry", label: "Retry", variant: "accent" },
+                { id: "context", label: "Context" },
+              ],
+              stateLabel: "Connection issue",
+              actorDetail: event.code,
+            },
+          );
+          break;
+        case "session.ended":
+          dispatch({ type: "set_connection", connection: "disconnected" });
+          break;
+        case "session.attached":
+          dispatch({ type: "set_connection", connection: "connected" });
+          break;
+      }
+    });
+  });
+
+  const handleConnectionChange = useEffectEvent((connection: LiveConnectionState) => {
+    startTransition(() => {
+      dispatch({ type: "set_connection", connection });
+    });
+  });
+
+  const handleTransportError = useEffectEvent((error: Error) => {
+    startTransition(() => {
+      appendLocalActivity(
+        "error",
+        "Live transport error",
+        error.message,
+        {
+          status: "failed",
+          actions: [
+            { id: "retry", label: "Retry", variant: "accent" },
+            { id: "context", label: "Context" },
+          ],
+          stateLabel: "Connection issue",
+        },
+      );
+    });
+  });
+
+  useEffect(() => {
+    let disposed = false;
+
+    void connectLiveSession(sessionId, {
+      onConnectionChange: handleConnectionChange,
+      onEvent: applyTransportEvent,
+      onTransportError: handleTransportError,
+    }).then((transport) => {
+      if (disposed) {
+        transport.disconnect();
+        return;
+      }
+
+      transportRef.current = transport;
+    });
+
+    return () => {
+      disposed = true;
+      transportRef.current?.disconnect();
+      transportRef.current = null;
+    };
+  }, [applyTransportEvent, handleConnectionChange, handleTransportError, sessionId]);
+
+  const syncFollowMode = useEffectEvent(() => {
+    const nearBottom =
+      window.scrollY + window.innerHeight >=
+      document.documentElement.scrollHeight - 160;
+    const nextMode: FollowMode = nearBottom ? "live" : "paused";
+
+    if (nextMode !== state.followMode) {
+      startTransition(() => {
+        dispatch({ type: "set_follow_mode", followMode: nextMode });
+      });
+    }
+  });
+
+  useEffect(() => {
+    syncFollowMode();
+    window.addEventListener("scroll", syncFollowMode, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", syncFollowMode);
+    };
+  }, [syncFollowMode]);
+
+  useEffect(() => {
+    if (state.followMode !== "live") return;
+    liveAnchorRef.current?.scrollIntoView({ block: "end" });
+  }, [state.connection, state.followMode, state.turns]);
+
+  const dispatchCommand = useEffectEvent(async (command: SessionCommand) => {
+    if (transportRef.current) {
+      await transportRef.current.send(command);
+      return;
+    }
+
+    await sendSessionCommand(sessionId, command);
+  });
+
+  const handleRetryAction = useEffectEvent(async (activity: LiveActivity, actionId: string) => {
+    if (activity.kind !== "error") return;
+
+    if (actionId === "retry") {
+      handleConnectionChange("reconnecting");
+      return;
+    }
+
+    appendLocalActivity(
+      "system",
+      "Context note",
+      `Captured extra context for ${activity.title}.`,
+      {
+        status: "completed",
+        detail: activity.detail,
+        stateLabel: "Context captured",
+      },
+    );
+  });
 
   return (
     <main
@@ -129,28 +315,19 @@ export function SessionShell({
             Auto-follow: {state.followMode === "live" ? "on" : "paused"}
           </span>
           {state.followMode === "paused" ? (
-            <button
-              type="button"
-              onClick={() =>
-                dispatch({ type: "set_follow_mode", followMode: "live" })
-              }
-              style={{
-                alignSelf: "flex-start",
-                minHeight: "44px",
-                borderRadius: "999px",
-                border: "1px solid #0F766E",
-                background: "#0F766E",
-                color: "#F6F3ED",
-                padding: "10px 16px",
-                fontSize: "14px",
-                lineHeight: 1.35,
-                fontWeight: 600,
+            <JumpToLive
+              onClick={() => {
+                dispatch({ type: "set_follow_mode", followMode: "live" });
+                liveAnchorRef.current?.scrollIntoView({
+                  block: "end",
+                  behavior: "smooth",
+                });
               }}
-            >
-              Jump to live
-            </button>
+            />
           ) : null}
         </section>
+
+        {state.connection === "reconnecting" ? <ReconnectBanner /> : null}
 
         <section
           aria-label="Timeline"
@@ -162,29 +339,127 @@ export function SessionShell({
           }}
         >
           {state.turns.map((turn) => (
-            <TurnCard key={turn.turnId} turn={turn} />
+            <TurnCard
+              key={turn.turnId}
+              turn={turn}
+              onApprovalDecision={(requestId, decision) => {
+                void dispatchCommand({
+                  kind: "approval",
+                  requestId,
+                  decision,
+                }).then(
+                  () => {
+                    appendLocalActivity(
+                      "system",
+                      "Approval decision sent",
+                      `Sent ${decision} for request ${requestId}.`,
+                      {
+                        status: "completed",
+                        stateLabel: "Approval updated",
+                      },
+                    );
+                  },
+                  (error) => {
+                    appendLocalActivity(
+                      "error",
+                      "Approval action failed",
+                      error instanceof Error ? error.message : "Approval action failed.",
+                      {
+                        status: "failed",
+                        actions: [
+                          { id: "retry", label: "Retry", variant: "accent" },
+                          { id: "context", label: "Context" },
+                        ],
+                      },
+                    );
+                  },
+                );
+              }}
+              onActivityAction={(activity, actionId) => {
+                void handleRetryAction(activity, actionId);
+              }}
+            />
           ))}
+          <div ref={liveAnchorRef} />
         </section>
 
         <Composer
           pendingInterrupt={state.pendingInterrupt}
           onSendPrompt={(text) => {
-            handleLocalMessage(
-              "assistant",
-              "Assistant update",
-              `Queued a fresh prompt: ${text}`,
+            appendLocalActivity(
+              "system",
+              "Prompt queued",
+              `Send Prompt: ${text}`,
+              {
+                status: "pending",
+                detail: "The relay is forwarding this prompt to the connected bridge.",
+                stateLabel: "Prompt queued",
+              },
             );
+            void dispatchCommand({ kind: "prompt", text }).catch((error) => {
+              appendLocalActivity(
+                "error",
+                "Prompt send failed",
+                error instanceof Error ? error.message : "Prompt send failed.",
+                {
+                  status: "failed",
+                  actions: [
+                    { id: "retry", label: "Retry", variant: "accent" },
+                    { id: "context", label: "Context" },
+                  ],
+                },
+              );
+            });
           }}
           onSteer={(text) => {
-            dispatch({ type: "set_follow_mode", followMode: "paused" });
-            handleLocalMessage(
+            appendLocalActivity(
               "system",
               "Steering note",
-              `Jump to live is ready because the operator stepped back to review: ${text}`,
+              `Steer: ${text}`,
+              {
+                status: "pending",
+                detail: "Steer stays visible in the composer row while the live turn continues.",
+                stateLabel: "Steering",
+              },
             );
+            void dispatchCommand({ kind: "steer", text }).catch((error) => {
+              appendLocalActivity(
+                "error",
+                "Steer send failed",
+                error instanceof Error ? error.message : "Steer send failed.",
+                {
+                  status: "failed",
+                  actions: [
+                    { id: "retry", label: "Retry", variant: "accent" },
+                    { id: "context", label: "Context" },
+                  ],
+                },
+              );
+            });
           }}
           onInterrupt={() => {
             dispatch({ type: "request_interrupt" });
+            void dispatchCommand({ kind: "interrupt", reason: "user_request" }).catch(
+              (error) => {
+                dispatch({
+                  type: "interrupt_finished",
+                  stateLabel: "Running bash",
+                  actorDetail: "Interrupt request could not reach the relay",
+                });
+                appendLocalActivity(
+                  "error",
+                  "Interrupt failed",
+                  error instanceof Error ? error.message : "Interrupt failed.",
+                  {
+                    status: "failed",
+                    actions: [
+                      { id: "retry", label: "Retry", variant: "accent" },
+                      { id: "context", label: "Context" },
+                    ],
+                  },
+                );
+              },
+            );
           }}
         />
       </div>

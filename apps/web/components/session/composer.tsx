@@ -56,6 +56,8 @@ export function Composer({
         style={{
           width: "100%",
           resize: "none",
+          overflowY: "auto",
+          maxHeight: "160px",
           borderRadius: "18px",
           border: "1px solid #CBBEAD",
           padding: "16px",
@@ -105,7 +107,7 @@ export function Composer({
             minHeight: "44px",
             borderRadius: "999px",
             border: "1px solid #B8AE9F",
-            background: "#F6F3ED",
+            background: hasValue ? "#F6F3ED" : "#EEE7DC",
             color: "#3F372B",
             fontSize: "14px",
             lineHeight: 1.35,

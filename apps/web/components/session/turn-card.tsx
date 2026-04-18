@@ -1,11 +1,25 @@
+import { ApprovalCard } from "./approval-card";
 import { ActivityCard } from "./activity-card";
-import type { LiveTurn } from "../../lib/live-session/session-model";
+import type {
+  ApprovalActivity,
+  LiveActivity,
+  LiveTurn,
+} from "../../lib/live-session/session-model";
 
 interface TurnCardProps {
   turn: LiveTurn;
+  onApprovalDecision?: (
+    requestId: string,
+    decision: "approved" | "denied" | "abort",
+  ) => void;
+  onActivityAction?: (activity: LiveActivity, actionId: string) => void;
 }
 
-export function TurnCard({ turn }: TurnCardProps) {
+export function TurnCard({
+  turn,
+  onApprovalDecision,
+  onActivityAction,
+}: TurnCardProps) {
   return (
     <section
       aria-label={`Turn ${turn.turnId}`}
@@ -96,9 +110,21 @@ export function TurnCard({ turn }: TurnCardProps) {
             </div>
           ) : null}
 
-          {turn.activities.map((activity) => (
-            <ActivityCard key={activity.activityId} activity={activity} />
-          ))}
+          {turn.activities.map((activity) =>
+            activity.kind === "approval" ? (
+              <ApprovalCard
+                key={activity.activityId}
+                activity={activity as ApprovalActivity}
+                onDecision={onApprovalDecision}
+              />
+            ) : (
+              <ActivityCard
+                key={activity.activityId}
+                activity={activity}
+                onAction={(actionId) => onActivityAction?.(activity, actionId)}
+              />
+            ),
+          )}
         </div>
       )}
     </section>
