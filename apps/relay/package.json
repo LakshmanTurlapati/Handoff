@@ -17,6 +17,7 @@
     "@codex-mobile/auth": "0.1.0",
     "@codex-mobile/db": "0.1.0",
     "@codex-mobile/protocol": "0.1.0",
+    "@fastify/websocket": "11.2.0",
     "fastify": "5.8.4",
     "jose": "6.2.2",
     "ws": "8.20.0",

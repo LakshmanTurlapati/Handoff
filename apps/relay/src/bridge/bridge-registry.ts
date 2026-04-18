@@ -43,4 +43,10 @@ export class BridgeRegistry {
   get size(): number {
     return this.bridges.size;
   }
+
+  clear(): void {
+    this.bridges.clear();
+  }
 }
+
+export const bridgeRegistry = new BridgeRegistry();

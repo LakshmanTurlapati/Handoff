@@ -1,23 +1,17 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import websocket from "@fastify/websocket";
 import { verifyWsTicket } from "@codex-mobile/auth/ws-ticket";
-import { BridgeRegistry, type BridgeEntry } from "../bridge/bridge-registry.js";
+import { bridgeRegistry, type BridgeEntry } from "../bridge/bridge-registry.js";
 import {
   BridgeRegisterParamsSchema,
   JsonRpcNotificationSchema,
 } from "@codex-mobile/protocol";
+import { sessionRouter } from "../browser/session-router.js";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
-
-// Shared bridge registry -- single instance for the relay process
-export const bridgeRegistry = new BridgeRegistry();
 
 export async function registerBridgeWsRoutes(
   app: FastifyInstance,
 ): Promise<void> {
-  // Register @fastify/websocket plugin
-  await app.register(websocket);
-
   // ws-ticket secret from environment
   const wsTicketSecret = new TextEncoder().encode(
     process.env.WS_TICKET_SECRET ?? "dev-ws-ticket-secret-change-me",
@@ -84,7 +78,7 @@ export async function registerBridgeWsRoutes(
           }
         }
 
-        // Other messages will be routed in Plan 02-03
+        void sessionRouter.handleBridgeMessage(claims.userId, raw);
       } catch {
         // Ignore malformed messages
       }

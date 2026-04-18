@@ -18,8 +18,10 @@
  *     tests has no side effects.
  */
 import Fastify, { type FastifyInstance } from "fastify";
+import websocket from "@fastify/websocket";
 import { registerHealthRoutes } from "./routes/health";
 import { registerBridgeWsRoutes } from "./routes/ws-bridge.js";
+import { registerBrowserWsRoutes } from "./routes/ws-browser.js";
 
 /** Options accepted by {@link buildRelayServer}. */
 export interface BuildRelayServerOptions {
@@ -42,8 +44,10 @@ export async function buildRelayServer(
     disableRequestLogging: true,
   });
 
+  await app.register(websocket);
   registerHealthRoutes(app);
   await registerBridgeWsRoutes(app);
+  await registerBrowserWsRoutes(app);
 
   return app;
 }
@@ -62,7 +66,7 @@ export interface StartRelayServerOptions extends BuildRelayServerOptions {
 export async function startRelayServer(
   options: StartRelayServerOptions = {},
 ): Promise<FastifyInstance> {
-  const app = buildRelayServer({ logger: options.logger ?? true });
+  const app = await buildRelayServer({ logger: options.logger ?? true });
   const host = options.host ?? process.env.RELAY_HOST ?? "0.0.0.0";
   const port = options.port ?? Number(process.env.PORT ?? 8080);
   await app.listen({ host, port });
