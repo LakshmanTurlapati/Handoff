@@ -10,6 +10,10 @@ const relayDbMocks = vi.hoisted(() => ({
   markBridgeLeaseDisconnected: vi.fn(async () => undefined),
   findActiveBridgeLeaseForUser: vi.fn(),
   findActiveBridgeLeaseForSession: vi.fn(),
+  getRelayLeaseCountsForMachine: vi.fn(async () => ({
+    activeLeaseCount: 0,
+    staleLeaseCount: 0,
+  })),
   setAttachedSessionOnLease: vi.fn(async () => undefined),
 }));
 
@@ -21,11 +25,13 @@ vi.mock("@codex-mobile/db", () => ({
   markBridgeLeaseDisconnected: relayDbMocks.markBridgeLeaseDisconnected,
   findActiveBridgeLeaseForUser: relayDbMocks.findActiveBridgeLeaseForUser,
   findActiveBridgeLeaseForSession: relayDbMocks.findActiveBridgeLeaseForSession,
+  getRelayLeaseCountsForMachine: relayDbMocks.getRelayLeaseCountsForMachine,
   setAttachedSessionOnLease: relayDbMocks.setAttachedSessionOnLease,
 }));
 
 import { sessionRouter } from "../../src/browser/session-router.js";
 import { bridgeRegistry } from "../../src/bridge/bridge-registry.js";
+import { resetRelayOpsState } from "../../src/routes/ops.js";
 import { buildRelayServer } from "../../src/server.js";
 
 const WS_TICKET_SECRET = "relay-test-secret-with-at-least-32-bytes";
@@ -72,6 +78,7 @@ describe("relay ws-browser auth and routing", () => {
     process.env.WS_TICKET_SECRET = WS_TICKET_SECRET;
     bridgeRegistry.clear();
     sessionRouter.clear();
+    resetRelayOpsState();
     relayDbMocks.appendAuditEvent.mockClear();
     relayDbMocks.findDeviceSessionForPrincipal.mockReset();
     relayDbMocks.upsertBridgeLease.mockClear();
@@ -79,12 +86,14 @@ describe("relay ws-browser auth and routing", () => {
     relayDbMocks.markBridgeLeaseDisconnected.mockClear();
     relayDbMocks.findActiveBridgeLeaseForUser.mockReset();
     relayDbMocks.findActiveBridgeLeaseForSession.mockReset();
+    relayDbMocks.getRelayLeaseCountsForMachine.mockClear();
     relayDbMocks.setAttachedSessionOnLease.mockClear();
   });
 
   afterEach(() => {
     bridgeRegistry.clear();
     sessionRouter.clear();
+    resetRelayOpsState();
   });
 
   it("rejects a reused ticket on the internal browser session listing route", async () => {

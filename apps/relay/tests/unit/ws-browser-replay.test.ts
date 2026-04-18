@@ -11,6 +11,10 @@ const relayDbMocks = vi.hoisted(() => ({
   markBridgeLeaseDisconnected: vi.fn(async () => undefined),
   findActiveBridgeLeaseForUser: vi.fn(),
   findActiveBridgeLeaseForSession: vi.fn(),
+  getRelayLeaseCountsForMachine: vi.fn(async () => ({
+    activeLeaseCount: 0,
+    staleLeaseCount: 0,
+  })),
   setAttachedSessionOnLease: vi.fn(async () => undefined),
 }));
 
@@ -22,11 +26,13 @@ vi.mock("@codex-mobile/db", () => ({
   markBridgeLeaseDisconnected: relayDbMocks.markBridgeLeaseDisconnected,
   findActiveBridgeLeaseForUser: relayDbMocks.findActiveBridgeLeaseForUser,
   findActiveBridgeLeaseForSession: relayDbMocks.findActiveBridgeLeaseForSession,
+  getRelayLeaseCountsForMachine: relayDbMocks.getRelayLeaseCountsForMachine,
   setAttachedSessionOnLease: relayDbMocks.setAttachedSessionOnLease,
 }));
 
 import { sessionRouter } from "../../src/browser/session-router.js";
 import { bridgeRegistry } from "../../src/bridge/bridge-registry.js";
+import { resetRelayOpsState } from "../../src/routes/ops.js";
 import { buildRelayServer } from "../../src/server.js";
 
 const BROWSER_PROTOCOL = "codex-mobile.live.v1";
@@ -104,9 +110,11 @@ describe("relay ws-browser replay routing", () => {
     process.env.WS_TICKET_SECRET = WS_TICKET_SECRET;
     bridgeRegistry.clear();
     sessionRouter.clear();
+    resetRelayOpsState();
     relayDbMocks.findDeviceSessionForPrincipal.mockReset();
     relayDbMocks.findActiveBridgeLeaseForUser.mockReset();
     relayDbMocks.findActiveBridgeLeaseForSession.mockReset();
+    relayDbMocks.getRelayLeaseCountsForMachine.mockClear();
     relayDbMocks.findActiveBridgeLeaseForUser.mockResolvedValue(
       createRemoteLease("user-owner"),
     );
@@ -118,6 +126,7 @@ describe("relay ws-browser replay routing", () => {
   afterEach(() => {
     bridgeRegistry.clear();
     sessionRouter.clear();
+    resetRelayOpsState();
   });
 
   it("replays wrong-instance session listing requests to the owning Fly machine", async () => {

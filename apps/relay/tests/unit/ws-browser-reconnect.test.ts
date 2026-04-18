@@ -11,6 +11,10 @@ const relayDbMocks = vi.hoisted(() => ({
   markBridgeLeaseDisconnected: vi.fn(async () => undefined),
   findActiveBridgeLeaseForUser: vi.fn(),
   findActiveBridgeLeaseForSession: vi.fn(),
+  getRelayLeaseCountsForMachine: vi.fn(async () => ({
+    activeLeaseCount: 0,
+    staleLeaseCount: 0,
+  })),
   setAttachedSessionOnLease: vi.fn(async () => undefined),
 }));
 
@@ -22,11 +26,17 @@ vi.mock("@codex-mobile/db", () => ({
   markBridgeLeaseDisconnected: relayDbMocks.markBridgeLeaseDisconnected,
   findActiveBridgeLeaseForUser: relayDbMocks.findActiveBridgeLeaseForUser,
   findActiveBridgeLeaseForSession: relayDbMocks.findActiveBridgeLeaseForSession,
+  getRelayLeaseCountsForMachine: relayDbMocks.getRelayLeaseCountsForMachine,
   setAttachedSessionOnLease: relayDbMocks.setAttachedSessionOnLease,
 }));
 
+import { browserRegistry } from "../../src/browser/browser-registry.js";
 import { sessionRouter } from "../../src/browser/session-router.js";
 import { bridgeRegistry } from "../../src/bridge/bridge-registry.js";
+import {
+  handleRelayOps,
+  resetRelayOpsState,
+} from "../../src/routes/ops.js";
 import { buildRelayServer } from "../../src/server.js";
 
 const BROWSER_PROTOCOL = "codex-mobile.live.v1";
@@ -123,8 +133,10 @@ function createLease(userId: string, sessionId: string | null = null) {
 describe("relay ws-browser reconnect safety", () => {
   beforeEach(() => {
     process.env.WS_TICKET_SECRET = WS_TICKET_SECRET;
+    browserRegistry.clear();
     bridgeRegistry.clear();
     sessionRouter.clear();
+    resetRelayOpsState();
     relayDbMocks.appendAuditEvent.mockClear();
     relayDbMocks.findDeviceSessionForPrincipal.mockResolvedValue({
       id: "device-alpha",
@@ -138,6 +150,7 @@ describe("relay ws-browser reconnect safety", () => {
     relayDbMocks.markBridgeLeaseDisconnected.mockClear();
     relayDbMocks.findActiveBridgeLeaseForUser.mockReset();
     relayDbMocks.findActiveBridgeLeaseForSession.mockReset();
+    relayDbMocks.getRelayLeaseCountsForMachine.mockClear();
     relayDbMocks.setAttachedSessionOnLease.mockClear();
     relayDbMocks.findActiveBridgeLeaseForUser.mockResolvedValue(
       createLease("user-alpha"),
@@ -148,8 +161,10 @@ describe("relay ws-browser reconnect safety", () => {
   });
 
   afterEach(() => {
+    browserRegistry.clear();
     bridgeRegistry.clear();
     sessionRouter.clear();
+    resetRelayOpsState();
   });
 
   it("rejects device_session_revoked during browser reconnect", async () => {
@@ -241,12 +256,69 @@ describe("relay ws-browser reconnect safety", () => {
 
       const ended = await endedPromise;
       const closed = await closePromise;
+      const ops = await handleRelayOps({
+        getRelayLeaseCountsForMachine: async () => ({
+          activeLeaseCount: 1,
+          staleLeaseCount: 0,
+        }),
+      });
 
       expect(ended.reason).toBe("bridge_unavailable");
       expect(closed.code).toBe(1011);
       expect(closed.reason).toBe("bridge_unavailable");
+      expect(ops.recentDisconnectReasons[0]).toBe("bridge_unavailable");
     } finally {
       await app.close();
     }
+  });
+
+  it("surfaces backpressure disconnect reasons in relay ops state", async () => {
+    function send(
+      _message: string,
+      _callback: (error?: Error) => void,
+    ): void {
+      // Intentionally never resolve the callback so pending queue pressure accumulates.
+    }
+
+    const slowSocket = {
+      OPEN: 1,
+      readyState: 1,
+      send,
+      close: vi.fn(),
+    } as never;
+
+    browserRegistry.register({
+      userId: "user-alpha",
+      deviceSessionId: "device-alpha",
+      sessionId: "session-alpha",
+      socket: slowSocket,
+      connectedAt: new Date("2026-04-18T12:00:00.000Z"),
+    });
+
+    for (let index = 0; index < 51; index += 1) {
+      browserRegistry.broadcast(
+        "session-alpha",
+        JSON.stringify({ kind: "activity.appended", cursor: index }),
+        { priority: "important" },
+      );
+    }
+
+    for (let index = 0; index < 26; index += 1) {
+      browserRegistry.broadcast(
+        "session-alpha",
+        JSON.stringify({ kind: "session.history", cursor: index }),
+        { priority: "best_effort" },
+      );
+    }
+
+    const ops = await handleRelayOps({
+      getRelayLeaseCountsForMachine: async () => ({
+        activeLeaseCount: 1,
+        staleLeaseCount: 0,
+      }),
+    });
+
+    expect(slowSocket.close).toHaveBeenCalledWith(1013, "backpressure");
+    expect(ops.recentDisconnectReasons[0]).toBe("backpressure");
   });
 });
