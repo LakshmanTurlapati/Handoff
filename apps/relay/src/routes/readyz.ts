@@ -19,13 +19,11 @@
  *     socket.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { handleRelayOps, type RelayOpsDependencies } from "./ops.js";
 
 /** Machine-readable readiness payload. */
 export interface ReadyzPayload {
-  status: "ready";
-  service: "codex-mobile-relay";
-  timestamp: string;
-  version: string;
+  status: "ready" | "degraded";
 }
 
 /**
@@ -33,12 +31,12 @@ export interface ReadyzPayload {
  * even though the Phase 1 implementation is identical — Plan 02-01 will
  * add ownership-aware gating here.
  */
-export async function handleReadyz(): Promise<ReadyzPayload> {
+export async function handleReadyz(
+  dependencies: RelayOpsDependencies = {},
+): Promise<ReadyzPayload> {
+  const snapshot = await handleRelayOps(dependencies);
   return {
-    status: "ready",
-    service: "codex-mobile-relay",
-    timestamp: new Date().toISOString(),
-    version: process.env.npm_package_version ?? "0.1.0",
+    status: snapshot.readyzStatus,
   };
 }
 
@@ -48,12 +46,15 @@ export async function handleReadyz(): Promise<ReadyzPayload> {
  * expose a single wiring entry point and Plan 02-01 can swap the handler
  * here without touching the server bootstrap.
  */
-export function registerReadyzRoute(app: FastifyInstance): void {
+export function registerReadyzRoute(
+  app: FastifyInstance,
+  dependencies: RelayOpsDependencies = {},
+): void {
   app.get(
     "/readyz",
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      const payload = await handleReadyz();
-      reply.code(200).send(payload);
+      const payload = await handleReadyz(dependencies);
+      reply.code(payload.status === "ready" ? 200 : 503).send(payload);
     },
   );
 }

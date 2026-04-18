@@ -22,6 +22,10 @@ import type { BridgeRegistry } from "../bridge/bridge-registry.js";
 import { bridgeRegistry } from "../bridge/bridge-registry.js";
 import type { BrowserRegistry } from "./browser-registry.js";
 import { browserRegistry } from "./browser-registry.js";
+import type {
+  BrowserEventPriority,
+  BrowserRegistrySnapshot,
+} from "./browser-registry.js";
 import type { SessionBuffer } from "./session-buffer.js";
 import { sessionBuffer } from "./session-buffer.js";
 import {
@@ -327,6 +331,17 @@ export class SessionRouter {
     this.browserRegistry.unregister(browserId);
   }
 
+  getBrowserSnapshot(): BrowserRegistrySnapshot {
+    const snapshot = this.browserRegistry.getSnapshot();
+    return {
+      activeBrowserCount: snapshot.activeBrowserCount,
+      queuePressureCount: snapshot.queuePressureCount,
+      backpressuredSockets: snapshot.backpressuredSockets,
+      droppedBestEffortMessages: snapshot.droppedBestEffortMessages,
+      recentDisconnectReasons: snapshot.recentDisconnectReasons,
+    };
+  }
+
   revokeDeviceSession(userId: string, deviceSessionId: string): number {
     const matchingBrowserCount =
       this.browserRegistry.countByDeviceSessionId(deviceSessionId);
@@ -374,7 +389,9 @@ export class SessionRouter {
 
   private publishEvent(event: LiveSessionEvent): void {
     this.sessionBuffer.append(event);
-    this.browserRegistry.broadcast(event.sessionId, JSON.stringify(event));
+    this.browserRegistry.broadcast(event.sessionId, JSON.stringify(event), {
+      priority: this.getEventPriority(event),
+    });
   }
 
   private closeSessionBrowsers(
@@ -594,7 +611,7 @@ export class SessionRouter {
     sessionId: string,
     reason: LiveSessionEndedReason,
     cursor = this.sessionBuffer.getLatestCursor(sessionId),
-  ): LiveSessionEvent {
+  ): Extract<LiveSessionEvent, { kind: "session.ended" }> {
     return {
       kind: "session.ended",
       sessionId,
@@ -643,6 +660,28 @@ export class SessionRouter {
   private sendEventToSocket(socket: WebSocket, event: LiveSessionEvent): void {
     if (socket.readyState !== socket.OPEN) return;
     socket.send(JSON.stringify(event));
+  }
+
+  private getEventPriority(event: LiveSessionEvent): BrowserEventPriority {
+    if (event.kind === "session.ended" || event.kind === "session.error") {
+      return "critical";
+    }
+
+    if (
+      event.kind === "activity.appended" &&
+      event.activity.kind === "approval"
+    ) {
+      return "critical";
+    }
+
+    if (
+      event.kind === "session.reconnected" ||
+      event.kind === "interrupt.finished"
+    ) {
+      return "important";
+    }
+
+    return "best_effort";
   }
 }
 

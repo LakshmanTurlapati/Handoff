@@ -20,6 +20,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
 import { registerHealthRoutes } from "./routes/health";
+import { registerOpsRoutes } from "./routes/ops.js";
 import { registerBridgeWsRoutes } from "./routes/ws-bridge.js";
 import { registerBrowserWsRoutes } from "./routes/ws-browser.js";
 
@@ -46,6 +47,7 @@ export async function buildRelayServer(
 
   await app.register(websocket);
   registerHealthRoutes(app);
+  registerOpsRoutes(app);
   await registerBridgeWsRoutes(app);
   await registerBrowserWsRoutes(app);
 

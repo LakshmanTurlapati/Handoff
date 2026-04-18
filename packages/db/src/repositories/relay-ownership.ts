@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb } from "../client.js";
 import {
   relay_bridge_leases,
@@ -35,6 +35,15 @@ export interface MarkBridgeLeaseDisconnectedInput {
   userId: string;
   bridgeInstanceId: string;
   disconnectedAt?: Date;
+}
+
+export interface RelayLeaseCountsForMachineInput {
+  relayMachineId: string;
+}
+
+export interface RelayLeaseCountsForMachineResult {
+  activeLeaseCount: number;
+  staleLeaseCount: number;
 }
 
 export async function upsertBridgeLease(
@@ -183,4 +192,41 @@ export async function markBridgeLeaseDisconnected(
     .returning();
 
   return row ?? null;
+}
+
+export async function getRelayLeaseCountsForMachine(
+  input: RelayLeaseCountsForMachineInput,
+): Promise<RelayLeaseCountsForMachineResult> {
+  const db = getDb();
+  const [activeRow] = await db
+    .select({
+      count: sql<number>`count(*)`.mapWith(Number),
+    })
+    .from(relay_bridge_leases)
+    .where(
+      and(
+        eq(relay_bridge_leases.relayMachineId, input.relayMachineId),
+        isNull(relay_bridge_leases.disconnectedAt),
+        gt(relay_bridge_leases.expiresAt, sql`now()`),
+      ),
+    );
+  const [staleRow] = await db
+    .select({
+      count: sql<number>`count(*)`.mapWith(Number),
+    })
+    .from(relay_bridge_leases)
+    .where(
+      and(
+        eq(relay_bridge_leases.relayMachineId, input.relayMachineId),
+        or(
+          isNotNull(relay_bridge_leases.disconnectedAt),
+          lte(relay_bridge_leases.expiresAt, sql`now()`),
+        ),
+      ),
+    );
+
+  return {
+    activeLeaseCount: activeRow?.count ?? 0,
+    staleLeaseCount: staleRow?.count ?? 0,
+  };
 }

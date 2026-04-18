@@ -1,5 +1,11 @@
 import type { WebSocket } from "ws";
 
+export const MAX_PENDING_BROWSER_MESSAGES = 50;
+export const PRESSURE_WARNING_THRESHOLD = 40;
+export const MAX_BEST_EFFORT_DROPS = 25;
+
+export type BrowserEventPriority = "critical" | "important" | "best_effort";
+
 export interface BrowserEntry {
   id: string;
   userId: string;
@@ -7,6 +13,17 @@ export interface BrowserEntry {
   sessionId: string;
   socket: WebSocket;
   connectedAt: Date;
+  pendingMessages: number;
+  droppedBestEffortMessages: number;
+  lastDisconnectReason: string | null;
+}
+
+export interface BrowserRegistrySnapshot {
+  activeBrowserCount: number;
+  queuePressureCount: number;
+  backpressuredSockets: number;
+  droppedBestEffortMessages: number;
+  recentDisconnectReasons: string[];
 }
 
 export class BrowserRegistry {
@@ -14,10 +31,25 @@ export class BrowserRegistry {
   private readonly idsBySession = new Map<string, Set<string>>();
   private readonly idsByDeviceSession = new Map<string, Set<string>>();
   private readonly idsByUser = new Map<string, Set<string>>();
+  private readonly backpressuredIds = new Set<string>();
+  private queuePressureCount = 0;
+  private droppedBestEffortMessages = 0;
+  private recentDisconnectReasons: string[] = [];
 
-  register(entry: Omit<BrowserEntry, "id">): string {
+  register(
+    entry: Omit<
+      BrowserEntry,
+      "id" | "pendingMessages" | "droppedBestEffortMessages" | "lastDisconnectReason"
+    >,
+  ): string {
     const id = crypto.randomUUID();
-    const record: BrowserEntry = { id, ...entry };
+    const record: BrowserEntry = {
+      id,
+      pendingMessages: 0,
+      droppedBestEffortMessages: 0,
+      lastDisconnectReason: null,
+      ...entry,
+    };
     this.entries.set(id, record);
 
     const sessionIds = this.idsBySession.get(record.sessionId) ?? new Set<string>();
@@ -41,6 +73,7 @@ export class BrowserRegistry {
     if (!entry) return;
 
     this.entries.delete(id);
+    this.backpressuredIds.delete(id);
 
     const sessionIds = this.idsBySession.get(entry.sessionId);
     if (sessionIds) {
@@ -67,7 +100,13 @@ export class BrowserRegistry {
     }
   }
 
-  broadcast(sessionId: string, message: string): number {
+  broadcast(
+    sessionId: string,
+    message: string,
+    options: {
+      priority?: BrowserEventPriority;
+    } = {},
+  ): number {
     const sessionIds = this.idsBySession.get(sessionId);
     if (!sessionIds) return 0;
 
@@ -81,8 +120,60 @@ export class BrowserRegistry {
         continue;
       }
 
+      if (
+        entry.pendingMessages > MAX_PENDING_BROWSER_MESSAGES &&
+        entry.droppedBestEffortMessages >= MAX_BEST_EFFORT_DROPS
+      ) {
+        this.closeEntries([id], {
+          code: 1013,
+          reason: "backpressure",
+        });
+        continue;
+      }
+
+      if (
+        entry.pendingMessages > MAX_PENDING_BROWSER_MESSAGES &&
+        (options.priority ?? "important") === "best_effort"
+      ) {
+        entry.droppedBestEffortMessages += 1;
+        this.droppedBestEffortMessages += 1;
+
+        if (entry.droppedBestEffortMessages > MAX_BEST_EFFORT_DROPS) {
+          this.closeEntries([id], {
+            code: 1013,
+            reason: "backpressure",
+          });
+        }
+        continue;
+      }
+
       try {
-        entry.socket.send(message);
+        entry.pendingMessages += 1;
+        if (entry.pendingMessages >= PRESSURE_WARNING_THRESHOLD) {
+          this.queuePressureCount += 1;
+        }
+        this.syncBackpressureState(entry);
+
+        const completeSend = () => {
+          entry.pendingMessages = Math.max(0, entry.pendingMessages - 1);
+          this.syncBackpressureState(entry);
+        };
+
+        if (entry.socket.send.length >= 2) {
+          (entry.socket.send as unknown as (
+            payload: string,
+            callback: (error?: Error) => void,
+          ) => void)(message, (error?: Error) => {
+            if (error) {
+              this.unregister(id);
+              return;
+            }
+            completeSend();
+          });
+        } else {
+          entry.socket.send(message);
+          queueMicrotask(completeSend);
+        }
         delivered += 1;
       } catch {
         this.unregister(id);
@@ -111,6 +202,10 @@ export class BrowserRegistry {
     this.idsBySession.clear();
     this.idsByDeviceSession.clear();
     this.idsByUser.clear();
+    this.backpressuredIds.clear();
+    this.queuePressureCount = 0;
+    this.droppedBestEffortMessages = 0;
+    this.recentDisconnectReasons = [];
   }
 
   countByDeviceSessionId(deviceSessionId: string): number {
@@ -163,6 +258,16 @@ export class BrowserRegistry {
     return this.closeEntries(userIds, options);
   }
 
+  getSnapshot(): BrowserRegistrySnapshot {
+    return {
+      activeBrowserCount: this.entries.size,
+      queuePressureCount: this.queuePressureCount,
+      backpressuredSockets: this.backpressuredIds.size,
+      droppedBestEffortMessages: this.droppedBestEffortMessages,
+      recentDisconnectReasons: [...this.recentDisconnectReasons],
+    };
+  }
+
   private listEntries(ids: Iterable<string>): BrowserEntry[] {
     const entries: BrowserEntry[] = [];
     for (const id of ids) {
@@ -197,6 +302,11 @@ export class BrowserRegistry {
         // Closing the socket still takes priority over the pre-close hook.
       }
 
+      if (options.reason) {
+        entry.lastDisconnectReason = options.reason;
+        this.recordDisconnectReason(options.reason);
+      }
+
       try {
         entry.socket.close(options.code ?? 1008, options.reason);
       } catch {
@@ -212,6 +322,22 @@ export class BrowserRegistry {
 
   get size(): number {
     return this.entries.size;
+  }
+
+  private syncBackpressureState(entry: BrowserEntry): void {
+    if (entry.pendingMessages > MAX_PENDING_BROWSER_MESSAGES) {
+      this.backpressuredIds.add(entry.id);
+      return;
+    }
+
+    this.backpressuredIds.delete(entry.id);
+  }
+
+  private recordDisconnectReason(reason: string): void {
+    this.recentDisconnectReasons = [
+      reason,
+      ...this.recentDisconnectReasons.filter((entry) => entry !== reason),
+    ].slice(0, 10);
   }
 }
 

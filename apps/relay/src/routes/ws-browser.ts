@@ -13,6 +13,7 @@ import {
   type OwnerResolution,
 } from "../ownership/ownership-service.js";
 import { sendFlyReplay } from "../ownership/replay-routing.js";
+import { recordReplayFailure } from "./ops.js";
 
 const BROWSER_PROTOCOL = "codex-mobile.live.v1";
 const OWNER_MACHINE_HEADER = "x-codex-owner-machine-id";
@@ -152,15 +153,28 @@ function logReplayBranch(
     replayState: string;
   },
 ): void {
+  const replaySource = extractReplaySource(request) ?? null;
+  const replayFailed = hasReplayFailed(request);
+  const replayState =
+    extractReplayStateFromSource(replaySource ?? undefined) ?? input.replayState;
+  if (input.event === "browser_replay_failed") {
+    recordReplayFailure({
+      event: input.event,
+      ownerMachineId: input.resolution.ownerMachineId ?? "unknown",
+      ownerRegion: input.resolution.ownerRegion ?? "unknown",
+      replayState,
+      replaySource,
+      replayFailed,
+    });
+  }
+
   request.log.info({
     event: input.event,
     ownerMachineId: input.resolution.ownerMachineId ?? "unknown",
     ownerRegion: input.resolution.ownerRegion ?? "unknown",
-    replayState:
-      extractReplayStateFromSource(extractReplaySource(request)) ??
-      input.replayState,
-    replaySource: extractReplaySource(request) ?? null,
-    replayFailed: hasReplayFailed(request),
+    replayState,
+    replaySource,
+    replayFailed,
   });
 }
 
