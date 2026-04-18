@@ -192,4 +192,52 @@ describe("relay ws-browser auth and routing", () => {
       await app.close();
     }
   });
+
+  it("returns owner_unavailable after Fly replay fails and does not adopt local ownership", async () => {
+    const app = await buildRelayServer();
+
+    try {
+      const ownerSocket = createBridgeSocket();
+      bridgeRegistry.register({
+        userId: "user-owner",
+        deviceSessionId: "device-owner",
+        bridgeInstanceId: "bridge-owner",
+        relayMachineId: "local-dev-machine",
+        socket: ownerSocket as never,
+        connectedAt: new Date("2026-04-18T07:30:00.000Z"),
+      });
+      relayDbMocks.findActiveBridgeLeaseForSession.mockResolvedValue({
+        ...createLease("user-owner", "session-alpha"),
+        relayMachineId: "fly-machine-2",
+        relayRegion: "dfw",
+      });
+
+      const ticket = await mintTicket("user-owner", "device-owner");
+      const response = await app.inject({
+        method: "POST",
+        url: "/internal/browser/sessions/session-alpha/command",
+        headers: {
+          authorization: `Bearer ${ticket}`,
+          "content-type": "application/json",
+          "fly-replay-failed": "true",
+          "fly-replay-src":
+            "instance=fly-machine-2;state=browser:user-owner:session-alpha:device-owner",
+        },
+        payload: JSON.stringify({
+          kind: "prompt",
+          text: "Retry the command",
+        }),
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toEqual({
+        error: "owner_unavailable",
+        ownerMachineId: "fly-machine-2",
+        ownerRegion: "dfw",
+      });
+      expect(ownerSocket.send).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
 });
