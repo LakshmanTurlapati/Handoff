@@ -39,6 +39,18 @@ export async function registerBridgeWsRoutes(
 
     let bridgeInstanceId = "unknown";
     let isAlive = true;
+    let bridgeClosed = false;
+
+    const handleBridgeDisconnect = () => {
+      if (bridgeClosed) {
+        return;
+      }
+
+      bridgeClosed = true;
+      clearInterval(heartbeat);
+      void sessionRouter.handleBridgeUnavailable(claims.userId);
+      bridgeRegistry.unregister(claims.userId);
+    };
 
     // Heartbeat ping/pong
     const heartbeat = setInterval(() => {
@@ -85,13 +97,11 @@ export async function registerBridgeWsRoutes(
     });
 
     socket.on("close", () => {
-      clearInterval(heartbeat);
-      bridgeRegistry.unregister(claims.userId);
+      handleBridgeDisconnect();
     });
 
     socket.on("error", () => {
-      clearInterval(heartbeat);
-      bridgeRegistry.unregister(claims.userId);
+      handleBridgeDisconnect();
     });
   });
 

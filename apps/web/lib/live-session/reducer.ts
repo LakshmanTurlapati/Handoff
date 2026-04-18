@@ -3,7 +3,9 @@ import {
   type FollowMode,
   type LiveActivity,
   type LiveConnectionState,
+  type LiveSessionEndedReason,
   type LiveSessionState,
+  type TerminalState,
   type LiveTurn,
 } from "./session-model";
 
@@ -39,6 +41,11 @@ export type LiveSessionAction =
   | {
       type: "mark_reconnected";
       activity: LiveActivity;
+    }
+  | {
+      type: "set_terminal_state";
+      terminalState: TerminalState;
+      terminalReason: LiveSessionEndedReason;
     };
 
 function deriveAssistantPreview(turn: LiveTurn, activity: LiveActivity): string {
@@ -111,6 +118,8 @@ export function liveSessionReducer(
         ...state,
         connection: action.connection ?? state.connection,
         liveTurnId: liveTurn?.turnId ?? null,
+        terminalState: null,
+        terminalReason: null,
         turns: action.turns,
       };
     }
@@ -170,6 +179,36 @@ export function liveSessionReducer(
       return {
         ...state,
         connection: "connected",
+        terminalState: null,
+        terminalReason: null,
+        turns,
+      };
+    }
+    case "set_terminal_state": {
+      const turns = state.turns.map((turn) => {
+        if (turn.turnId !== state.liveTurnId) {
+          return { ...turn, isLive: false };
+        }
+
+        return {
+          ...turn,
+          isLive: false,
+          collapsed: false,
+          stateLabel: action.terminalState === "revoked" ? "Device revoked" : "Ended",
+          actorDetail:
+            action.terminalState === "revoked"
+              ? "Device revoked"
+              : "Session ended on your laptop",
+        };
+      });
+
+      return {
+        ...state,
+        connection: "disconnected",
+        liveTurnId: null,
+        pendingInterrupt: false,
+        terminalState: action.terminalState,
+        terminalReason: action.terminalReason,
         turns,
       };
     }

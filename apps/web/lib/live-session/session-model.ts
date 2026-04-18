@@ -1,3 +1,5 @@
+import type { LiveSessionEndedReason } from "@codex-mobile/protocol/live-session";
+
 export type LiveConnectionState =
   | "connecting"
   | "connected"
@@ -5,6 +7,8 @@ export type LiveConnectionState =
   | "disconnected";
 
 export type FollowMode = "live" | "paused";
+
+export type TerminalState = "revoked" | "ended";
 
 export type LiveActivityKind =
   | "assistant"
@@ -89,7 +93,15 @@ export interface LiveSessionState {
   followMode: FollowMode;
   liveTurnId: string | null;
   pendingInterrupt: boolean;
+  terminalState: TerminalState | null;
+  terminalReason: LiveSessionEndedReason | null;
   turns: LiveTurn[];
+}
+
+export function resolveTerminalState(
+  reason: LiveSessionEndedReason,
+): TerminalState {
+  return reason === "device_session_revoked" ? "revoked" : "ended";
 }
 
 export function createFixtureTurns(sessionId: string): LiveTurn[] {
@@ -202,6 +214,8 @@ export function createInitialLiveSessionState(
     followMode: "live",
     liveTurnId: liveTurn?.turnId ?? null,
     pendingInterrupt: false,
+    terminalState: null,
+    terminalReason: null,
     turns,
   };
 }

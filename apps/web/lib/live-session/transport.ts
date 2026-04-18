@@ -5,6 +5,7 @@ import {
   SessionCommandResponseSchema,
   SessionConnectResponseSchema,
   type LiveSessionEvent,
+  type LiveSessionEndedReason,
   type SessionCommand,
 } from "@codex-mobile/protocol/live-session";
 import type { LiveConnectionState } from "./session-model";
@@ -27,23 +28,58 @@ function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
+class TerminalConnectError extends Error {
+  constructor(readonly reason: Extract<
+    LiveSessionEndedReason,
+    "device_session_revoked" | "device_session_expired"
+  >) {
+    super(reason);
+  }
+}
+
 async function fetchConnectPayload(sessionId: string) {
   const response = await fetch(`/api/sessions/${sessionId}/connect`, {
     method: "POST",
     cache: "no-store",
   });
 
+  const body = await response.json().catch(() => null);
   if (!response.ok) {
+    const failureCode =
+      body && typeof body === "object" && "error" in body && typeof body.error === "string"
+        ? body.error
+        : null;
+
+    if (
+      failureCode === "device_session_revoked" ||
+      failureCode === "device_session_expired"
+    ) {
+      throw new TerminalConnectError(failureCode);
+    }
+
     throw new Error(`connect_boot_failed_${response.status}`);
   }
 
-  const body = await response.json();
   const parsed = SessionConnectResponseSchema.safeParse(body);
   if (!parsed.success) {
     throw new Error("connect_boot_invalid");
   }
 
   return parsed.data;
+}
+
+function buildTerminalEndedEvent(
+  sessionId: string,
+  reason: LiveSessionEndedReason,
+  cursor: number,
+): LiveSessionEvent {
+  return {
+    kind: "session.ended",
+    sessionId,
+    cursor,
+    occurredAt: new Date().toISOString(),
+    reason,
+  };
 }
 
 export async function sendSessionCommand(
@@ -75,12 +111,40 @@ export async function connectLiveSession(
   let disposed = false;
   let hasConnected = false;
   let lastCursor = 0;
+  let terminalReason: LiveSessionEndedReason | null = null;
+
+  const enterTerminalState = (reason: LiveSessionEndedReason) => {
+    if (terminalReason === reason) {
+      handlers.onConnectionChange("disconnected");
+      return;
+    }
+
+    terminalReason = reason;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
+    handlers.onEvent(buildTerminalEndedEvent(sessionId, reason, lastCursor));
+    handlers.onConnectionChange("disconnected");
+  };
 
   const openSocket = async () => {
-    if (disposed) return;
+    if (disposed || terminalReason) return;
 
     handlers.onConnectionChange(hasConnected ? "reconnecting" : "connecting");
-    const payload = await fetchConnectPayload(sessionId);
+    let payload;
+    try {
+      payload = await fetchConnectPayload(sessionId);
+    } catch (error) {
+      if (error instanceof TerminalConnectError) {
+        enterTerminalState(error.reason);
+        return;
+      }
+
+      throw error;
+    }
+
     const url = new URL(payload.relayUrl);
     url.searchParams.set("sessionId", payload.sessionId);
     if (lastCursor > 0) {
@@ -108,6 +172,9 @@ export async function connectLiveSession(
         }
 
         lastCursor = Math.max(lastCursor, parsed.data.cursor);
+        if (parsed.data.kind === "session.ended") {
+          terminalReason = parsed.data.reason;
+        }
         handlers.onEvent(parsed.data);
       } catch (error) {
         handlers.onTransportError(asError(error));
@@ -121,6 +188,11 @@ export async function connectLiveSession(
     nextSocket.addEventListener("close", () => {
       socket = null;
       if (disposed) {
+        handlers.onConnectionChange("disconnected");
+        return;
+      }
+
+      if (terminalReason) {
         handlers.onConnectionChange("disconnected");
         return;
       }
@@ -154,6 +226,7 @@ export async function connectLiveSession(
   return {
     disconnect() {
       disposed = true;
+      terminalReason = null;
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;

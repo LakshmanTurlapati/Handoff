@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   ApprovalDecisionSchema,
   LiveSessionCursorSchema,
+  LiveSessionEndedReasonSchema,
   LiveSessionEventSchema,
   LiveTurnSchema,
   TurnInterruptParamsSchema,
@@ -132,7 +133,7 @@ export const SessionEndedParamsSchema = z
   .object({
     sessionId: z.string().min(1),
     cursor: LiveSessionCursorSchema,
-    reason: z.string().min(1),
+    reason: LiveSessionEndedReasonSchema,
   })
   .strict();
 

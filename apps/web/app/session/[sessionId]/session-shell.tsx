@@ -4,11 +4,13 @@ import { startTransition, useEffect, useEffectEvent, useReducer, useRef } from "
 import { Composer } from "../../../components/session/composer";
 import { JumpToLive } from "../../../components/session/jump-to-live";
 import { ReconnectBanner } from "../../../components/session/reconnect-banner";
+import { SessionEndedCard } from "../../../components/session/session-ended-card";
 import { TurnCard } from "../../../components/session/turn-card";
 import {
   createInitialLiveSessionState,
   liveSessionReducer,
 } from "../../../lib/live-session/reducer";
+import { resolveTerminalState } from "../../../lib/live-session/session-model";
 import {
   connectLiveSession,
   sendSessionCommand,
@@ -132,7 +134,11 @@ export function SessionShell({
           );
           break;
         case "session.ended":
-          dispatch({ type: "set_connection", connection: "disconnected" });
+          dispatch({
+            type: "set_terminal_state",
+            terminalState: resolveTerminalState(event.reason),
+            terminalReason: event.reason,
+          });
           break;
         case "session.attached":
           dispatch({ type: "set_connection", connection: "connected" });
@@ -243,6 +249,8 @@ export function SessionShell({
     );
   });
 
+  const controlsDisabled = state.terminalState !== null;
+
   return (
     <main
       style={{
@@ -327,7 +335,16 @@ export function SessionShell({
           ) : null}
         </section>
 
-        {state.connection === "reconnecting" ? <ReconnectBanner /> : null}
+        {state.terminalState ? (
+          <SessionEndedCard
+            terminalState={state.terminalState}
+            terminalReason={state.terminalReason}
+          />
+        ) : null}
+
+        {state.connection === "reconnecting" && !state.terminalState ? (
+          <ReconnectBanner />
+        ) : null}
 
         <section
           aria-label="Timeline"
@@ -342,6 +359,7 @@ export function SessionShell({
             <TurnCard
               key={turn.turnId}
               turn={turn}
+              approvalDisabled={controlsDisabled}
               onApprovalDecision={(requestId, decision) => {
                 void dispatchCommand({
                   kind: "approval",
@@ -384,6 +402,7 @@ export function SessionShell({
         </section>
 
         <Composer
+          disabled={controlsDisabled}
           pendingInterrupt={state.pendingInterrupt}
           onSendPrompt={(text) => {
             appendLocalActivity(

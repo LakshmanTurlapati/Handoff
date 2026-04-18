@@ -15,6 +15,7 @@ import {
   SessionCommandSchema,
   type BrowserSessionListItem,
   type LiveSessionEvent,
+  type LiveSessionEndedReason,
   type SessionCommand,
 } from "@codex-mobile/protocol/live-session";
 import type { BridgeRegistry } from "../bridge/bridge-registry.js";
@@ -286,16 +287,15 @@ export class SessionRouter {
         const params = SessionEndedParamsSchema.safeParse(data.params);
         if (!params.success) return;
 
-        const event: LiveSessionEvent = {
-          kind: "session.ended",
-          sessionId: params.data.sessionId,
-          cursor: params.data.cursor,
-          occurredAt: new Date().toISOString(),
-          reason: params.data.reason,
-        };
+        const event = this.buildEndedEvent(
+          params.data.sessionId,
+          params.data.reason,
+          params.data.cursor,
+        );
 
         await this.appendDisconnectAudits(event);
         this.publishEvent(event);
+        this.closeSessionBrowsers(event.sessionId, event.reason);
         return;
       }
 
@@ -329,22 +329,51 @@ export class SessionRouter {
       reason: "device_session_revoked",
       predicate: (entry) => entry.userId === userId,
       beforeClose: (entry) => {
-        const event: LiveSessionEvent = {
-          kind: "session.ended",
-          sessionId: entry.sessionId,
-          cursor: this.sessionBuffer.getLatestCursor(entry.sessionId),
-          occurredAt: new Date().toISOString(),
-          reason: "device_session_revoked",
-        };
-
-        this.sendEventToSocket(entry.socket, event);
+        this.sendEventToSocket(
+          entry.socket,
+          this.buildEndedEvent(entry.sessionId, "device_session_revoked"),
+        );
       },
+    });
+  }
+
+  async handleBridgeUnavailable(userId: string): Promise<number> {
+    const entries = this.browserRegistry.listByUserId(userId);
+    if (entries.length === 0) {
+      return 0;
+    }
+
+    const seenSessions = new Set<string>();
+    for (const entry of entries) {
+      if (seenSessions.has(entry.sessionId)) {
+        continue;
+      }
+
+      seenSessions.add(entry.sessionId);
+      const event = this.buildEndedEvent(entry.sessionId, "bridge_unavailable");
+      await this.appendDisconnectAudits(event);
+      this.publishEvent(event);
+    }
+
+    return this.browserRegistry.closeByUserId(userId, {
+      code: 1011,
+      reason: "bridge_unavailable",
     });
   }
 
   private publishEvent(event: LiveSessionEvent): void {
     this.sessionBuffer.append(event);
     this.browserRegistry.broadcast(event.sessionId, JSON.stringify(event));
+  }
+
+  private closeSessionBrowsers(
+    sessionId: string,
+    reason: LiveSessionEndedReason,
+  ): number {
+    return this.browserRegistry.closeBySessionId(sessionId, {
+      code: reason === "bridge_unavailable" ? 1011 : 1000,
+      reason,
+    });
   }
 
   private async appendDisconnectAudits(event: LiveSessionEvent): Promise<void> {
@@ -525,6 +554,20 @@ export class SessionRouter {
       cursor: lastEvent?.cursor ?? this.sessionBuffer.getLatestCursor(sessionId),
       occurredAt,
       activity: reconnectActivity,
+    };
+  }
+
+  private buildEndedEvent(
+    sessionId: string,
+    reason: LiveSessionEndedReason,
+    cursor = this.sessionBuffer.getLatestCursor(sessionId),
+  ): LiveSessionEvent {
+    return {
+      kind: "session.ended",
+      sessionId,
+      cursor,
+      occurredAt: new Date().toISOString(),
+      reason,
     };
   }
 

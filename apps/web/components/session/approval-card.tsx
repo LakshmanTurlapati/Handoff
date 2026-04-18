@@ -2,6 +2,7 @@ import type { ApprovalActivity } from "../../lib/live-session/session-model";
 
 interface ApprovalCardProps {
   activity: ApprovalActivity;
+  disabled?: boolean;
   onDecision?: (requestId: string, decision: "approved" | "denied" | "abort") => void;
 }
 
@@ -11,7 +12,11 @@ function toDecision(actionId: string): "approved" | "denied" | "abort" {
   return "abort";
 }
 
-export function ApprovalCard({ activity, onDecision }: ApprovalCardProps) {
+export function ApprovalCard({
+  activity,
+  disabled = false,
+  onDecision,
+}: ApprovalCardProps) {
   return (
     <article
       aria-label="Waiting for approval"
@@ -79,16 +84,18 @@ export function ApprovalCard({ activity, onDecision }: ApprovalCardProps) {
             <button
               key={action.id}
               type="button"
+              disabled={disabled}
               onClick={() => onDecision?.(String(activity.requestId), toDecision(action.id))}
               style={{
                 minHeight: "44px",
                 borderRadius: "999px",
                 border: `1px solid ${palette.border}`,
-                background: palette.background,
-                color: palette.color,
+                background: disabled ? "#E5E7EB" : palette.background,
+                color: disabled ? "#7A746B" : palette.color,
                 fontSize: "14px",
                 lineHeight: 1.35,
                 fontWeight: 600,
+                opacity: disabled ? 0.8 : 1,
               }}
             >
               {action.label}

@@ -13,6 +13,7 @@ export class BrowserRegistry {
   private readonly entries = new Map<string, BrowserEntry>();
   private readonly idsBySession = new Map<string, Set<string>>();
   private readonly idsByDeviceSession = new Map<string, Set<string>>();
+  private readonly idsByUser = new Map<string, Set<string>>();
 
   register(entry: Omit<BrowserEntry, "id">): string {
     const id = crypto.randomUUID();
@@ -28,6 +29,10 @@ export class BrowserRegistry {
     deviceSessionIds.add(id);
     this.idsByDeviceSession.set(record.deviceSessionId, deviceSessionIds);
 
+    const userIds = this.idsByUser.get(record.userId) ?? new Set<string>();
+    userIds.add(id);
+    this.idsByUser.set(record.userId, userIds);
+
     return id;
   }
 
@@ -38,19 +43,27 @@ export class BrowserRegistry {
     this.entries.delete(id);
 
     const sessionIds = this.idsBySession.get(entry.sessionId);
-    if (!sessionIds) return;
-
-    sessionIds.delete(id);
-    if (sessionIds.size === 0) {
-      this.idsBySession.delete(entry.sessionId);
+    if (sessionIds) {
+      sessionIds.delete(id);
+      if (sessionIds.size === 0) {
+        this.idsBySession.delete(entry.sessionId);
+      }
     }
 
     const deviceSessionIds = this.idsByDeviceSession.get(entry.deviceSessionId);
-    if (!deviceSessionIds) return;
+    if (deviceSessionIds) {
+      deviceSessionIds.delete(id);
+      if (deviceSessionIds.size === 0) {
+        this.idsByDeviceSession.delete(entry.deviceSessionId);
+      }
+    }
 
-    deviceSessionIds.delete(id);
-    if (deviceSessionIds.size === 0) {
-      this.idsByDeviceSession.delete(entry.deviceSessionId);
+    const userIds = this.idsByUser.get(entry.userId);
+    if (userIds) {
+      userIds.delete(id);
+      if (userIds.size === 0) {
+        this.idsByUser.delete(entry.userId);
+      }
     }
   }
 
@@ -83,26 +96,41 @@ export class BrowserRegistry {
     const sessionIds = this.idsBySession.get(sessionId);
     if (!sessionIds) return [];
 
-    const entries: BrowserEntry[] = [];
-    for (const id of sessionIds) {
-      const entry = this.entries.get(id);
-      if (entry) {
-        entries.push(entry);
-      }
-    }
+    return this.listEntries(sessionIds);
+  }
 
-    return entries;
+  listByUserId(userId: string): BrowserEntry[] {
+    const userIds = this.idsByUser.get(userId);
+    if (!userIds) return [];
+
+    return this.listEntries(userIds);
   }
 
   clear(): void {
     this.entries.clear();
     this.idsBySession.clear();
     this.idsByDeviceSession.clear();
+    this.idsByUser.clear();
   }
 
   countByDeviceSessionId(deviceSessionId: string): number {
     const deviceSessionIds = this.idsByDeviceSession.get(deviceSessionId);
     return deviceSessionIds?.size ?? 0;
+  }
+
+  closeBySessionId(
+    sessionId: string,
+    options: {
+      code?: number;
+      reason?: string;
+      predicate?: (entry: BrowserEntry) => boolean;
+      beforeClose?: (entry: BrowserEntry) => void;
+    } = {},
+  ): number {
+    const sessionIds = this.idsBySession.get(sessionId);
+    if (!sessionIds) return 0;
+
+    return this.closeEntries(sessionIds, options);
   }
 
   closeByDeviceSessionId(
@@ -117,9 +145,48 @@ export class BrowserRegistry {
     const deviceSessionIds = this.idsByDeviceSession.get(deviceSessionId);
     if (!deviceSessionIds) return 0;
 
+    return this.closeEntries(deviceSessionIds, options);
+  }
+
+  closeByUserId(
+    userId: string,
+    options: {
+      code?: number;
+      reason?: string;
+      predicate?: (entry: BrowserEntry) => boolean;
+      beforeClose?: (entry: BrowserEntry) => void;
+    } = {},
+  ): number {
+    const userIds = this.idsByUser.get(userId);
+    if (!userIds) return 0;
+
+    return this.closeEntries(userIds, options);
+  }
+
+  private listEntries(ids: Iterable<string>): BrowserEntry[] {
+    const entries: BrowserEntry[] = [];
+    for (const id of ids) {
+      const entry = this.entries.get(id);
+      if (entry) {
+        entries.push(entry);
+      }
+    }
+
+    return entries;
+  }
+
+  private closeEntries(
+    ids: Iterable<string>,
+    options: {
+      code?: number;
+      reason?: string;
+      predicate?: (entry: BrowserEntry) => boolean;
+      beforeClose?: (entry: BrowserEntry) => void;
+    },
+  ): number {
     let closed = 0;
 
-    for (const id of [...deviceSessionIds]) {
+    for (const id of [...ids]) {
       const entry = this.entries.get(id);
       if (!entry) continue;
       if (options.predicate && !options.predicate(entry)) continue;

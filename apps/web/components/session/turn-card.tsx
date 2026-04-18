@@ -8,6 +8,7 @@ import type {
 
 interface TurnCardProps {
   turn: LiveTurn;
+  approvalDisabled?: boolean;
   onApprovalDecision?: (
     requestId: string,
     decision: "approved" | "denied" | "abort",
@@ -17,6 +18,7 @@ interface TurnCardProps {
 
 export function TurnCard({
   turn,
+  approvalDisabled,
   onApprovalDecision,
   onActivityAction,
 }: TurnCardProps) {
@@ -115,6 +117,7 @@ export function TurnCard({
               <ApprovalCard
                 key={activity.activityId}
                 activity={activity as ApprovalActivity}
+                disabled={approvalDisabled}
                 onDecision={onApprovalDecision}
               />
             ) : (

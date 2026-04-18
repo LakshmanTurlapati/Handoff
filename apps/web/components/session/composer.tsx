@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 interface ComposerProps {
+  disabled?: boolean;
   pendingInterrupt: boolean;
   onSendPrompt: (text: string) => void;
   onSteer: (text: string) => void;
@@ -10,6 +11,7 @@ interface ComposerProps {
 }
 
 export function Composer({
+  disabled = false,
   pendingInterrupt,
   onSendPrompt,
   onSteer,
@@ -49,9 +51,14 @@ export function Composer({
 
       <textarea
         id="session-composer"
+        disabled={disabled}
         value={value}
         onChange={(event) => setValue(event.target.value)}
-        placeholder="Keep the current session moving from your phone."
+        placeholder={
+          disabled
+            ? "Remote controls are disabled because this session can no longer reconnect."
+            : "Keep the current session moving from your phone."
+        }
         rows={value.length > 120 ? 5 : 3}
         style={{
           width: "100%",
@@ -65,7 +72,7 @@ export function Composer({
           lineHeight: 1.5,
           fontFamily: "inherit",
           color: "#1F1A14",
-          background: "#F6F3ED",
+          background: disabled ? "#ECE7DE" : "#F6F3ED",
         }}
       />
 
@@ -78,6 +85,7 @@ export function Composer({
       >
         <button
           type="button"
+          disabled={disabled || !hasValue}
           onClick={() => {
             if (!hasValue) return;
             onSendPrompt(value.trim());
@@ -87,7 +95,7 @@ export function Composer({
             minHeight: "44px",
             borderRadius: "999px",
             border: "1px solid #0F766E",
-            background: hasValue ? "#0F766E" : "#C0D9D5",
+            background: disabled ? "#BDD0CD" : hasValue ? "#0F766E" : "#C0D9D5",
             color: "#F6F3ED",
             fontSize: "14px",
             lineHeight: 1.35,
@@ -98,6 +106,7 @@ export function Composer({
         </button>
         <button
           type="button"
+          disabled={disabled || !hasValue}
           onClick={() => {
             if (!hasValue) return;
             onSteer(value.trim());
@@ -107,7 +116,7 @@ export function Composer({
             minHeight: "44px",
             borderRadius: "999px",
             border: "1px solid #B8AE9F",
-            background: hasValue ? "#F6F3ED" : "#EEE7DC",
+            background: disabled ? "#E4DED4" : hasValue ? "#F6F3ED" : "#EEE7DC",
             color: "#3F372B",
             fontSize: "14px",
             lineHeight: 1.35,
@@ -119,12 +128,12 @@ export function Composer({
         <button
           type="button"
           onClick={onInterrupt}
-          disabled={pendingInterrupt}
+          disabled={disabled || pendingInterrupt}
           style={{
             minHeight: "44px",
             borderRadius: "999px",
             border: "1px solid #B93815",
-            background: pendingInterrupt ? "#F5CFC5" : "#FFF2EE",
+            background: disabled ? "#E7D9D4" : pendingInterrupt ? "#F5CFC5" : "#FFF2EE",
             color: "#B93815",
             fontSize: "14px",
             lineHeight: 1.35,
