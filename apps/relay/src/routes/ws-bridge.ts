@@ -1,13 +1,20 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { verifyWsTicket } from "@codex-mobile/auth/ws-ticket";
+import {
+  markBridgeLeaseDisconnected,
+  refreshBridgeLease,
+  upsertBridgeLease,
+} from "@codex-mobile/db";
 import { bridgeRegistry, type BridgeEntry } from "../bridge/bridge-registry.js";
 import {
   BridgeRegisterParamsSchema,
   JsonRpcNotificationSchema,
 } from "@codex-mobile/protocol";
 import { sessionRouter } from "../browser/session-router.js";
+import { getRelayInstanceIdentity } from "../ownership/relay-instance.js";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
+const BRIDGE_LEASE_TTL_MS = 90_000;
 
 export async function registerBridgeWsRoutes(
   app: FastifyInstance,
@@ -37,17 +44,24 @@ export async function registerBridgeWsRoutes(
       return;
     }
 
+    const relayInstance = getRelayInstanceIdentity();
     let bridgeInstanceId = "unknown";
     let isAlive = true;
     let bridgeClosed = false;
 
-    const handleBridgeDisconnect = () => {
+    const handleBridgeDisconnect = async () => {
       if (bridgeClosed) {
         return;
       }
 
       bridgeClosed = true;
       clearInterval(heartbeat);
+      if (bridgeInstanceId !== "unknown") {
+        await markBridgeLeaseDisconnected({
+          userId: claims.userId,
+          bridgeInstanceId,
+        });
+      }
       void sessionRouter.handleBridgeUnavailable(claims.userId);
       bridgeRegistry.unregister(claims.userId);
     };
@@ -64,6 +78,15 @@ export async function registerBridgeWsRoutes(
 
     socket.on("pong", () => {
       isAlive = true;
+      if (bridgeInstanceId === "unknown") {
+        return;
+      }
+
+      void refreshBridgeLease({
+        userId: claims.userId,
+        bridgeInstanceId,
+        expiresAt: new Date(Date.now() + BRIDGE_LEASE_TTL_MS),
+      });
     });
 
     socket.on("message", (data) => {
@@ -83,10 +106,20 @@ export async function registerBridgeWsRoutes(
               userId: claims.userId,
               deviceSessionId: claims.deviceSessionId,
               bridgeInstanceId,
+              relayMachineId: relayInstance.machineId,
               socket,
               connectedAt: new Date(),
             };
             bridgeRegistry.register(entry);
+            void upsertBridgeLease({
+              userId: claims.userId,
+              deviceSessionId: claims.deviceSessionId,
+              bridgeInstanceId,
+              relayMachineId: relayInstance.machineId,
+              relayRegion: relayInstance.region,
+              expiresAt: new Date(Date.now() + BRIDGE_LEASE_TTL_MS),
+              leaseVersion: 1,
+            });
           }
         }
 
@@ -97,11 +130,11 @@ export async function registerBridgeWsRoutes(
     });
 
     socket.on("close", () => {
-      handleBridgeDisconnect();
+      void handleBridgeDisconnect();
     });
 
     socket.on("error", () => {
-      handleBridgeDisconnect();
+      void handleBridgeDisconnect();
     });
   });
 

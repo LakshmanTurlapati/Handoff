@@ -180,6 +180,49 @@ export const pairing_sessions = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Relay bridge leases (multi-instance relay ownership)
+// ---------------------------------------------------------------------------
+
+export const relay_bridge_leases = pgTable(
+  "relay_bridge_leases",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deviceSessionId: uuid("device_session_id")
+      .notNull()
+      .references(() => device_sessions.id, { onDelete: "cascade" }),
+    bridgeInstanceId: varchar("bridge_instance_id", { length: 120 }).notNull(),
+    relayMachineId: varchar("relay_machine_id", { length: 120 }).notNull(),
+    relayRegion: varchar("relay_region", { length: 32 }).notNull(),
+    attachedSessionId: varchar("attached_session_id", { length: 200 }),
+    leaseVersion: integer("lease_version").notNull().default(1),
+    connectedAt: timestamp("connected_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+    replacedByLeaseId: uuid("replaced_by_lease_id"),
+  },
+  (table) => ({
+    userIdx: uniqueIndex("relay_bridge_leases_user_idx").on(table.userId),
+    attachedSessionIdx: index("relay_bridge_leases_attached_session_idx").on(
+      table.attachedSessionId,
+    ),
+    relayMachineIdx: index("relay_bridge_leases_machine_idx").on(
+      table.relayMachineId,
+    ),
+    expiresAtIdx: index("relay_bridge_leases_expires_at_idx").on(
+      table.expiresAt,
+    ),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Audit events
 // ---------------------------------------------------------------------------
 
@@ -217,4 +260,5 @@ export type OAuthAccountRow = typeof oauth_accounts.$inferSelect;
 export type WebSessionRow = typeof web_sessions.$inferSelect;
 export type DeviceSessionRow = typeof device_sessions.$inferSelect;
 export type PairingSessionRow = typeof pairing_sessions.$inferSelect;
+export type RelayBridgeLeaseRow = typeof relay_bridge_leases.$inferSelect;
 export type AuditEventRow = typeof audit_events.$inferSelect;

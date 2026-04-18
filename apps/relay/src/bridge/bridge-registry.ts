@@ -4,6 +4,7 @@ export interface BridgeEntry {
   userId: string;
   deviceSessionId: string;
   bridgeInstanceId: string;
+  relayMachineId: string;
   socket: WebSocket;
   connectedAt: Date;
 }

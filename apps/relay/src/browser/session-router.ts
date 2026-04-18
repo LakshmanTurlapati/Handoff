@@ -24,6 +24,10 @@ import type { BrowserRegistry } from "./browser-registry.js";
 import { browserRegistry } from "./browser-registry.js";
 import type { SessionBuffer } from "./session-buffer.js";
 import { sessionBuffer } from "./session-buffer.js";
+import {
+  ownershipService,
+  type OwnershipService,
+} from "../ownership/ownership-service.js";
 
 const BRIDGE_REQUEST_TIMEOUT_MS = 3_000;
 
@@ -46,12 +50,14 @@ interface SessionRouterDependencies {
   bridgeRegistry?: BridgeRegistry;
   browserRegistry?: BrowserRegistry;
   sessionBuffer?: SessionBuffer;
+  ownershipService?: OwnershipService;
 }
 
 export class SessionRouter {
   private readonly bridgeRegistry: BridgeRegistry;
   private readonly browserRegistry: BrowserRegistry;
   private readonly sessionBuffer: SessionBuffer;
+  private readonly ownershipService: OwnershipService;
   private readonly pending = new Map<string, PendingBridgeRequest>();
   private requestSequence = 0;
 
@@ -59,6 +65,7 @@ export class SessionRouter {
     this.bridgeRegistry = dependencies.bridgeRegistry ?? bridgeRegistry;
     this.browserRegistry = dependencies.browserRegistry ?? browserRegistry;
     this.sessionBuffer = dependencies.sessionBuffer ?? sessionBuffer;
+    this.ownershipService = dependencies.ownershipService ?? ownershipService;
   }
 
   async attachBrowser(input: AttachBrowserInput): Promise<string> {
@@ -107,6 +114,8 @@ export class SessionRouter {
           "The relay could not reach the owning bridge for this session.",
         ),
       );
+    } else {
+      await this.recordAttachedSessionSafely(input.userId, input.sessionId);
     }
 
     return browserId;
@@ -293,6 +302,7 @@ export class SessionRouter {
           params.data.cursor,
         );
 
+        await this.clearAttachedSessionSafely(userId, event.sessionId);
         await this.appendDisconnectAudits(event);
         this.publishEvent(event);
         this.closeSessionBrowsers(event.sessionId, event.reason);
@@ -350,6 +360,7 @@ export class SessionRouter {
       }
 
       seenSessions.add(entry.sessionId);
+      await this.clearAttachedSessionSafely(userId, entry.sessionId);
       const event = this.buildEndedEvent(entry.sessionId, "bridge_unavailable");
       await this.appendDisconnectAudits(event);
       this.publishEvent(event);
@@ -415,6 +426,28 @@ export class SessionRouter {
       await appendAuditEvent(input);
     } catch (error) {
       console.error("session router audit append failed", error);
+    }
+  }
+
+  private async recordAttachedSessionSafely(
+    userId: string,
+    sessionId: string,
+  ): Promise<void> {
+    try {
+      await this.ownershipService.recordAttachedSession({ userId, sessionId });
+    } catch (error) {
+      console.error("session router attach record failed", error);
+    }
+  }
+
+  private async clearAttachedSessionSafely(
+    userId: string,
+    sessionId: string,
+  ): Promise<void> {
+    try {
+      await this.ownershipService.clearAttachedSession({ userId, sessionId });
+    } catch (error) {
+      console.error("session router attach clear failed", error);
     }
   }
 

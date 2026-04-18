@@ -7,8 +7,20 @@ import {
   SessionListResponseSchema,
 } from "@codex-mobile/protocol/live-session";
 import { sessionRouter } from "../browser/session-router.js";
+import { bridgeRegistry } from "../bridge/bridge-registry.js";
+import {
+  ownershipService,
+  type OwnerResolution,
+} from "../ownership/ownership-service.js";
 
 const BROWSER_PROTOCOL = "codex-mobile.live.v1";
+const OWNER_MACHINE_HEADER = "x-codex-owner-machine-id";
+const OWNER_REGION_HEADER = "x-codex-owner-region";
+
+type BrowserClaims = {
+  userId: string;
+  deviceSessionId: string;
+};
 
 function extractBearerTicket(request: FastifyRequest): string | undefined {
   const authHeader = request.headers.authorization;
@@ -34,6 +46,73 @@ function extractProtocolTicket(request: FastifyRequest): string | undefined {
   }
 
   return protocols[1];
+}
+
+function extractBrowserClaims(request: FastifyRequest): BrowserClaims | undefined {
+  return (
+    request as FastifyRequest & {
+      _wsTicketClaims?: BrowserClaims;
+    }
+  )._wsTicketClaims;
+}
+
+function extractSessionId(request: FastifyRequest): string | undefined {
+  const url = new URL(
+    request.url,
+    `http://${request.headers.host ?? "localhost"}`,
+  );
+  return url.searchParams.get("sessionId") ?? undefined;
+}
+
+async function resolveBrowserRouteOwnership(input: {
+  userId: string;
+  sessionId?: string;
+}): Promise<OwnerResolution> {
+  if (input.sessionId) {
+    const sessionResolution = await ownershipService.resolveOwnerForSession(
+      input.sessionId,
+    );
+    if (sessionResolution.status !== "bridge_owner_missing") {
+      return sessionResolution;
+    }
+  }
+
+  return ownershipService.resolveOwnerForUser(input.userId);
+}
+
+function requireLocalBridge(
+  resolution: OwnerResolution,
+  userId: string,
+): OwnerResolution {
+  if (resolution.status !== "local_owner") {
+    return resolution;
+  }
+
+  if (bridgeRegistry.has(userId)) {
+    return resolution;
+  }
+
+  return {
+    status: "bridge_owner_missing",
+    lease: resolution.lease,
+    ownerMachineId: resolution.ownerMachineId,
+    ownerRegion: resolution.ownerRegion,
+  };
+}
+
+function sendOwnerNotLocal(
+  reply: FastifyReply,
+  resolution: OwnerResolution,
+): FastifyReply {
+  const ownerMachineId = resolution.ownerMachineId ?? "unknown";
+  const ownerRegion = resolution.ownerRegion ?? "unknown";
+  reply.header(OWNER_MACHINE_HEADER, ownerMachineId);
+  reply.header(OWNER_REGION_HEADER, ownerRegion);
+  return reply.code(503).send({
+    error: "owner_not_local",
+    ownerMachineId,
+    ownerRegion,
+  });
 }
 
 function createBrowserTicketVerifier(app: FastifyInstance) {
@@ -114,33 +193,58 @@ export async function registerBrowserWsRoutes(
   app: FastifyInstance,
 ): Promise<void> {
   const authenticateBrowserTicket = createBrowserTicketVerifier(app);
+  const ensureBrowserWsOwnerIsLocal = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<void> => {
+    const claims = extractBrowserClaims(request);
+    if (!claims) {
+      return;
+    }
+
+    const sessionId = extractSessionId(request);
+    if (!sessionId) {
+      reply.code(400).send({ error: "missing_session_id" });
+      return;
+    }
+
+    const resolution = requireLocalBridge(
+      await ownershipService.resolveOwnerForUser(claims.userId),
+      claims.userId,
+    );
+    if (resolution.status === "owner_not_local") {
+      sendOwnerNotLocal(reply, resolution);
+      return;
+    }
+
+    (
+      request as FastifyRequest & {
+        _browserAttach?: { sessionId: string; ownerResolution: OwnerResolution };
+      }
+    )._browserAttach = { sessionId, ownerResolution: resolution };
+  };
 
   app.get(
     "/ws/browser",
     {
       websocket: true,
-      preValidation: authenticateBrowserTicket,
+      preValidation: [authenticateBrowserTicket, ensureBrowserWsOwnerIsLocal],
     },
     (socket, request) => {
-      const claims = (
+      const claims = extractBrowserClaims(request);
+      const attachContext = (
         request as FastifyRequest & {
-          _wsTicketClaims?: {
-            userId: string;
-            deviceSessionId: string;
-          };
+          _browserAttach?: { sessionId: string; ownerResolution: OwnerResolution };
         }
-      )._wsTicketClaims;
+      )._browserAttach;
 
       if (!claims) {
         socket.close(1008, "unauthorized");
         return;
       }
 
-      const url = new URL(
-        request.url,
-        `http://${request.headers.host ?? "localhost"}`,
-      );
-      const sessionId = url.searchParams.get("sessionId");
+      const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+      const sessionId = attachContext?.sessionId ?? url.searchParams.get("sessionId");
       const cursorParam = url.searchParams.get("cursor");
       const cursor = cursorParam ? Number(cursorParam) : undefined;
 
@@ -183,6 +287,17 @@ export async function registerBrowserWsRoutes(
             deviceSessionId: claims.deviceSessionId,
           });
 
+          const ownerResolution = attachContext?.ownerResolution
+            ? requireLocalBridge(attachContext.ownerResolution, claims.userId)
+            : requireLocalBridge(
+                await ownershipService.resolveOwnerForUser(claims.userId),
+                claims.userId,
+              );
+          if (ownerResolution.status === "bridge_owner_missing") {
+            socket.close(1013, "bridge_owner_missing");
+            return;
+          }
+
           const id = await sessionRouter.attachBrowser({
             userId: claims.userId,
             deviceSessionId: claims.deviceSessionId,
@@ -214,16 +329,21 @@ export async function registerBrowserWsRoutes(
       preValidation: authenticateBrowserTicket,
     },
     async (request, reply) => {
-      const claims = (
-        request as FastifyRequest & {
-          _wsTicketClaims?: {
-            userId: string;
-          };
-        }
-      )._wsTicketClaims;
+      const claims = extractBrowserClaims(request);
 
       if (!claims) {
         return reply.code(401).send({ error: "missing ws-ticket" });
+      }
+
+      const ownership = requireLocalBridge(
+        await ownershipService.resolveOwnerForUser(claims.userId),
+        claims.userId,
+      );
+      if (ownership.status === "owner_not_local") {
+        return sendOwnerNotLocal(reply, ownership);
+      }
+      if (ownership.status === "bridge_owner_missing") {
+        return reply.code(503).send({ error: "bridge_owner_missing" });
       }
 
       const body = SessionListResponseSchema.parse({
@@ -240,15 +360,7 @@ export async function registerBrowserWsRoutes(
       preValidation: authenticateBrowserTicket,
     },
     async (request, reply) => {
-      const claims = (
-        request as FastifyRequest & {
-          _wsTicketClaims?: {
-            userId: string;
-          };
-          body: unknown;
-          params: { sessionId?: string };
-        }
-      )._wsTicketClaims;
+      const claims = extractBrowserClaims(request);
       const sessionId = (
         request as FastifyRequest & { params: { sessionId?: string } }
       ).params.sessionId;
@@ -259,6 +371,20 @@ export async function registerBrowserWsRoutes(
 
       if (!sessionId) {
         return reply.code(400).send({ error: "missing_session_id" });
+      }
+
+      const ownership = requireLocalBridge(
+        await resolveBrowserRouteOwnership({
+          userId: claims.userId,
+          sessionId,
+        }),
+        claims.userId,
+      );
+      if (ownership.status === "owner_not_local") {
+        return sendOwnerNotLocal(reply, ownership);
+      }
+      if (ownership.status === "bridge_owner_missing") {
+        return reply.code(503).send({ error: "bridge_owner_missing" });
       }
 
       const command = SessionCommandSchema.safeParse(request.body);
