@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 1: Identity & Pairing Foundation** - secure sign-in, QR pairing, session issuance, and Fly deployment baseline
 - [x] **Phase 2: Bridge & Codex Session Adapter** - local bridge lifecycle, Codex app-server integration, and remote attach-to-session behavior
 - [x] **Phase 3: Live Remote UI & Control** - phone-first live session timeline with prompt, steer, interrupt, and structured activity rendering
-- [ ] **Phase 4: Approval, Audit & Device Safety** - revocation, reconnect, approval surfaces, and safety rails around repeated use
+- [x] **Phase 4: Approval, Audit & Device Safety** - revocation, reconnect, approval surfaces, and safety rails around repeated use
 - [ ] **Phase 5: Multi-Instance Routing & Production Hardening** - relay ownership routing, observability, and scale-focused hardening on Fly.io
 
 ## Phase Details
@@ -105,9 +105,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 04-01: Implement device management, revocation, and session teardown
-- [ ] 04-02: Build approval-state handling and audit event persistence
-- [ ] 04-03: Add reconnect, resume, and bridge-health safety behavior
+- [x] 04-01: Implement device management, revocation, and session teardown
+- [x] 04-02: Build approval-state handling and audit event persistence
+- [x] 04-03: Add reconnect, resume, and bridge-health safety behavior
 
 ### Phase 5: Multi-Instance Routing & Production Hardening
 **Goal**: Make the relay architecture operationally credible beyond a single instance
@@ -137,5 +137,5 @@ Phases execute in numeric order: 1 -> 01.1 -> 2 -> 3 -> 4 -> 5
 | 01.1 Browser device session claim flow | 2/2 | Complete    | 2026-04-12 |
 | 2. Bridge & Codex Session Adapter | 3/3 | Complete | 2026-04-18 |
 | 3. Live Remote UI & Control | 3/3 | Complete | 2026-04-18 |
-| 4. Approval, Audit & Device Safety | 0/3 | Not started | - |
+| 4. Approval, Audit & Device Safety | 3/3 | Complete | 2026-04-18 |
 | 5. Multi-Instance Routing & Production Hardening | 0/3 | Not started | - |
