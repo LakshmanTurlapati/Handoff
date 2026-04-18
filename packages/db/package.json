@@ -29,7 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "22.10.5",
-    "drizzle-kit": "0.45.2",
+    "drizzle-kit": "0.31.10",
     "typescript": "5.7.3",
     "vitest": "2.1.8"
   }
