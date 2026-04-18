@@ -83,7 +83,7 @@ describe("relay ws-bridge route", () => {
           params: {
             sessionId: "thr_alpha",
             cursor: 3,
-            reason: "codex_session_ended",
+            reason: "codex_process_exited",
           },
         }),
       );
@@ -95,6 +95,9 @@ describe("relay ws-bridge route", () => {
       );
 
       socket.close();
+      await new Promise<void>((resolve) => {
+        socket.once("close", () => resolve());
+      });
       await flush();
       expect(bridgeRegistry.has("user-bridge")).toBe(false);
     } finally {

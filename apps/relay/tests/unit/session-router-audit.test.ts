@@ -149,7 +149,7 @@ describe("SessionRouter audit capture", () => {
         params: {
           sessionId: "session-123",
           cursor: 9,
-          reason: "bridge_disconnected",
+          reason: "bridge_unavailable",
         },
       }),
     );
@@ -161,7 +161,7 @@ describe("SessionRouter audit capture", () => {
         metadata: expect.objectContaining({
           sessionId: "session-123",
           deviceSessionId: "device-123",
-          reason: "bridge_disconnected",
+          reason: "bridge_unavailable",
           cursor: 9,
         }),
       }),
