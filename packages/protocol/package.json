@@ -18,6 +18,10 @@
     "./session": {
       "types": "./src/session.ts",
       "default": "./src/session.ts"
+    },
+    "./live-session": {
+      "types": "./src/live-session.ts",
+      "default": "./src/live-session.ts"
     }
   },
   "scripts": {

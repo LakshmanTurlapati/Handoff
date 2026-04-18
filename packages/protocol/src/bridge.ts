@@ -1,4 +1,11 @@
 import { z } from "zod";
+import {
+  ApprovalDecisionSchema,
+  LiveSessionCursorSchema,
+  LiveSessionEventSchema,
+  LiveTurnSchema,
+  TurnInterruptParamsSchema,
+} from "./live-session.js";
 
 /** Base JSON-RPC 2.0 schemas (bridge-relay channel) */
 export const JsonRpcRequestSchema = z
@@ -102,7 +109,9 @@ export type SessionDetachParams = z.infer<typeof SessionDetachParamsSchema>;
 export const SessionHistoryParamsSchema = z
   .object({
     sessionId: z.string().min(1),
-    turns: z.array(z.unknown()),
+    cursor: LiveSessionCursorSchema,
+    replayed: z.boolean().optional(),
+    turns: z.array(LiveTurnSchema),
   })
   .strict();
 
@@ -112,8 +121,7 @@ export type SessionHistoryParams = z.infer<typeof SessionHistoryParamsSchema>;
 export const SessionEventParamsSchema = z
   .object({
     sessionId: z.string().min(1),
-    eventType: z.string().min(1),
-    payload: z.unknown(),
+    event: LiveSessionEventSchema,
   })
   .strict();
 
@@ -123,6 +131,7 @@ export type SessionEventParams = z.infer<typeof SessionEventParamsSchema>;
 export const SessionEndedParamsSchema = z
   .object({
     sessionId: z.string().min(1),
+    cursor: LiveSessionCursorSchema,
     reason: z.string().min(1),
   })
   .strict();
@@ -144,11 +153,34 @@ export const ApprovalRespondParamsSchema = z
   .object({
     sessionId: z.string().min(1),
     requestId: z.union([z.string(), z.number()]),
-    decision: z.enum(["approved", "denied", "abort"]),
+    decision: ApprovalDecisionSchema,
   })
   .strict();
 
 export type ApprovalRespondParams = z.infer<typeof ApprovalRespondParamsSchema>;
+
+/** turn.steer request (relay -> bridge) */
+export const TurnSteerParamsSchema = z
+  .object({
+    sessionId: z.string().min(1),
+    userMessage: z.string().min(1),
+    targetTurnId: z.string().min(1).optional(),
+    mode: z.enum(["append", "replace"]).default("append"),
+  })
+  .strict();
+
+export type TurnSteerParams = z.infer<typeof TurnSteerParamsSchema>;
+
+/** turn.interrupt request (relay -> bridge) */
+export const TurnInterruptRequestParamsSchema = z
+  .object({
+    sessionId: z.string().min(1),
+  })
+  .merge(TurnInterruptParamsSchema.omit({ kind: true }));
+
+export type TurnInterruptRequestParams = z.infer<
+  typeof TurnInterruptRequestParamsSchema
+>;
 
 /** Standard JSON-RPC error codes used by bridge and relay */
 export const JSON_RPC_ERRORS = {
