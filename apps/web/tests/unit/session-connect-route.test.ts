@@ -4,13 +4,19 @@ import { SessionConnectResponseSchema } from "@codex-mobile/protocol/live-sessio
 const {
   mockAssertSameOrigin,
   mockMintRelayTicket,
+  mockRecordWsTicketAudit,
   mockRequireRemotePrincipal,
   mockResolveRelayPublicWebSocketUrl,
 } = vi.hoisted(() => ({
   mockAssertSameOrigin: vi.fn(),
   mockMintRelayTicket: vi.fn(),
+  mockRecordWsTicketAudit: vi.fn(),
   mockRequireRemotePrincipal: vi.fn(),
   mockResolveRelayPublicWebSocketUrl: vi.fn(),
+}));
+
+vi.mock("../../lib/session-audit", () => ({
+  recordWsTicketAudit: mockRecordWsTicketAudit,
 }));
 
 vi.mock("../../lib/live-session/server", () => ({

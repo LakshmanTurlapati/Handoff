@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const devicePageMocks = vi.hoisted(() => ({
   requireRemotePrincipal: vi.fn(),
   relayInternalFetch: vi.fn(),
+  listAuditEventsForUser: vi.fn(),
   listDeviceSessionsForUser: vi.fn(),
   refresh: vi.fn(),
 }));
@@ -36,6 +37,7 @@ vi.mock("../../lib/live-session/server", () => ({
 }));
 
 vi.mock("@codex-mobile/db", () => ({
+  listAuditEventsForUser: devicePageMocks.listAuditEventsForUser,
   listDeviceSessionsForUser: devicePageMocks.listDeviceSessionsForUser,
 }));
 
@@ -60,6 +62,7 @@ describe("DevicesPage", () => {
         revokedAt: null,
       },
     ]);
+    devicePageMocks.listAuditEventsForUser.mockResolvedValue([]);
     devicePageMocks.relayInternalFetch.mockResolvedValue(
       new Response(
         JSON.stringify({
