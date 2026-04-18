@@ -35,7 +35,9 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import {
+  AUDIT_EVENT_TYPES,
   PAIRING_STATUS_VALUES,
+  type AuditEventType,
   type PairingCreateResponse,
   type PairingStatus,
   type PairingStatusResponse,
@@ -52,12 +54,12 @@ import {
  * and the pairing verification suite stay in sync.
  */
 export const PAIRING_AUDIT_EVENTS = {
-  created: "pairing.created",
-  redeemed: "pairing.redeemed",
-  confirmed: "pairing.confirmed",
-  expired: "pairing.expired",
-  confirmFailed: "pairing.confirm_failed",
-  claimed: "pairing.claimed",
+  created: AUDIT_EVENT_TYPES.pairingCreated,
+  redeemed: AUDIT_EVENT_TYPES.pairingRedeemed,
+  confirmed: AUDIT_EVENT_TYPES.pairingConfirmed,
+  expired: AUDIT_EVENT_TYPES.pairingExpired,
+  confirmFailed: AUDIT_EVENT_TYPES.pairingConfirmFailed,
+  claimed: AUDIT_EVENT_TYPES.pairingClaimed,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -160,7 +162,7 @@ class InMemoryPairingStore implements PairingStore {
 
 /** Shape of an `audit_events` row written by the pairing service. */
 export interface AuditRow {
-  eventType: string;
+  eventType: AuditEventType;
   userId: string | null;
   subject: string | null;
   outcome: "success" | "failure";
@@ -262,7 +264,7 @@ export async function createPairing(
   await store.insert(row);
 
   await auditStore.record({
-    eventType: PAIRING_AUDIT_EVENTS.created,
+    eventType: AUDIT_EVENT_TYPES.pairingCreated,
     userId: null,
     subject: pairingId,
     outcome: "success",
@@ -361,7 +363,7 @@ export async function redeemPairing(
   });
 
   await auditStore.record({
-    eventType: PAIRING_AUDIT_EVENTS.redeemed,
+    eventType: AUDIT_EVENT_TYPES.pairingRedeemed,
     userId: input.userId,
     subject: input.pairingId,
     outcome: "success",
@@ -421,7 +423,7 @@ export async function confirmPairing(
 
   if (row.status !== "pending" && row.status !== "redeemed") {
     await auditStore.record({
-      eventType: PAIRING_AUDIT_EVENTS.confirmFailed,
+      eventType: AUDIT_EVENT_TYPES.pairingConfirmFailed,
       userId: input.userId,
       subject: input.pairingId,
       outcome: "failure",
@@ -446,7 +448,7 @@ export async function confirmPairing(
   // above and never reach this point.
   if (!verifyPairingTokenHash(input.pairingToken, row.pairingTokenHash)) {
     await auditStore.record({
-      eventType: PAIRING_AUDIT_EVENTS.confirmFailed,
+      eventType: AUDIT_EVENT_TYPES.pairingConfirmFailed,
       userId: input.userId,
       subject: input.pairingId,
       outcome: "failure",
@@ -458,7 +460,7 @@ export async function confirmPairing(
 
   if (!row.verificationPhrase) {
     await auditStore.record({
-      eventType: PAIRING_AUDIT_EVENTS.confirmFailed,
+      eventType: AUDIT_EVENT_TYPES.pairingConfirmFailed,
       userId: input.userId,
       subject: input.pairingId,
       outcome: "failure",
@@ -474,7 +476,7 @@ export async function confirmPairing(
     !constantTimeEqual(row.verificationPhrase, input.verificationPhrase)
   ) {
     await auditStore.record({
-      eventType: PAIRING_AUDIT_EVENTS.confirmFailed,
+      eventType: AUDIT_EVENT_TYPES.pairingConfirmFailed,
       userId: input.userId,
       subject: input.pairingId,
       outcome: "failure",
@@ -492,7 +494,7 @@ export async function confirmPairing(
   });
 
   await auditStore.record({
-    eventType: PAIRING_AUDIT_EVENTS.confirmed,
+    eventType: AUDIT_EVENT_TYPES.pairingConfirmed,
     userId: confirmedByUserId,
     subject: row.id,
     outcome: "success",
@@ -588,7 +590,7 @@ async function loadOrExpire(
       cancelledAt: currentTime,
     });
     await auditStore.record({
-      eventType: PAIRING_AUDIT_EVENTS.expired,
+      eventType: AUDIT_EVENT_TYPES.pairingExpired,
       userId: null,
       subject: pairingId,
       outcome: "success",
