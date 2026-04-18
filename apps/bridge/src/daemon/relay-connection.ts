@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import { EventEmitter } from "node:events";
 import { mintWsTicket } from "@codex-mobile/auth/ws-ticket";
-import { createNotification } from "./jsonrpc.js";
+import { createNotification } from "../lib/jsonrpc.js";
 
 export interface RelayConnectionOptions {
   relayUrl: string;

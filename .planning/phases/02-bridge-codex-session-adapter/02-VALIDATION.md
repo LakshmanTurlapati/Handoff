@@ -19,7 +19,7 @@ created: 2026-04-18
 |----------|-------|
 | **Framework** | Vitest workspace (`phase-01-unit`) for bridge + relay unit/integration coverage |
 | **Config file** | `vitest.workspace.ts` |
-| **Quick run command** | `vitest run --project phase-01-unit apps/bridge/tests/codex-adapter.test.ts apps/bridge/tests/codex-event-normalizer.test.ts apps/bridge/tests/session-flow.test.ts apps/bridge/tests/event-relay.test.ts apps/relay/tests/ws-bridge.test.ts` |
+| **Quick run command** | `vitest run --project phase-01-unit apps/bridge/tests/unit/codex-adapter.test.ts apps/bridge/tests/unit/codex-event-normalizer.test.ts apps/bridge/tests/unit/session-flow.test.ts apps/bridge/tests/unit/event-relay.test.ts apps/relay/tests/unit/ws-bridge.test.ts` |
 | **Full suite command** | `npm run typecheck && vitest run --project phase-01-unit` |
 | **Estimated runtime** | ~20-60 seconds depending on mocked integration coverage |
 
@@ -42,9 +42,9 @@ created: 2026-04-18
 | 02-02-01 | 02 | 2 | SESS-02 | unit | `vitest run --project phase-01-unit apps/bridge/tests/unit/codex-adapter.test.ts` | ✅ | ✅ green |
 | 02-02-02 | 02 | 2 | SESS-03 | unit | `vitest run --project phase-01-unit apps/bridge/tests/unit/codex-adapter.test.ts apps/bridge/tests/unit/codex-event-normalizer.test.ts` | ✅ | ✅ green |
 | 02-02-03 | 02 | 2 | SEC-02 | unit | `vitest run --project phase-01-unit apps/bridge/tests/unit/codex-event-normalizer.test.ts` | ✅ | ✅ green |
-| 02-03-01 | 03 | 2 | SESS-02 | integration | `vitest run --project phase-01-unit apps/bridge/tests/session-flow.test.ts` | ❌ W0 | ⬜ pending |
-| 02-03-02 | 03 | 2 | SESS-03 | integration | `vitest run --project phase-01-unit apps/bridge/tests/session-flow.test.ts apps/bridge/tests/event-relay.test.ts` | ❌ W0 | ⬜ pending |
-| 02-03-03 | 03 | 2 | SEC-02 | integration | `vitest run --project phase-01-unit apps/bridge/tests/event-relay.test.ts apps/relay/tests/ws-bridge.test.ts` | ❌ W0 | ⬜ pending |
+| 02-03-01 | 03 | 2 | SESS-02 | integration | `vitest run --project phase-01-unit apps/bridge/tests/unit/session-flow.test.ts` | ✅ | ✅ green |
+| 02-03-02 | 03 | 2 | SESS-03 | integration | `vitest run --project phase-01-unit apps/bridge/tests/unit/session-flow.test.ts apps/bridge/tests/unit/event-relay.test.ts` | ✅ | ✅ green |
+| 02-03-03 | 03 | 2 | SEC-02 | integration | `vitest run --project phase-01-unit apps/bridge/tests/unit/event-relay.test.ts apps/relay/tests/unit/ws-bridge.test.ts` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky · ⏭ gated/skipped*
 
@@ -54,15 +54,15 @@ created: 2026-04-18
 
 - [x] `apps/bridge/src/daemon/codex-adapter.ts` — stdio app-server adapter with initialize handshake
 - [x] `apps/bridge/src/daemon/codex-event-normalizer.ts` — Codex notification to live-session translation
-- [ ] `apps/bridge/src/daemon/session-manager.ts` — one-active-session guard and session metadata cache
-- [ ] `apps/bridge/src/daemon/bridge-daemon.ts` — bridge orchestration for relay + Codex adapter
-- [ ] `apps/bridge/src/daemon/message-router.ts` — session list/attach/command routing
-- [ ] `apps/bridge/src/cli/daemon.ts` — daemon entry point
+- [x] `apps/bridge/src/daemon/session-manager.ts` — one-active-session guard and session metadata cache
+- [x] `apps/bridge/src/daemon/bridge-daemon.ts` — bridge orchestration for relay + Codex adapter
+- [x] `apps/bridge/src/daemon/message-router.ts` — session list/attach/command routing
+- [x] `apps/bridge/src/cli/daemon.ts` — daemon entry point
 - [x] `apps/bridge/tests/unit/codex-adapter.test.ts` — mocked stdio adapter coverage
 - [x] `apps/bridge/tests/unit/codex-event-normalizer.test.ts` — normalized event coverage
-- [ ] `apps/bridge/tests/session-flow.test.ts` — list/attach/history integration coverage
-- [ ] `apps/bridge/tests/event-relay.test.ts` — event fanout and failure handling coverage
-- [ ] `apps/relay/tests/ws-bridge.test.ts` — bridge route expectations remain green with richer bridge traffic
+- [x] `apps/bridge/tests/unit/session-flow.test.ts` — list/attach/history integration coverage
+- [x] `apps/bridge/tests/unit/event-relay.test.ts` — event fanout and failure handling coverage
+- [x] `apps/relay/tests/unit/ws-bridge.test.ts` — bridge route expectations remain green with richer bridge traffic
 
 ---
 

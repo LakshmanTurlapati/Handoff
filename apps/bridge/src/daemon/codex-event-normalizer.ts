@@ -86,12 +86,14 @@ function normalizeHistoryActivity(
   index: number,
 ): LiveActivity {
   const record = asRecord(item) ?? {};
-  const itemType = readString(record, "kind", "type", "method") ?? "system";
+  const itemType = (
+    readString(record, "kind", "type", "method") ?? "system"
+  ).toLowerCase();
   const text =
     readString(record, "text", "preview", "delta", "message", "reason") ??
     "Codex activity";
 
-  if (itemType.includes("assistant")) {
+  if (itemType.includes("assistant") || itemType.includes("agentmessage")) {
     return {
       kind: "assistant",
       ...createActivityBase("assistant", turnId, `assistant-${index}`, text, occurredAt),
@@ -235,6 +237,27 @@ export function normalizeCodexServerEvent(input: {
         },
       };
     }
+    case "turn/started":
+      return {
+        kind: "activity.appended",
+        sessionId: input.sessionId,
+        cursor: input.cursor,
+        occurredAt,
+        isLive: true,
+        stateLabel: "Running",
+        actorDetail: "Codex started a turn",
+        activity: {
+          kind: "system",
+          ...createActivityBase(
+            "system",
+            turnId,
+            `turn-started-${input.cursor}`,
+            "Codex started working on a new turn.",
+            occurredAt,
+          ),
+          detail: "The local Codex session accepted the remote prompt.",
+        },
+      };
     case "item/commandExecution/started": {
       const command =
         (params ? readString(params, "command") : null) ?? "Codex command";
@@ -254,8 +277,32 @@ export function normalizeCodexServerEvent(input: {
         },
       };
     }
+    case "item/started": {
+      const item = params ? asRecord(params.item) : null;
+      if (!item || readString(item, "type") !== "commandExecution") {
+        return null;
+      }
+
+      const command = readString(item, "command") ?? "Codex command";
+      return {
+        kind: "activity.appended",
+        sessionId: input.sessionId,
+        cursor: input.cursor,
+        occurredAt,
+        isLive: true,
+        stateLabel: "Running command",
+        actorDetail: "Codex is executing a command",
+        activity: {
+          kind: "command",
+          ...createActivityBase("command", turnId, `command-${input.cursor}`, command, occurredAt),
+          detail: readString(item, "cwd") ?? undefined,
+          command,
+        },
+      };
+    }
     case "thread/ended":
     case "session/ended":
+    case "thread/closed":
       return {
         kind: "session.ended",
         sessionId: input.sessionId,

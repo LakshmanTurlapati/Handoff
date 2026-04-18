@@ -160,6 +160,44 @@ export class CodexAdapter extends EventEmitter {
     });
   }
 
+  async startTurn(sessionId: string, userMessage: string): Promise<unknown> {
+    return this.request("turn/start", {
+      threadId: sessionId,
+      input: [
+        {
+          type: "text",
+          text: userMessage,
+          text_elements: [],
+        },
+      ],
+    });
+  }
+
+  async steerTurn(
+    sessionId: string,
+    userMessage: string,
+    expectedTurnId: string,
+  ): Promise<unknown> {
+    return this.request("turn/steer", {
+      threadId: sessionId,
+      expectedTurnId,
+      input: [
+        {
+          type: "text",
+          text: userMessage,
+          text_elements: [],
+        },
+      ],
+    });
+  }
+
+  async interruptTurn(sessionId: string, turnId: string): Promise<unknown> {
+    return this.request("turn/interrupt", {
+      threadId: sessionId,
+      turnId,
+    });
+  }
+
   async respondToApproval(
     requestId: string | number,
     decision: "approved" | "denied" | "abort",

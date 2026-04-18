@@ -13,7 +13,7 @@ Codex Mobile will start by establishing trust boundaries and secure device pairi
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Identity & Pairing Foundation** - secure sign-in, QR pairing, session issuance, and Fly deployment baseline
-- [ ] **Phase 2: Bridge & Codex Session Adapter** - local bridge lifecycle, Codex app-server integration, and remote attach-to-session behavior
+- [x] **Phase 2: Bridge & Codex Session Adapter** - local bridge lifecycle, Codex app-server integration, and remote attach-to-session behavior
 - [x] **Phase 3: Live Remote UI & Control** - phone-first live session timeline with prompt, steer, interrupt, and structured activity rendering
 - [ ] **Phase 4: Approval, Audit & Device Safety** - revocation, reconnect, approval surfaces, and safety rails around repeated use
 - [ ] **Phase 5: Multi-Instance Routing & Production Hardening** - relay ownership routing, observability, and scale-focused hardening on Fly.io
@@ -73,7 +73,7 @@ Plans:
 Plans:
 - [x] 02-01: Build local bridge daemon lifecycle and relay registration
 - [x] 02-02: Integrate local `codex app-server` and normalize core thread/turn/session events
-- [ ] 02-03: Implement session listing, attach/resume behavior, and local failure handling
+- [x] 02-03: Implement session listing, attach/resume behavior, and local failure handling
 
 ### Phase 3: Live Remote UI & Control
 **Goal**: Deliver the core remote-control experience on a phone-sized web UI
@@ -135,7 +135,7 @@ Phases execute in numeric order: 1 -> 01.1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Identity & Pairing Foundation | 7/7 | Complete | - |
 | 01.1 Browser device session claim flow | 2/2 | Complete    | 2026-04-12 |
-| 2. Bridge & Codex Session Adapter | 2/3 | In Progress | - |
+| 2. Bridge & Codex Session Adapter | 3/3 | Complete | 2026-04-18 |
 | 3. Live Remote UI & Control | 3/3 | Complete | 2026-04-18 |
 | 4. Approval, Audit & Device Safety | 0/3 | Not started | - |
 | 5. Multi-Instance Routing & Production Hardening | 0/3 | Not started | - |
