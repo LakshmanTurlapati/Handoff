@@ -19,6 +19,7 @@
  */
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerHealthRoutes } from "./routes/health";
+import { registerBridgeWsRoutes } from "./routes/ws-bridge.js";
 
 /** Options accepted by {@link buildRelayServer}. */
 export interface BuildRelayServerOptions {
@@ -32,19 +33,17 @@ export interface BuildRelayServerOptions {
  * `startRelayServer` to bind a real listener or by tests via
  * `fastify.inject()`.
  */
-export function buildRelayServer(
+export async function buildRelayServer(
   options: BuildRelayServerOptions = {},
-): FastifyInstance {
+): Promise<FastifyInstance> {
   const app = Fastify({
     logger: options.logger ?? false,
     trustProxy: true,
     disableRequestLogging: true,
   });
 
-  // /healthz + /readyz are the only routes registered in Phase 1.
-  // Plan 02-01 will add the bridge WebSocket upgrade gate on top of
-  // this foundation without changing the health endpoints.
   registerHealthRoutes(app);
+  await registerBridgeWsRoutes(app);
 
   return app;
 }

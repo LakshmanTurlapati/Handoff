@@ -6,3 +6,4 @@
  */
 export * from "./pairing.js";
 export * from "./session.js";
+export * from "./bridge.js";
