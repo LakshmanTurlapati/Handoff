@@ -3,7 +3,7 @@ phase: 03
 slug: live-remote-ui-control
 status: approved
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-04-18
 ---
 
@@ -43,25 +43,25 @@ created: 2026-04-18
 | 03-02-01 | 02 | 1 | LIVE-01 | unit | `vitest run --project phase-01-unit apps/relay/tests/unit/ws-browser.test.ts apps/web/tests/unit/session-connect-route.test.ts` | ✅ | ✅ green |
 | 03-02-02 | 02 | 1 | SESS-04 | unit | `vitest run --project phase-01-unit apps/relay/tests/unit/ws-browser.test.ts apps/web/tests/unit/session-connect-route.test.ts` | ✅ | ✅ green |
 | 03-02-03 | 02 | 1 | SESS-05 | unit | `vitest run --project phase-01-unit apps/relay/tests/unit/ws-browser.test.ts apps/web/tests/unit/session-connect-route.test.ts` | ✅ | ✅ green |
-| 03-03-01 | 03 | 2 | LIVE-01 | unit | `vitest run --project phase-03-web apps/web/tests/unit/session-shell.test.tsx` | ❌ W0 | ⬜ pending |
-| 03-03-02 | 03 | 2 | SESS-04 | e2e | `npx playwright test apps/web/tests/live-session-mobile.spec.ts` | ❌ W0 | ⬜ pending |
-| 03-03-03 | 03 | 2 | SESS-05 | e2e | `npx playwright test apps/web/tests/live-session-mobile.spec.ts` | ❌ W0 | ⬜ pending |
-| 03-03-04 | 03 | 2 | LIVE-04 | e2e | `npx playwright test apps/web/tests/live-session-mobile.spec.ts` | ❌ W0 | ⬜ pending |
+| 03-03-01 | 03 | 2 | LIVE-01 | unit | `vitest run --project phase-03-web apps/web/tests/unit/session-shell.test.tsx` | ✅ | ✅ green |
+| 03-03-02 | 03 | 2 | SESS-04 | e2e | `npx playwright test apps/web/tests/live-session-mobile.spec.ts` | ✅ | ⏭ gated (`CODEX_MOBILE_E2E_LIVE`) |
+| 03-03-03 | 03 | 2 | SESS-05 | e2e | `npx playwright test apps/web/tests/live-session-mobile.spec.ts` | ✅ | ⏭ gated (`CODEX_MOBILE_E2E_LIVE`) |
+| 03-03-04 | 03 | 2 | LIVE-04 | e2e | `npx playwright test apps/web/tests/live-session-mobile.spec.ts` | ✅ | ⏭ gated (`CODEX_MOBILE_E2E_LIVE`) |
 
-*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
+*Status: ⬜ pending · ✅ green · ⏭ gated/skipped · ❌ red · ⚠️ flaky*
 
 ---
 
 ## Wave 0 Requirements
 
 - [x] `apps/web/tests/unit/live-session-reducer.test.ts` — reducer coverage for turn grouping, follow mode, and pending interrupt
-- [ ] `apps/web/package.json` — add `jsdom`, `@testing-library/react`, and `@testing-library/jest-dom`
-- [ ] `apps/web/tests/setup.ts` — shared RTL/jest-dom setup for jsdom tests
-- [ ] `apps/web/tests/unit/session-shell.test.tsx` — connected shell coverage for reconnect, approval, and `Jump to live`
+- [x] `apps/web/package.json` — add `jsdom`, `@testing-library/react`, and `@testing-library/jest-dom`
+- [x] `apps/web/tests/setup.ts` — shared RTL/jest-dom setup for jsdom tests
+- [x] `apps/web/tests/unit/session-shell.test.tsx` — connected shell coverage for reconnect, approval, and `Jump to live`
 - [x] `apps/relay/tests/unit/ws-browser.test.ts` — relay browser upgrade auth, replay rejection, and owner routing
 - [x] `apps/web/tests/unit/session-connect-route.test.ts` — ws-ticket boot route validation and no URL credential leakage
-- [ ] `apps/web/tests/live-session-mobile.spec.ts` — mobile smoke coverage for composer, reconnect, and approval visibility
-- [ ] `vitest.workspace.ts` — `phase-03-web` jsdom project for `.test.tsx` files
+- [x] `apps/web/tests/live-session-mobile.spec.ts` — mobile smoke coverage for composer, reconnect, and approval visibility
+- [x] `vitest.workspace.ts` — `phase-03-web` jsdom project for `.test.tsx` files
 
 ---
 

@@ -25,13 +25,13 @@
 - [ ] **SESS-01**: Local bridge can register a Codex session with the hosted relay using outbound secure connectivity only
 - [ ] **SESS-02**: User can see active and recent Codex sessions available for remote control
 - [ ] **SESS-03**: User can attach to an existing Codex session and continue the same conversation history remotely
-- [ ] **SESS-04**: User can start a new turn or steer an in-flight turn from the remote UI
-- [ ] **SESS-05**: User can interrupt or intentionally end a remote session from the remote UI
+- [x] **SESS-04**: User can start a new turn or steer an in-flight turn from the remote UI
+- [x] **SESS-05**: User can interrupt or intentionally end a remote session from the remote UI
 - [ ] **SESS-06**: Session ends cleanly when the local Codex process stops or the device/session is revoked
 
 ### Live Activity
 
-- [ ] **LIVE-01**: Remote UI streams Codex agent events, progress, and assistant output in near real time
+- [x] **LIVE-01**: Remote UI streams Codex agent events, progress, and assistant output in near real time
 - [x] **LIVE-02**: Remote UI distinguishes agent messages, tool activity, command execution, and approval state instead of showing one undifferentiated log
 - [ ] **LIVE-03**: Remote UI can recover from short network interruptions and resume the live stream without creating a new session
 - [x] **LIVE-04**: Remote UI is usable on phone-sized screens without requiring a full desktop terminal layout
@@ -94,10 +94,10 @@
 | SESS-01 | Phase 2 | Pending |
 | SESS-02 | Phase 2 | Pending |
 | SESS-03 | Phase 2 | Pending |
-| SESS-04 | Phase 3 | Pending |
-| SESS-05 | Phase 3 | Pending |
+| SESS-04 | Phase 3 | Complete |
+| SESS-05 | Phase 3 | Complete |
 | SESS-06 | Phase 4 | Pending |
-| LIVE-01 | Phase 3 | Pending |
+| LIVE-01 | Phase 3 | Complete |
 | LIVE-02 | Phase 3 | Complete |
 | LIVE-03 | Phase 4 | Pending |
 | LIVE-04 | Phase 3 | Complete |
@@ -119,4 +119,4 @@
 
 ---
 *Requirements defined: 2026-04-06*
-*Last updated: 2026-04-18 after Phase 03-01 progress update*
+*Last updated: 2026-04-18 after Phase 03 completion*

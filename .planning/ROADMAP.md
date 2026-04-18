@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Identity & Pairing Foundation** - secure sign-in, QR pairing, session issuance, and Fly deployment baseline
 - [ ] **Phase 2: Bridge & Codex Session Adapter** - local bridge lifecycle, Codex app-server integration, and remote attach-to-session behavior
-- [ ] **Phase 3: Live Remote UI & Control** - phone-first live session timeline with prompt, steer, interrupt, and structured activity rendering
+- [x] **Phase 3: Live Remote UI & Control** - phone-first live session timeline with prompt, steer, interrupt, and structured activity rendering
 - [ ] **Phase 4: Approval, Audit & Device Safety** - revocation, reconnect, approval surfaces, and safety rails around repeated use
 - [ ] **Phase 5: Multi-Instance Routing & Production Hardening** - relay ownership routing, observability, and scale-focused hardening on Fly.io
 
@@ -90,7 +90,7 @@ Plans:
 Plans:
 - [x] 03-01: Build the mobile session shell, timeline, and structured activity renderer
 - [x] 03-02: Implement live stream transport plus prompt, steer, and interrupt controls
-- [ ] 03-03: Polish small-screen interaction patterns and Codex-specific control affordances
+- [x] 03-03: Polish small-screen interaction patterns and Codex-specific control affordances
 
 ### Phase 4: Approval, Audit & Device Safety
 **Goal**: Make repeated remote use safe through revocation, reconnect, audit, and clear approval handling
@@ -136,6 +136,6 @@ Phases execute in numeric order: 1 -> 01.1 -> 2 -> 3 -> 4 -> 5
 | 1. Identity & Pairing Foundation | 7/7 | Complete | - |
 | 01.1 Browser device session claim flow | 2/2 | Complete    | 2026-04-12 |
 | 2. Bridge & Codex Session Adapter | 0/3 | Not started | - |
-| 3. Live Remote UI & Control | 2/3 | In Progress | - |
+| 3. Live Remote UI & Control | 3/3 | Complete | 2026-04-18 |
 | 4. Approval, Audit & Device Safety | 0/3 | Not started | - |
 | 5. Multi-Instance Routing & Production Hardening | 0/3 | Not started | - |
