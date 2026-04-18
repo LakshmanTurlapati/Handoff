@@ -12,10 +12,13 @@ import {
   ownershipService,
   type OwnerResolution,
 } from "../ownership/ownership-service.js";
+import { sendFlyReplay } from "../ownership/replay-routing.js";
 
 const BROWSER_PROTOCOL = "codex-mobile.live.v1";
 const OWNER_MACHINE_HEADER = "x-codex-owner-machine-id";
 const OWNER_REGION_HEADER = "x-codex-owner-region";
+const REPLAY_FAILED_HEADER = "fly-replay-failed";
+const REPLAY_SOURCE_HEADER = "fly-replay-src";
 
 type BrowserClaims = {
   userId: string;
@@ -64,6 +67,20 @@ function extractSessionId(request: FastifyRequest): string | undefined {
   return url.searchParams.get("sessionId") ?? undefined;
 }
 
+function getHeaderValue(
+  request: FastifyRequest,
+  headerName: string,
+): string | undefined {
+  const value = request.headers[headerName];
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return undefined;
+}
+
 async function resolveBrowserRouteOwnership(input: {
   userId: string;
   sessionId?: string;
@@ -100,7 +117,54 @@ function requireLocalBridge(
   };
 }
 
-function sendOwnerNotLocal(
+function buildReplayState(claims: BrowserClaims, sessionId?: string): string {
+  return `browser:${claims.userId}:${sessionId ?? "list"}:${claims.deviceSessionId}`;
+}
+
+function hasReplayFailed(request: FastifyRequest): boolean {
+  return getHeaderValue(request, REPLAY_FAILED_HEADER) != null;
+}
+
+function extractReplaySource(request: FastifyRequest): string | undefined {
+  return getHeaderValue(request, REPLAY_SOURCE_HEADER);
+}
+
+function hasReplayAttempt(request: FastifyRequest): boolean {
+  return hasReplayFailed(request) || extractReplaySource(request) != null;
+}
+
+function extractReplayStateFromSource(
+  replaySource: string | undefined,
+): string | undefined {
+  if (!replaySource) {
+    return undefined;
+  }
+
+  const match = replaySource.match(/(?:^|[;, ])state=([^;,\s]+)/);
+  return match?.[1] ?? undefined;
+}
+
+function logReplayBranch(
+  request: FastifyRequest,
+  input: {
+    event: string;
+    resolution: OwnerResolution;
+    replayState: string;
+  },
+): void {
+  request.log.info({
+    event: input.event,
+    ownerMachineId: input.resolution.ownerMachineId ?? "unknown",
+    ownerRegion: input.resolution.ownerRegion ?? "unknown",
+    replayState:
+      extractReplayStateFromSource(extractReplaySource(request)) ??
+      input.replayState,
+    replaySource: extractReplaySource(request) ?? null,
+    replayFailed: hasReplayFailed(request),
+  });
+}
+
+function sendOwnerUnavailable(
   reply: FastifyReply,
   resolution: OwnerResolution,
 ): FastifyReply {
@@ -109,7 +173,7 @@ function sendOwnerNotLocal(
   reply.header(OWNER_MACHINE_HEADER, ownerMachineId);
   reply.header(OWNER_REGION_HEADER, ownerRegion);
   return reply.code(503).send({
-    error: "owner_not_local",
+    error: "owner_unavailable",
     ownerMachineId,
     ownerRegion,
   });
@@ -208,12 +272,33 @@ export async function registerBrowserWsRoutes(
       return;
     }
 
+    const replayState = buildReplayState(claims, sessionId);
     const resolution = requireLocalBridge(
       await ownershipService.resolveOwnerForUser(claims.userId),
       claims.userId,
     );
+    if (
+      hasReplayFailed(request) ||
+      (hasReplayAttempt(request) && resolution.status === "bridge_owner_missing")
+    ) {
+      logReplayBranch(request, {
+        event: "browser_replay_failed",
+        resolution,
+        replayState,
+      });
+      sendOwnerUnavailable(reply, resolution);
+      return;
+    }
     if (resolution.status === "owner_not_local") {
-      sendOwnerNotLocal(reply, resolution);
+      logReplayBranch(request, {
+        event: "browser_replay_requested",
+        resolution,
+        replayState,
+      });
+      sendFlyReplay(reply, {
+        ownerMachineId: resolution.ownerMachineId ?? "unknown",
+        state: replayState,
+      });
       return;
     }
 
@@ -335,12 +420,32 @@ export async function registerBrowserWsRoutes(
         return reply.code(401).send({ error: "missing ws-ticket" });
       }
 
+      const replayState = buildReplayState(claims);
       const ownership = requireLocalBridge(
         await ownershipService.resolveOwnerForUser(claims.userId),
         claims.userId,
       );
+      if (
+        hasReplayFailed(request) ||
+        (hasReplayAttempt(request) && ownership.status === "bridge_owner_missing")
+      ) {
+        logReplayBranch(request, {
+          event: "browser_replay_failed",
+          resolution: ownership,
+          replayState,
+        });
+        return sendOwnerUnavailable(reply, ownership);
+      }
       if (ownership.status === "owner_not_local") {
-        return sendOwnerNotLocal(reply, ownership);
+        logReplayBranch(request, {
+          event: "browser_replay_requested",
+          resolution: ownership,
+          replayState,
+        });
+        return sendFlyReplay(reply, {
+          ownerMachineId: ownership.ownerMachineId ?? "unknown",
+          state: replayState,
+        });
       }
       if (ownership.status === "bridge_owner_missing") {
         return reply.code(503).send({ error: "bridge_owner_missing" });
@@ -373,6 +478,7 @@ export async function registerBrowserWsRoutes(
         return reply.code(400).send({ error: "missing_session_id" });
       }
 
+      const replayState = buildReplayState(claims, sessionId);
       const ownership = requireLocalBridge(
         await resolveBrowserRouteOwnership({
           userId: claims.userId,
@@ -380,8 +486,27 @@ export async function registerBrowserWsRoutes(
         }),
         claims.userId,
       );
+      if (
+        hasReplayFailed(request) ||
+        (hasReplayAttempt(request) && ownership.status === "bridge_owner_missing")
+      ) {
+        logReplayBranch(request, {
+          event: "browser_replay_failed",
+          resolution: ownership,
+          replayState,
+        });
+        return sendOwnerUnavailable(reply, ownership);
+      }
       if (ownership.status === "owner_not_local") {
-        return sendOwnerNotLocal(reply, ownership);
+        logReplayBranch(request, {
+          event: "browser_replay_requested",
+          resolution: ownership,
+          replayState,
+        });
+        return sendFlyReplay(reply, {
+          ownerMachineId: ownership.ownerMachineId ?? "unknown",
+          state: replayState,
+        });
       }
       if (ownership.status === "bridge_owner_missing") {
         return reply.code(503).send({ error: "bridge_owner_missing" });
