@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { verifyWsTicket } from "@codex-mobile/auth/ws-ticket";
+import { findDeviceSessionForPrincipal } from "@codex-mobile/db";
 import {
   SessionCommandSchema,
   SessionCommandResponseSchema,
@@ -83,6 +84,32 @@ function createBrowserTicketVerifier(app: FastifyInstance) {
   };
 }
 
+async function validateBrowserDeviceSession(input: {
+  userId: string;
+  deviceSessionId: string;
+}): Promise<void> {
+  const deviceSession = await findDeviceSessionForPrincipal({
+    deviceSessionId: input.deviceSessionId,
+    userId: input.userId,
+  });
+
+  if (!deviceSession) {
+    throw new Error("device_session_required");
+  }
+
+  if (deviceSession.userId !== input.userId) {
+    throw new Error("user_mismatch");
+  }
+
+  if (deviceSession.revokedAt) {
+    throw new Error("device_session_revoked");
+  }
+
+  if (deviceSession.expiresAt.getTime() <= Date.now()) {
+    throw new Error("device_session_expired");
+  }
+}
+
 export async function registerBrowserWsRoutes(
   app: FastifyInstance,
 ): Promise<void> {
@@ -124,26 +151,13 @@ export async function registerBrowserWsRoutes(
 
       let browserId: string | null = null;
       let closed = false;
-      void sessionRouter
-        .attachBrowser({
-          userId: claims.userId,
-          deviceSessionId: claims.deviceSessionId,
-          sessionId,
-          socket,
-          cursor: Number.isFinite(cursor) ? cursor : undefined,
-        })
-        .then((id) => {
-          if (closed) {
-            sessionRouter.unregisterBrowser(id);
-            return;
-          }
-          browserId = id;
-        })
-        .catch(() => {
-          socket.close(1011, "attach failed");
-        });
+      let attached = false;
 
       socket.on("message", (data) => {
+        if (!attached) {
+          return;
+        }
+
         void sessionRouter.handleBrowserMessage(
           claims.userId,
           sessionId,
@@ -161,6 +175,36 @@ export async function registerBrowserWsRoutes(
         closed = true;
         if (browserId) sessionRouter.unregisterBrowser(browserId);
       });
+
+      void (async () => {
+        try {
+          await validateBrowserDeviceSession({
+            userId: claims.userId,
+            deviceSessionId: claims.deviceSessionId,
+          });
+
+          const id = await sessionRouter.attachBrowser({
+            userId: claims.userId,
+            deviceSessionId: claims.deviceSessionId,
+            sessionId,
+            socket,
+            cursor: Number.isFinite(cursor) ? cursor : undefined,
+          });
+
+          if (closed) {
+            sessionRouter.unregisterBrowser(id);
+            return;
+          }
+
+          browserId = id;
+          attached = true;
+        } catch (error) {
+          socket.close(
+            1008,
+            error instanceof Error ? error.message : "attach failed",
+          );
+        }
+      })();
     },
   );
 

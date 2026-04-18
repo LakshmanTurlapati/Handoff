@@ -168,9 +168,19 @@ export const LiveSessionInterruptFinishedEventSchema = LiveSessionEventBaseSchem
   },
 ).strict();
 
+export const LiveSessionEndedReasonSchema = z.enum([
+  "device_session_revoked",
+  "device_session_expired",
+  "bridge_unavailable",
+  "codex_process_exited",
+  "detached",
+]);
+
+export type LiveSessionEndedReason = z.infer<typeof LiveSessionEndedReasonSchema>;
+
 export const LiveSessionEndedEventSchema = LiveSessionEventBaseSchema.extend({
   kind: z.literal("session.ended"),
-  reason: z.string().min(1),
+  reason: LiveSessionEndedReasonSchema,
 }).strict();
 
 export const LiveSessionErrorEventSchema = LiveSessionEventBaseSchema.extend({

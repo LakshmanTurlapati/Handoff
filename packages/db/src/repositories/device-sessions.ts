@@ -17,8 +17,8 @@ export interface CreateDeviceSessionRecordInput {
 
 export interface FindDeviceSessionForPrincipalInput {
   deviceSessionId: string;
-  userId: string;
-  cookieTokenHash: string;
+  userId?: string;
+  cookieTokenHash?: string;
 }
 
 export async function createDeviceSessionRecord(
@@ -58,12 +58,24 @@ export async function createDeviceSessionRecord(
 
 export async function findDeviceSessionForPrincipal({
   deviceSessionId,
+  userId,
+  cookieTokenHash,
 }: FindDeviceSessionForPrincipalInput): Promise<DeviceSessionRow | null> {
   const db = getDb();
+  const conditions = [eq(device_sessions.id, deviceSessionId)];
+
+  if (userId) {
+    conditions.push(eq(device_sessions.userId, userId));
+  }
+
+  if (cookieTokenHash) {
+    conditions.push(eq(device_sessions.cookieTokenHash, cookieTokenHash));
+  }
+
   const [row] = await db
     .select()
     .from(device_sessions)
-    .where(eq(device_sessions.id, deviceSessionId))
+    .where(and(...conditions))
     .limit(1);
 
   return row ?? null;
