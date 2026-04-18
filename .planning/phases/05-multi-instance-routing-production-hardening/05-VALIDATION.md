@@ -20,7 +20,7 @@ created: 2026-04-18
 | **Framework** | Vitest workspace (`phase-01-unit`) for relay/db/bridge unit and WebSocket integration coverage |
 | **Config file** | `vitest.workspace.ts` |
 | **Quick run command** | `vitest run apps/relay/tests/unit/ws-bridge.test.ts apps/relay/tests/unit/ws-browser.test.ts apps/relay/tests/unit/ws-browser-reconnect.test.ts apps/relay/tests/unit/session-router-safety.test.ts` |
-| **Full suite command** | `npm run typecheck && vitest run apps/relay/tests/unit/ws-bridge.test.ts apps/relay/tests/unit/ws-browser.test.ts apps/relay/tests/unit/ws-browser-reconnect.test.ts apps/relay/tests/unit/session-router-safety.test.ts apps/relay/tests/unit/ownership-service.test.ts apps/relay/tests/unit/ws-browser-replay.test.ts apps/relay/tests/unit/ops-route.test.ts packages/db/tests/relay-ownership.test.ts` |
+| **Full suite command** | `npm run typecheck --workspace @codex-mobile/relay && vitest run packages/db/tests/relay-ownership.test.ts apps/relay/tests/unit/ownership-service.test.ts apps/relay/tests/unit/ws-bridge.test.ts apps/relay/tests/unit/ws-browser.test.ts apps/relay/tests/unit/ws-browser-replay.test.ts apps/relay/tests/unit/ws-browser-reconnect.test.ts apps/relay/tests/unit/session-router-safety.test.ts apps/relay/tests/unit/session-router-audit.test.ts apps/relay/tests/unit/ops-route.test.ts apps/relay/tests/unit/readyz.test.ts apps/bridge/tests/unit/relay-connection.test.ts` |
 | **Estimated runtime** | ~30-90 seconds depending on new relay/db coverage |
 
 ---
@@ -38,15 +38,15 @@ created: 2026-04-18
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 05-01-01 | 01 | 1 | OPS-02 | unit | `vitest run packages/db/tests/relay-ownership.test.ts` | ❌ W0 | ⬜ pending |
-| 05-01-02 | 01 | 1 | SEC-04 | unit | `vitest run apps/relay/tests/unit/ownership-service.test.ts apps/relay/tests/unit/session-router-safety.test.ts` | ❌ W0 | ⬜ pending |
-| 05-01-03 | 01 | 1 | OPS-02, SEC-04 | integration | `vitest run apps/relay/tests/unit/ws-bridge.test.ts apps/relay/tests/unit/ws-browser.test.ts` | ✅ partial | ⬜ pending |
-| 05-02-01 | 02 | 2 | OPS-03 | unit | `vitest run apps/relay/tests/unit/ws-browser-replay.test.ts apps/relay/tests/unit/ownership-service.test.ts` | ❌ W0 | ⬜ pending |
-| 05-02-02 | 02 | 2 | SEC-04, OPS-03 | integration | `vitest run apps/relay/tests/unit/ws-browser.test.ts apps/relay/tests/unit/ws-browser-reconnect.test.ts` | ✅ partial | ⬜ pending |
-| 05-02-03 | 02 | 2 | OPS-03 | bridge unit | `vitest run apps/bridge/tests/unit/relay-connection.test.ts` | ❌ W0 | ⬜ pending |
-| 05-03-01 | 03 | 3 | OPS-04 | unit | `vitest run apps/relay/tests/unit/ops-route.test.ts apps/relay/tests/unit/readyz.test.ts` | ❌ W0 | ⬜ pending |
-| 05-03-02 | 03 | 3 | OPS-04 | integration | `vitest run apps/relay/tests/unit/ws-browser-reconnect.test.ts apps/relay/tests/unit/ws-browser-replay.test.ts` | ❌ W0 | ⬜ pending |
-| 05-03-03 | 03 | 3 | SEC-04, OPS-04 | unit | `vitest run apps/relay/tests/unit/session-router-safety.test.ts apps/relay/tests/unit/ops-route.test.ts` | ❌ W0 | ⬜ pending |
+| 05-01-01 | 01 | 1 | OPS-02 | unit | `vitest run packages/db/tests/relay-ownership.test.ts` | ✅ yes | ✅ green |
+| 05-01-02 | 01 | 1 | SEC-04 | unit | `vitest run apps/relay/tests/unit/ownership-service.test.ts apps/relay/tests/unit/session-router-safety.test.ts` | ✅ yes | ✅ green |
+| 05-01-03 | 01 | 1 | OPS-02, SEC-04 | integration | `vitest run apps/relay/tests/unit/ws-bridge.test.ts apps/relay/tests/unit/ws-browser.test.ts` | ✅ yes | ✅ green |
+| 05-02-01 | 02 | 2 | OPS-03 | unit | `vitest run apps/relay/tests/unit/ws-browser-replay.test.ts apps/relay/tests/unit/ownership-service.test.ts` | ✅ yes | ✅ green |
+| 05-02-02 | 02 | 2 | SEC-04, OPS-03 | integration | `vitest run apps/relay/tests/unit/ws-browser.test.ts apps/relay/tests/unit/ws-browser-reconnect.test.ts` | ✅ yes | ✅ green |
+| 05-02-03 | 02 | 2 | OPS-03 | bridge unit | `vitest run apps/bridge/tests/unit/relay-connection.test.ts` | ✅ yes | ✅ green |
+| 05-03-01 | 03 | 3 | OPS-04 | unit | `vitest run apps/relay/tests/unit/ops-route.test.ts apps/relay/tests/unit/readyz.test.ts` | ✅ yes | ✅ green |
+| 05-03-02 | 03 | 3 | OPS-04 | integration | `vitest run apps/relay/tests/unit/ws-browser-reconnect.test.ts apps/relay/tests/unit/ws-browser-replay.test.ts` | ✅ yes | ✅ green |
+| 05-03-03 | 03 | 3 | SEC-04, OPS-04 | unit | `vitest run apps/relay/tests/unit/session-router-safety.test.ts apps/relay/tests/unit/ops-route.test.ts` | ✅ yes | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky · ⏭ gated/skipped*
 
@@ -54,18 +54,18 @@ created: 2026-04-18
 
 ## Wave 0 Requirements
 
-- [ ] `packages/db/src/schema.ts` — ownership lease table/schema additions
-- [ ] `packages/db/src/repositories/relay-ownership.ts` — repository helpers for create/refresh/replace/expire lookups
-- [ ] `packages/db/tests/relay-ownership.test.ts` — repository coverage for lease lifecycle and stale-owner detection
-- [ ] `apps/relay/src/ownership/ownership-service.ts` — authoritative owner lookup / fail-closed decision layer
-- [ ] `apps/relay/tests/unit/ownership-service.test.ts` — stale/missing/conflicting lease handling
-- [ ] `apps/relay/src/routes/ws-browser.ts` — wrong-instance replay before local WebSocket upgrade
-- [ ] `apps/relay/tests/unit/ws-browser-replay.test.ts` — replay header generation and failure fallback
-- [ ] `apps/relay/src/routes/readyz.ts` — ownership/pressure-aware readiness logic
-- [ ] `apps/relay/tests/unit/readyz.test.ts` — readiness gating behavior
-- [ ] `apps/relay/src/routes/ops.ts` — compact operator-facing ownership/pressure/disconnect surface
-- [ ] `apps/relay/tests/unit/ops-route.test.ts` — ops snapshot correctness
-- [ ] `apps/bridge/tests/unit/relay-connection.test.ts` — reconnect-driven lease refresh and bridge re-registration coverage
+- [x] `packages/db/src/schema.ts` — ownership lease table/schema additions
+- [x] `packages/db/src/repositories/relay-ownership.ts` — repository helpers for create/refresh/replace/expire lookups
+- [x] `packages/db/tests/relay-ownership.test.ts` — repository coverage for lease lifecycle and stale-owner detection
+- [x] `apps/relay/src/ownership/ownership-service.ts` — authoritative owner lookup / fail-closed decision layer
+- [x] `apps/relay/tests/unit/ownership-service.test.ts` — stale/missing/conflicting lease handling
+- [x] `apps/relay/src/routes/ws-browser.ts` — wrong-instance replay before local WebSocket upgrade
+- [x] `apps/relay/tests/unit/ws-browser-replay.test.ts` — replay header generation and failure fallback
+- [x] `apps/relay/src/routes/readyz.ts` — ownership/pressure-aware readiness logic
+- [x] `apps/relay/tests/unit/readyz.test.ts` — readiness gating behavior
+- [x] `apps/relay/src/routes/ops.ts` — compact operator-facing ownership/pressure/disconnect surface
+- [x] `apps/relay/tests/unit/ops-route.test.ts` — ops snapshot correctness
+- [x] `apps/bridge/tests/unit/relay-connection.test.ts` — reconnect-driven lease refresh and bridge re-registration coverage
 
 ---
 

@@ -41,16 +41,16 @@
 - [ ] **SEC-01**: Web and WebSocket sessions use short-lived connection credentials derived from a stronger authenticated device session
 - [ ] **SEC-02**: Remote control preserves Codex sandbox and approval semantics instead of bypassing them
 - [ ] **SEC-03**: Pairing, approval, revoke, and disconnect events are recorded in an audit trail
-- [ ] **SEC-04**: Relay validates browser-to-bridge ownership so one user cannot attach to another user's local bridge
+- [x] **SEC-04**: Relay validates browser-to-bridge ownership so one user cannot attach to another user's local bridge
 - [ ] **SEC-05**: Product does not expose a general-purpose remote shell or tunnel independent of Codex
 - [ ] **SEC-06**: Origin, CSRF, and replay protections are enforced for browser sessions and pairing flows
 
 ### Deployment & Operations
 
 - [ ] **OPS-01**: Public web app and relay service deploy on Fly.io with TLS and health checks
-- [ ] **OPS-02**: Relay can support multiple concurrently connected users and bridges without relying on a single in-memory coordinator
-- [ ] **OPS-03**: Relay can route a browser connection to the relay instance that owns the local bridge connection
-- [ ] **OPS-04**: Operators can observe connection health, disconnect reasons, queue pressure, and relay ownership state
+- [x] **OPS-02**: Relay can support multiple concurrently connected users and bridges without relying on a single in-memory coordinator
+- [x] **OPS-03**: Relay can route a browser connection to the relay instance that owns the local bridge connection
+- [x] **OPS-04**: Operators can observe connection health, disconnect reasons, queue pressure, and relay ownership state
 
 ## v2 Requirements
 
@@ -104,13 +104,13 @@
 | SEC-01 | Phase 1 | Pending |
 | SEC-02 | Phase 2 | Pending |
 | SEC-03 | Phase 4 | Pending |
-| SEC-04 | Phase 5 | Pending |
+| SEC-04 | Phase 5 | Complete |
 | SEC-05 | Phase 4 | Pending |
 | SEC-06 | Phase 1 | Pending |
 | OPS-01 | Phase 1 | Pending |
-| OPS-02 | Phase 5 | Pending |
-| OPS-03 | Phase 5 | Pending |
-| OPS-04 | Phase 5 | Pending |
+| OPS-02 | Phase 5 | Complete |
+| OPS-03 | Phase 5 | Complete |
+| OPS-04 | Phase 5 | Complete |
 
 **Coverage:**
 - v1 requirements: 29 total
@@ -119,4 +119,4 @@
 
 ---
 *Requirements defined: 2026-04-06*
-*Last updated: 2026-04-18 after Phase 03 completion*
+*Last updated: 2026-04-18 after Phase 05 completion*

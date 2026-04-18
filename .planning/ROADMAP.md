@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Bridge & Codex Session Adapter** - local bridge lifecycle, Codex app-server integration, and remote attach-to-session behavior
 - [x] **Phase 3: Live Remote UI & Control** - phone-first live session timeline with prompt, steer, interrupt, and structured activity rendering
 - [x] **Phase 4: Approval, Audit & Device Safety** - revocation, reconnect, approval surfaces, and safety rails around repeated use
-- [ ] **Phase 5: Multi-Instance Routing & Production Hardening** - relay ownership routing, observability, and scale-focused hardening on Fly.io
+- [x] **Phase 5: Multi-Instance Routing & Production Hardening** - relay ownership routing, observability, and scale-focused hardening on Fly.io
 
 ## Phase Details
 
@@ -124,7 +124,7 @@ Plans:
 Plans:
 - [x] 05-01: Implement relay ownership metadata and routing contract
 - [x] 05-02: Add Fly.io-aware routing and scale validation for browser/bridge connections
-- [ ] 05-03: Add metrics, queue/backpressure guards, and production hardening checks
+- [x] 05-03: Add metrics, queue/backpressure guards, and production hardening checks
 
 ## Progress
 
@@ -138,4 +138,4 @@ Phases execute in numeric order: 1 -> 01.1 -> 2 -> 3 -> 4 -> 5
 | 2. Bridge & Codex Session Adapter | 3/3 | Complete | 2026-04-18 |
 | 3. Live Remote UI & Control | 3/3 | Complete | 2026-04-18 |
 | 4. Approval, Audit & Device Safety | 3/3 | Complete | 2026-04-18 |
-| 5. Multi-Instance Routing & Production Hardening | 2/3 | In Progress | - |
+| 5. Multi-Instance Routing & Production Hardening | 3/3 | Complete | 2026-04-18 |
