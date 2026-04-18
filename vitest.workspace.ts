@@ -25,4 +25,17 @@ export default defineWorkspace([
       passWithNoTests: true,
     },
   },
+  {
+    esbuild: {
+      jsx: "automatic",
+      jsxImportSource: "react",
+    },
+    test: {
+      name: "phase-03-web",
+      include: ["apps/web/tests/unit/**/*.test.tsx"],
+      environment: "jsdom",
+      setupFiles: ["apps/web/tests/setup.ts"],
+      passWithNoTests: true,
+    },
+  },
 ]);
