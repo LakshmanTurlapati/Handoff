@@ -6,3 +6,6 @@
  * `@codex-mobile/db/schema` directly) rather than reaching into submodules.
  */
 export * from "./schema.js";
+export * from "./client.js";
+export * from "./repositories/device-sessions.js";
+export * from "./repositories/audit-events.js";
