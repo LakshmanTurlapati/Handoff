@@ -227,20 +227,27 @@ export async function readDeviceSession(options?: {
   secret?: Uint8Array;
   now?: Date;
 }): Promise<DeviceSessionClaims | null> {
-  const cookieStore = await cookies();
-  const cookie = cookieStore.get(DEVICE_SESSION_COOKIE_NAME);
-  if (!cookie?.value) {
+  const token = await readRawDeviceSessionToken();
+  if (!token) {
     return null;
   }
+
   try {
     return await verifyDeviceSession({
-      token: cookie.value,
+      token,
       secret: options?.secret ?? loadSessionCookieSecret(),
       now: options?.now,
     });
   } catch {
     return null;
   }
+}
+
+export async function readRawDeviceSessionToken(): Promise<string | null> {
+  const cookieStore = await cookies();
+  const cookie = cookieStore.get(DEVICE_SESSION_COOKIE_NAME);
+
+  return cookie?.value ?? null;
 }
 
 /** Clear both the web session and device session cookies on sign-out. */

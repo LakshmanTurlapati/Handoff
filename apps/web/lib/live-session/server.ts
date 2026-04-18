@@ -1,6 +1,14 @@
+import {
+  findDeviceSessionForPrincipal,
+  touchDeviceSessionLastSeen,
+} from "@codex-mobile/db";
 import { mintWsTicket } from "@codex-mobile/auth/ws-ticket";
 import { auth } from "../../auth";
-import { readDeviceSession } from "../device-session";
+import {
+  hashCookieToken,
+  readDeviceSession,
+  readRawDeviceSessionToken,
+} from "../device-session";
 
 export interface RemotePrincipal {
   userId: string;
@@ -31,18 +39,50 @@ export async function requireRemotePrincipal(): Promise<RemotePrincipal> {
     session.user.email ??
     "unknown-user";
 
+  const rawDeviceSessionToken = await readRawDeviceSessionToken();
+  if (!rawDeviceSessionToken) {
+    throw new Error("device_session_required");
+  }
+
   const deviceSession = await readDeviceSession();
   if (!deviceSession) {
     throw new Error("device_session_required");
   }
 
-  if (deviceSession.userId !== userId) {
+  const cookieTokenHash = hashCookieToken(rawDeviceSessionToken);
+  const deviceSessionRow = await findDeviceSessionForPrincipal({
+    deviceSessionId: deviceSession.deviceSessionId,
+    userId,
+    cookieTokenHash,
+  });
+  if (!deviceSessionRow) {
+    throw new Error("device_session_required");
+  }
+
+  if (deviceSessionRow.cookieTokenHash !== cookieTokenHash) {
+    throw new Error("device_session_required");
+  }
+
+  if (
+    deviceSession.userId !== userId ||
+    deviceSessionRow.userId !== userId
+  ) {
     throw new Error("user_mismatch");
   }
 
+  if (deviceSessionRow.revokedAt) {
+    throw new Error("device_session_revoked");
+  }
+
+  if (deviceSessionRow.expiresAt.getTime() <= Date.now()) {
+    throw new Error("device_session_expired");
+  }
+
+  await touchDeviceSessionLastSeen(deviceSessionRow.id);
+
   return {
     userId,
-    deviceSessionId: deviceSession.deviceSessionId,
+    deviceSessionId: deviceSessionRow.id,
   };
 }
 

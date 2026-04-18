@@ -69,6 +69,25 @@ export async function findDeviceSessionForPrincipal({
   return row ?? null;
 }
 
+export async function findDeviceSessionByPairingId(input: {
+  pairingId: string;
+  userId: string;
+}): Promise<DeviceSessionRow | null> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(device_sessions)
+    .where(
+      and(
+        eq(device_sessions.issuedFromPairingId, input.pairingId),
+        eq(device_sessions.userId, input.userId),
+      ),
+    )
+    .limit(1);
+
+  return row ?? null;
+}
+
 export async function listDeviceSessionsForUser(
   userId: string,
 ): Promise<DeviceSessionRow[]> {

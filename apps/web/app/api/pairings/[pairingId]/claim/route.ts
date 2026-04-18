@@ -18,6 +18,10 @@
  * user-match check, audit trail.
  */
 import { NextResponse } from "next/server";
+import {
+  createDeviceSessionRecord,
+  findDeviceSessionByPairingId,
+} from "@codex-mobile/db";
 import { PairingClaimResponseSchema } from "@codex-mobile/protocol";
 import { auth } from "../../../../../auth";
 import { issueDeviceSession } from "../../../../../lib/device-session";
@@ -98,10 +102,19 @@ export async function POST(
 
     // Idempotency: if already claimed, return success without re-issuing
     if (row.claimedAt) {
+      const existingDeviceSession = await findDeviceSessionByPairingId({
+        pairingId,
+        userId,
+      });
+
+      if (!existingDeviceSession) {
+        throw new Error(`device_session for pairing ${pairingId} not found`);
+      }
+
       const response: { status: "claimed"; deviceSessionId: string; deviceLabel?: string } = {
         status: "claimed" as const,
-        deviceSessionId: row.id,
-        deviceLabel: row.deviceLabel ?? undefined,
+        deviceSessionId: existingDeviceSession.id,
+        deviceLabel: existingDeviceSession.deviceLabel,
       };
       return NextResponse.json(response, { status: 200 });
     }
@@ -111,6 +124,16 @@ export async function POST(
       userId,
       deviceLabel: row.deviceLabel ?? "codex-mobile device",
       issuedFromPairingId: row.id,
+    });
+
+    await createDeviceSessionRecord({
+      id: deviceSession.deviceSessionId,
+      userId,
+      deviceLabel: deviceSession.deviceLabel,
+      devicePublicId: deviceSession.devicePublicId,
+      cookieTokenHash: deviceSession.cookieTokenHash,
+      expiresAt: deviceSession.expiresAt,
+      issuedFromPairingId: pairingId,
     });
 
     // Mark the pairing as claimed
@@ -128,6 +151,7 @@ export async function POST(
         deviceSessionId: deviceSession.deviceSessionId,
         devicePublicId: deviceSession.devicePublicId,
         deviceLabel: deviceSession.deviceLabel,
+        cookieTokenHash: deviceSession.cookieTokenHash,
       },
       createdAt: new Date(),
     });

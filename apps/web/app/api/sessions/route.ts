@@ -34,11 +34,15 @@ export async function GET(): Promise<Response> {
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown_error";
 
-    if (message === "unauthenticated" || message === "device_session_required") {
+    if (
+      message === "unauthenticated" ||
+      message === "device_session_required" ||
+      message === "device_session_expired"
+    ) {
       return NextResponse.json({ error: message }, { status: 401 });
     }
 
-    if (message === "user_mismatch") {
+    if (message === "user_mismatch" || message === "device_session_revoked") {
       return NextResponse.json({ error: message }, { status: 403 });
     }
 

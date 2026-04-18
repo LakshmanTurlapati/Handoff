@@ -64,11 +64,15 @@ export async function POST(
       return NextResponse.json({ error: message }, { status: 403 });
     }
 
-    if (message === "unauthenticated" || message === "device_session_required") {
+    if (
+      message === "unauthenticated" ||
+      message === "device_session_required" ||
+      message === "device_session_expired"
+    ) {
       return NextResponse.json({ error: message }, { status: 401 });
     }
 
-    if (message === "user_mismatch") {
+    if (message === "user_mismatch" || message === "device_session_revoked") {
       return NextResponse.json({ error: message }, { status: 403 });
     }
 
