@@ -1,6 +1,8 @@
+import { appendAuditEvent } from "@codex-mobile/db";
 import type { WebSocket } from "ws";
 import { z } from "zod";
 import {
+  AUDIT_EVENT_TYPES,
   JsonRpcMessageSchema,
   SessionEndedParamsSchema,
   SessionEventParamsSchema,
@@ -73,10 +75,22 @@ export class SessionRouter {
     }
 
     if (input.cursor != null && buffered.length > 0) {
+      const reconnectEvent = this.buildReconnectEvent(input.sessionId, buffered);
       this.sendEventToSocket(
         input.socket,
-        this.buildReconnectEvent(input.sessionId, buffered),
+        reconnectEvent,
       );
+      await this.appendAuditSafely({
+        userId: input.userId,
+        eventType: AUDIT_EVENT_TYPES.sessionReconnected,
+        subject: input.sessionId,
+        outcome: "success",
+        metadata: {
+          sessionId: input.sessionId,
+          deviceSessionId: input.deviceSessionId,
+          cursor: reconnectEvent.cursor,
+        },
+      });
     }
 
     const attached = this.dispatchBridgeRequest(input.userId, "session.attach", {
@@ -200,7 +214,7 @@ export class SessionRouter {
     }
   }
 
-  async handleBridgeMessage(_userId: string, rawMessage: string): Promise<void> {
+  async handleBridgeMessage(userId: string, rawMessage: string): Promise<void> {
     let parsedJson: unknown;
 
     try {
@@ -247,6 +261,23 @@ export class SessionRouter {
         if (!params.success) return;
         if (params.data.event.sessionId !== params.data.sessionId) return;
 
+        if (
+          params.data.event.kind === "activity.appended" &&
+          params.data.event.activity.kind === "approval"
+        ) {
+          await this.appendAuditSafely({
+            userId,
+            eventType: AUDIT_EVENT_TYPES.approvalRequested,
+            subject: String(params.data.event.activity.requestId),
+            outcome: "success",
+            metadata: {
+              sessionId: params.data.sessionId,
+              requestId: String(params.data.event.activity.requestId),
+              turnId: params.data.event.activity.turnId,
+            },
+          });
+        }
+
         this.publishEvent(params.data.event);
         return;
       }
@@ -263,6 +294,7 @@ export class SessionRouter {
           reason: params.data.reason,
         };
 
+        await this.appendDisconnectAudits(event);
         this.publishEvent(event);
         return;
       }
@@ -313,6 +345,48 @@ export class SessionRouter {
   private publishEvent(event: LiveSessionEvent): void {
     this.sessionBuffer.append(event);
     this.browserRegistry.broadcast(event.sessionId, JSON.stringify(event));
+  }
+
+  private async appendDisconnectAudits(event: LiveSessionEvent): Promise<void> {
+    if (event.kind !== "session.ended") {
+      return;
+    }
+
+    const entries = this.browserRegistry.listBySessionId(event.sessionId);
+    const seenDeviceSessions = new Set<string>();
+    for (const entry of entries) {
+      if (seenDeviceSessions.has(entry.deviceSessionId)) {
+        continue;
+      }
+      seenDeviceSessions.add(entry.deviceSessionId);
+
+      await this.appendAuditSafely({
+        userId: entry.userId,
+        eventType: AUDIT_EVENT_TYPES.sessionDisconnected,
+        subject: event.sessionId,
+        outcome: "success",
+        metadata: {
+          sessionId: event.sessionId,
+          deviceSessionId: entry.deviceSessionId,
+          reason: event.reason,
+          cursor: event.cursor,
+        },
+      });
+    }
+  }
+
+  private async appendAuditSafely(input: {
+    userId?: string | null;
+    eventType: string;
+    subject?: string | null;
+    outcome: "success" | "failure";
+    metadata?: Record<string, unknown> | null;
+  }): Promise<void> {
+    try {
+      await appendAuditEvent(input);
+    } catch (error) {
+      console.error("session router audit append failed", error);
+    }
   }
 
   private handleBridgeResponse(

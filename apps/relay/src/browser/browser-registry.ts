@@ -79,6 +79,21 @@ export class BrowserRegistry {
     return delivered;
   }
 
+  listBySessionId(sessionId: string): BrowserEntry[] {
+    const sessionIds = this.idsBySession.get(sessionId);
+    if (!sessionIds) return [];
+
+    const entries: BrowserEntry[] = [];
+    for (const id of sessionIds) {
+      const entry = this.entries.get(id);
+      if (entry) {
+        entries.push(entry);
+      }
+    }
+
+    return entries;
+  }
+
   clear(): void {
     this.entries.clear();
     this.idsBySession.clear();

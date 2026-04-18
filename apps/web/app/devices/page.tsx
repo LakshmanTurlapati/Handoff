@@ -1,10 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { listDeviceSessionsForUser } from "@codex-mobile/db";
+import {
+  listAuditEventsForUser,
+  listDeviceSessionsForUser,
+} from "@codex-mobile/db";
 import {
   SessionListResponseSchema,
   type BrowserSessionListItem,
 } from "@codex-mobile/protocol/live-session";
+import {
+  AuditFeed,
+  type AuditFeedItem,
+} from "../../components/device/audit-feed";
 import {
   DeviceManagementList,
   type DeviceManagementDevice,
@@ -20,9 +27,14 @@ async function loadDeviceManagementState(): Promise<{
   currentDeviceSessionId: string;
   devices: DeviceManagementDevice[];
   activeSessions: BrowserSessionListItem[];
+  auditEvents: AuditFeedItem[];
 }> {
   const principal = await requireRemotePrincipal();
   const devices = await listDeviceSessionsForUser(principal.userId);
+  const auditEvents = await listAuditEventsForUser({
+    userId: principal.userId,
+    limit: 25,
+  });
   const relayResponse = await relayInternalFetch(
     "/internal/browser/sessions",
     principal,
@@ -49,12 +61,19 @@ async function loadDeviceManagementState(): Promise<{
       revokedAt: device.revokedAt?.toISOString() ?? null,
     })),
     activeSessions,
+    auditEvents: auditEvents.map((event) => ({
+      id: event.id,
+      eventType: event.eventType,
+      subject: event.subject,
+      outcome: event.outcome,
+      createdAt: event.createdAt.toISOString(),
+    })),
   };
 }
 
 export default async function DevicesPage() {
   try {
-    const { currentDeviceSessionId, devices, activeSessions } =
+    const { currentDeviceSessionId, devices, activeSessions, auditEvents } =
       await loadDeviceManagementState();
 
     return (
@@ -192,6 +211,8 @@ export default async function DevicesPage() {
               currentDeviceSessionId={currentDeviceSessionId}
             />
           </section>
+
+          <AuditFeed events={auditEvents} />
         </div>
       </main>
     );

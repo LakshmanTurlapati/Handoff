@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { listDeviceSessionsForUser } from "@codex-mobile/db";
+import {
+  listAuditEventsForUser,
+  listDeviceSessionsForUser,
+} from "@codex-mobile/db";
 import {
   SessionListResponseSchema,
   type BrowserSessionListItem,
@@ -16,6 +19,10 @@ export async function GET(): Promise<Response> {
   try {
     const principal = await requireRemotePrincipal();
     const devices = await listDeviceSessionsForUser(principal.userId);
+    const auditEvents = await listAuditEventsForUser({
+      userId: principal.userId,
+      limit: 25,
+    });
     const relayResponse = await relayInternalFetch(
       "/internal/browser/sessions",
       principal,
@@ -45,6 +52,13 @@ export async function GET(): Promise<Response> {
           revokedAt: device.revokedAt?.toISOString() ?? null,
         })),
         activeSessions,
+        auditEvents: auditEvents.map((event) => ({
+          id: event.id,
+          eventType: event.eventType,
+          subject: event.subject,
+          outcome: event.outcome,
+          createdAt: event.createdAt.toISOString(),
+        })),
       },
       { status: 200 },
     );
