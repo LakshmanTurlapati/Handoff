@@ -122,7 +122,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 05-01: Implement relay ownership metadata and routing contract
+- [x] 05-01: Implement relay ownership metadata and routing contract
 - [ ] 05-02: Add Fly.io-aware routing and scale validation for browser/bridge connections
 - [ ] 05-03: Add metrics, queue/backpressure guards, and production hardening checks
 
@@ -138,4 +138,4 @@ Phases execute in numeric order: 1 -> 01.1 -> 2 -> 3 -> 4 -> 5
 | 2. Bridge & Codex Session Adapter | 3/3 | Complete | 2026-04-18 |
 | 3. Live Remote UI & Control | 3/3 | Complete | 2026-04-18 |
 | 4. Approval, Audit & Device Safety | 3/3 | Complete | 2026-04-18 |
-| 5. Multi-Instance Routing & Production Hardening | 0/3 | Not started | - |
+| 5. Multi-Instance Routing & Production Hardening | 1/3 | In Progress | - |
