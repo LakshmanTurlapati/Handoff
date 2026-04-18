@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 3 UI-SPEC approved
-last_updated: "2026-04-18T04:33:42.085Z"
-last_activity: 2026-04-12
+last_updated: "2026-04-18T06:56:08.516Z"
+last_activity: 2026-04-18
 progress:
   total_phases: 6
   completed_phases: 3
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-06)
 Phase: 2
 Plan: Not started
 Status: Executing Phase 01
-Last activity: 2026-04-12
+Last activity: 2026-04-18 - Completed quick task 260418-2os: Publish current main to origin/main, normalize any April 13 content dates to 2026-04-18, exclude tsbuildinfo, and push remote
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -71,6 +71,12 @@ None yet.
 - Codex app-server WebSocket transport is documented as experimental; the local bridge should prefer stdio first
 - QR/device pairing must defend against hijack and replay from day one
 - Multi-instance relay routing on Fly.io must be proven before broad rollout
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260418-2os | Publish current main to origin/main, normalize any April 13 content dates to 2026-04-18, exclude tsbuildinfo, and push remote | 2026-04-18 | dc95f35 | [260418-2os-publish-current-main-to-origin-main-norm](./quick/260418-2os-publish-current-main-to-origin-main-norm/) |
 
 ### Roadmap Evolution
 
