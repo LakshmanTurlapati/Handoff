@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Handoff Install & Launch
-status: phase_6_planned
-stopped_at: Phase 6 planning complete — ready for execute-phase
-last_updated: "2026-04-19T00:55:00-05:00"
-last_activity: 2026-04-19 -- planned Phase 6 npm distribution and local bootstrap
+milestone: v1.0
+milestone_name: milestone
+status: completed
+stopped_at: Phase 7 context gathered
+last_updated: "2026-04-19T18:21:56.048Z"
+last_activity: 2026-04-19 -- Phase 06 execution completed
 progress:
   total_phases: 3
-  completed_phases: 0
-  total_plans: 9
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 3
+  completed_plans: 3
+  percent: 33
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-18)
 
 **Core value:** A developer can safely continue a local Codex session from anywhere, with live progress and approvals, without exposing raw shell access or moving their local environment into the cloud.
-**Current focus:** Execute Phase 6 to make the local bridge installable from npm and bootstrap without manual env wiring
+**Current focus:** Phase 07 — codex-native-handoff-command
 
 ## Current Position
 
-Phase: 6 - npm Distribution & Local Bootstrap
-Plan: 06-01 through 06-03 planned
-Status: Ready for `$gsd-execute-phase 6`
-Last activity: 2026-04-19 -- planned Phase 6
+Phase: 07 (codex-native-handoff-command) — READY
+Plan: Not started
+Status: Phase 06 complete, next phase ready for discuss/plan
+Last activity: 2026-04-19 -- Phase 06 execution completed
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 33%
 
 ## Prior Milestone Archive
 
@@ -41,18 +41,18 @@ Progress: [░░░░░░░░░░] 0%
 
 ## Pending Todos
 
-- Run `$gsd-execute-phase 6` to implement the install surface, secure bootstrap state, and daemon reuse path
-- Keep the archived v1.0 audit debt deferred unless it directly blocks npm install or `/handoff`
-- Resume manual verification from `.planning/phases/05-multi-instance-routing-production-hardening/05-UAT.md` only if it becomes a blocker for v1.1 launch work
+- Start Phase 07 discussion/planning for the Codex-native `/handoff` command that calls the new local `handoff launch` seam
+- Keep the archived v1.0 audit debt deferred unless it directly blocks `/handoff` command integration or hosted launch work
+- Defer full manual UAT and device verification until the final v1.1 verification pass unless a Phase 07 blocker forces an earlier check
 
 ## Blockers/Concerns
 
-- The current bridge, auth, db, and web workspaces still need package-local TypeScript configs before the install surface can be trusted
-- The current daemon path still requires raw hosted identity values and a locally held ticket-signing secret
-- The current hosted pairing flow still does not leave the laptop with a reusable bridge bootstrap credential
+- Phase 06 now depends on durable pairing persistence in the hosted app so bridge-installation rows can remain tied to real pairing ids
+- Bridge leases now treat the ws-ticket subject as a generic bridge-auth id, which Phase 07 should preserve rather than re-assuming browser device-session semantics
+- Manual real-device launch verification is still deferred; the current confidence is from targeted unit tests, typechecks, and tarball validation
 
 ## Session Continuity
 
-Last session: 2026-04-19T00:55:00-05:00
-Stopped at: Phase 6 planning complete — ready for execute-phase
-Resume file: .planning/phases/06-npm-distribution-local-bootstrap/06-01-PLAN.md
+Last session: 2026-04-19T18:21:56.046Z
+Stopped at: Phase 7 context gathered
+Resume file: .planning/phases/07-codex-native-handoff-command/07-CONTEXT.md
