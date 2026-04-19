@@ -9,3 +9,4 @@ export * from "./audit.js";
 export * from "./session.js";
 export * from "./bridge.js";
 export * from "./live-session.js";
+export * from "./handoff.js";

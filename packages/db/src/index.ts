@@ -9,4 +9,6 @@ export * from "./schema.js";
 export * from "./client.js";
 export * from "./repositories/device-sessions.js";
 export * from "./repositories/audit-events.js";
+export * from "./repositories/bridge-installations.js";
+export * from "./repositories/handoffs.js";
 export * from "./repositories/relay-ownership.js";

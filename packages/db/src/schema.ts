@@ -180,6 +180,80 @@ export const pairing_sessions = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Bridge installations (durable local bridge bootstrap identity)
+// ---------------------------------------------------------------------------
+
+export const bridge_installations = pgTable(
+  "bridge_installations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    pairingId: uuid("pairing_id")
+      .notNull()
+      .references(() => pairing_sessions.id, { onDelete: "cascade" }),
+    bridgeInstanceId: varchar("bridge_instance_id", { length: 120 }).notNull(),
+    deviceLabel: varchar("device_label", { length: 120 }),
+    installTokenHash: varchar("install_token_hash", { length: 128 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => ({
+    pairingIdx: uniqueIndex("bridge_installations_pairing_idx").on(table.pairingId),
+    tokenIdx: uniqueIndex("bridge_installations_token_idx").on(table.installTokenHash),
+    userBridgeInstanceIdx: uniqueIndex("bridge_installations_user_bridge_instance_idx").on(
+      table.userId,
+      table.bridgeInstanceId,
+    ),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Thread handoffs (short-lived thread-bound launch descriptors)
+// ---------------------------------------------------------------------------
+
+export const thread_handoffs = pgTable(
+  "thread_handoffs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    publicId: varchar("public_id", { length: 64 }).notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bridgeInstallationId: uuid("bridge_installation_id")
+      .notNull()
+      .references(() => bridge_installations.id, { onDelete: "cascade" }),
+    bridgeInstanceId: varchar("bridge_instance_id", { length: 120 }).notNull(),
+    threadId: varchar("thread_id", { length: 200 }).notNull(),
+    sessionId: varchar("session_id", { length: 200 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => ({
+    publicIdIdx: uniqueIndex("thread_handoffs_public_id_idx").on(table.publicId),
+    threadLookupIdx: index("thread_handoffs_thread_lookup_idx").on(
+      table.userId,
+      table.bridgeInstallationId,
+      table.threadId,
+      table.sessionId,
+    ),
+    expiresAtIdx: index("thread_handoffs_expires_at_idx").on(table.expiresAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Relay bridge leases (multi-instance relay ownership)
 // ---------------------------------------------------------------------------
 
@@ -190,9 +264,9 @@ export const relay_bridge_leases = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    deviceSessionId: uuid("device_session_id")
-      .notNull()
-      .references(() => device_sessions.id, { onDelete: "cascade" }),
+    // The bridge ws-ticket subject may be either a browser device session id
+    // or a bridge installation id depending on which actor is connecting.
+    deviceSessionId: uuid("device_session_id").notNull(),
     bridgeInstanceId: varchar("bridge_instance_id", { length: 120 }).notNull(),
     relayMachineId: varchar("relay_machine_id", { length: 120 }).notNull(),
     relayRegion: varchar("relay_region", { length: 32 }).notNull(),
@@ -260,5 +334,7 @@ export type OAuthAccountRow = typeof oauth_accounts.$inferSelect;
 export type WebSessionRow = typeof web_sessions.$inferSelect;
 export type DeviceSessionRow = typeof device_sessions.$inferSelect;
 export type PairingSessionRow = typeof pairing_sessions.$inferSelect;
+export type BridgeInstallationRow = typeof bridge_installations.$inferSelect;
+export type ThreadHandoffRow = typeof thread_handoffs.$inferSelect;
 export type RelayBridgeLeaseRow = typeof relay_bridge_leases.$inferSelect;
 export type AuditEventRow = typeof audit_events.$inferSelect;
