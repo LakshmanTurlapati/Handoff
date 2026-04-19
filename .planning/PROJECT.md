@@ -4,25 +4,35 @@
 
 Codex Mobile is a secure remote-control layer for local Codex sessions, optimized for phone-sized browsers. A developer runs a local bridge beside Codex, pairs a device by scanning a QR code rendered in the terminal, and continues the same local session through a Fly.io-hosted web UI and relay without opening inbound ports on the laptop.
 
-The product is intentionally not a cloud-hosted coding agent. It is a remote window into a developer's existing local Codex environment, with security, session control, and mobile usability treated as first-order product requirements.
+The shipped v1.0 product is a TypeScript monorepo with a mobile-first Next.js web app, a Fastify/WebSocket relay on Fly.io, and an outbound-only local bridge that integrates with `codex app-server` over stdio. The product is intentionally not a cloud-hosted coding agent or a general-purpose remote shell; it is a remote window into a developer's existing local Codex environment, with security, session control, and mobile usability treated as first-order requirements.
 
 ## Core Value
 
 A developer can safely continue a local Codex session from anywhere, with live progress and approvals, without exposing raw shell access or moving their local environment into the cloud.
 
+## Current State
+
+v1.0 shipped the full planned product path:
+
+- Secure browser auth, QR pairing, verification-phrase confirmation, and durable device sessions
+- An outbound-only bridge that registers with the relay, integrates with `codex app-server`, and preserves Codex approval and sandbox semantics
+- A phone-first live session UI with structured activity rendering, prompt/steer/interrupt controls, approval handling, reconnect UX, and terminal session states
+- Durable device management, revoke, and append-only audit flows
+- Relay ownership leases, wrong-instance Fly replay routing, readiness checks, operator visibility, and browser backpressure controls
+
+The archive state is intentionally conservative. Implementation is complete, but v1.0 was archived with accepted verification debt rather than a fully passed milestone audit. See `.planning/MILESTONES.md` and `.planning/milestones/v1.0-MILESTONE-AUDIT.md`.
+
 ## Requirements
 
 ### Validated
 
-(None yet — ship to validate)
+No milestone is fully validated yet. v1.0 shipped with deferred manual verification and missing milestone verification artifacts across several phases.
 
 ### Active
 
-- [ ] Secure QR-based device pairing with terminal confirmation and 7-day device sessions
-- [ ] Live mobile/web remote control for local Codex sessions using structured event streaming
-- [ ] Secure-by-default auth, approval, and audit model for an internet-facing relay
-- [ ] Fly.io deployment and routing model that scales beyond a single relay instance
-- [ ] Open-source, web-first developer experience that is simple to self-host and extend
+- [ ] Close archived v1.0 verification gaps for pairing, attach/live control, reconnect, and multi-instance Fly behavior
+- [ ] Decide whether the next milestone is hardening-only or also includes notifications and observer-style workflows
+- [ ] Improve contributor and self-host ergonomics now that the core web, relay, and bridge surfaces exist
 
 ### Out of Scope
 
@@ -33,11 +43,21 @@ A developer can safely continue a local Codex session from anywhere, with live p
 
 ## Context
 
-This repository is currently a project wrapper plus a mapped brownfield reference tree under `resources/gsd-2/`. The mapped GSD2 codebase is useful as implementation substrate and design reference because it already demonstrates adjacent primitives such as headless orchestration in `resources/gsd-2/src/headless.ts`, remote-question flows in `resources/gsd-2/src/resources/extensions/remote-questions/`, and web auth plus event streaming in `resources/gsd-2/web/lib/auth.ts`, `resources/gsd-2/web/proxy.ts`, and `resources/gsd-2/web/app/api/session/events/route.ts`.
+The repository now contains first-party product code under `apps/` and `packages/`, with the original `resources/gsd-2/` tree kept as reference material rather than the product root. The active system is:
 
-The user request referenced "Cloud Code mobile" behavior; this has been interpreted as Anthropic Claude Code Remote Control because the requested behavior matches the official product pattern: local execution, remote phone/browser continuation, QR-based connection, and live synchronized session state. The goal is to build an equivalent experience for Codex, but using Codex-native integration points instead of terminal scraping whenever possible.
+- `apps/web`: mobile-first Next.js UI for pairing, sessions, approvals, device management, and live control
+- `apps/relay`: Fastify + `ws` relay on Fly.io for auth-gated APIs, browser/bridge routing, replay, readiness, and ops state
+- `apps/bridge`: local daemon that talks outbound to the relay and locally to `codex app-server`
+- `packages/protocol`, `packages/db`, and related shared packages: protocol schemas, control-plane repositories, and shared helpers
 
-External research strongly points to `codex app-server` as the primary integration surface for this product. OpenAI documents app-server as the rich-client protocol Codex uses for approvals, conversation history, and streamed agent events; `codex exec --json` remains a useful fallback for one-shot automation, but not as the core protocol for an interactive mobile control plane. Fly.io documentation also provides a clear scale-out routing pattern for WebSocket-capable HTTP services via `fly-replay`, which aligns with a relay-ownership model for browser-to-bridge connections.
+The product direction remains the same as at initialization: remote continuation of local Codex sessions, not hosted execution. The biggest open question after v1.0 is not product shape but validation depth: the code paths exist, but the milestone audit still wants staged Fly verification and fuller cross-phase evidence.
+
+## Next Milestone Goals
+
+- Convert the archived v1.0 audit and paused Phase 5 UAT into explicit follow-up phases rather than leaving them as implicit debt
+- Fill missing `VERIFICATION.md` coverage for `01.1`, `02`, `03`, and `04`
+- Run staged/manual validation for pairing, attach/resume, reconnect, owner loss, and degraded multi-instance relay behavior
+- Decide whether notifications and observer flows should stay backlog-only until after hardening or enter the next planned milestone
 
 ## Constraints
 
@@ -51,11 +71,12 @@ External research strongly points to `codex app-server` as the primary integrati
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Use `codex app-server` as the primary local Codex integration | OpenAI positions app-server as the interface for rich clients with approvals, history, and streamed agent events | — Pending |
+| Use `codex app-server` as the primary local Codex integration | OpenAI positions app-server as the interface for rich clients with approvals, history, and streamed agent events | ✓ Good |
 | Treat `codex exec --json` as fallback automation support, not the main remote-control protocol | `codex exec` is better suited to scripts and CI than a long-lived interactive remote session | — Pending |
-| Use a local bridge that talks to Codex over local stdio and to the cloud over outbound WSS | This avoids exposing the local machine directly while keeping protocol control in our product layer | — Pending |
-| Pair devices with authenticated web sessions, short-lived QR tokens, and terminal confirmation phrases | OWASP QR-login guidance makes QR hijacking a primary risk that must be mitigated explicitly | — Pending |
-| Use Fly.io as a relay/control plane, with routing based on relay ownership rather than a single in-memory node | This keeps the first version deployable while leaving a credible path to multi-instance scale | — Pending |
+| Use a local bridge that talks to Codex over local stdio and to the cloud over outbound WSS | This avoids exposing the local machine directly while keeping protocol control in our product layer | ✓ Good |
+| Pair devices with authenticated web sessions, short-lived QR tokens, and terminal confirmation phrases | QR-based login is hijack-prone without explicit human confirmation and short-lived trust material | ✓ Good |
+| Model remote activity as product-owned structured events instead of terminal-byte scraping | Structured events preserve approvals, history, and typed mobile rendering without pretending the terminal is the source of truth | ✓ Good |
+| Use Fly.io relay ownership and replay routing instead of a single in-memory node | This keeps the first version deployable while leaving a credible path to multi-instance scale | ⚠ Revisit after staged Fly validation |
 
 ## Evolution
 
@@ -75,4 +96,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-06 after initialization*
+*Last updated: 2026-04-19 after v1.0 milestone archive*
