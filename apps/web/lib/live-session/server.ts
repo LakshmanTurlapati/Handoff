@@ -1,6 +1,10 @@
+import { createHash } from "node:crypto";
 import {
+  findBridgeInstallationByTokenHash,
   findDeviceSessionForPrincipal,
+  touchBridgeInstallationLastUsed,
   touchDeviceSessionLastSeen,
+  type BridgeInstallationRow,
 } from "@codex-mobile/db";
 import { mintWsTicket } from "@codex-mobile/auth/ws-ticket";
 import { auth } from "../../auth";
@@ -13,6 +17,14 @@ import {
 export interface RemotePrincipal {
   userId: string;
   deviceSessionId: string;
+}
+
+export interface RequireBridgeInstallationPrincipalOptions {
+  bridgeBootstrapToken: string;
+  bridgeInstallationId: string;
+  bridgeInstanceId?: string;
+  touchLastUsed?: boolean;
+  lastUsedAt?: Date;
 }
 
 export function loadWsTicketSecret(): Uint8Array {
@@ -84,6 +96,45 @@ export async function requireRemotePrincipal(): Promise<RemotePrincipal> {
     userId,
     deviceSessionId: deviceSessionRow.id,
   };
+}
+
+export async function requireBridgeInstallationPrincipal(
+  options: RequireBridgeInstallationPrincipalOptions,
+): Promise<BridgeInstallationRow> {
+  if (!options.bridgeBootstrapToken.trim()) {
+    throw new Error("missing_bridge_bootstrap_token");
+  }
+
+  const installTokenHash = createHash("sha256")
+    .update(options.bridgeBootstrapToken)
+    .digest("hex");
+  const installation = await findBridgeInstallationByTokenHash({
+    installTokenHash,
+  });
+
+  if (!installation || installation.id !== options.bridgeInstallationId) {
+    throw new Error("bridge_installation_invalid");
+  }
+
+  if (
+    options.bridgeInstanceId &&
+    installation.bridgeInstanceId !== options.bridgeInstanceId
+  ) {
+    throw new Error("bridge_installation_invalid");
+  }
+
+  if (installation.revokedAt) {
+    throw new Error("bridge_installation_revoked");
+  }
+
+  if (options.touchLastUsed) {
+    await touchBridgeInstallationLastUsed({
+      bridgeInstallationId: installation.id,
+      lastUsedAt: options.lastUsedAt ?? new Date(),
+    });
+  }
+
+  return installation;
 }
 
 export function assertSameOrigin(request: Request): void {

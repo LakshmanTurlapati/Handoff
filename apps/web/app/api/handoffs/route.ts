@@ -1,12 +1,11 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   createOrReuseThreadHandoff,
-  findBridgeInstallationByTokenHash,
-  touchBridgeInstallationLastUsed,
 } from "@codex-mobile/db";
 import { ThreadHandoffRecordSchema } from "@codex-mobile/protocol";
+import { requireBridgeInstallationPrincipal } from "../../../lib/live-session/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,23 +44,29 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const installTokenHash = createHash("sha256")
-    .update(bridgeBootstrapToken)
-    .digest("hex");
-  const installation = await findBridgeInstallationByTokenHash({
-    installTokenHash,
-  });
-
-  if (
-    !installation ||
-    installation.revokedAt ||
-    installation.id !== parsedBody.data.bridgeInstallationId ||
-    installation.bridgeInstanceId !== parsedBody.data.bridgeInstanceId
-  ) {
-    return NextResponse.json(
-      { error: "bridge_installation_invalid" },
-      { status: 403 },
-    );
+  let installation;
+  try {
+    installation = await requireBridgeInstallationPrincipal({
+      bridgeBootstrapToken,
+      bridgeInstallationId: parsedBody.data.bridgeInstallationId,
+      bridgeInstanceId: parsedBody.data.bridgeInstanceId,
+      touchLastUsed: true,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown_error";
+    if (message === "missing_bridge_bootstrap_token") {
+      return NextResponse.json({ error: message }, { status: 401 });
+    }
+    if (
+      message === "bridge_installation_invalid" ||
+      message === "bridge_installation_revoked"
+    ) {
+      return NextResponse.json(
+        { error: "handoff_not_authorized" },
+        { status: 403 },
+      );
+    }
+    throw error;
   }
 
   const now = new Date();
@@ -78,10 +83,23 @@ export async function POST(request: Request): Promise<Response> {
     expiresAt,
   });
 
-  await touchBridgeInstallationLastUsed({
-    bridgeInstallationId: installation.id,
-    lastUsedAt: now,
-  });
+  if (
+    handoff.userId !== installation.userId ||
+    handoff.bridgeInstallationId !== installation.id
+  ) {
+    return NextResponse.json(
+      { error: "handoff_not_authorized" },
+      { status: 403 },
+    );
+  }
+
+  if (handoff.revokedAt) {
+    return NextResponse.json({ error: "handoff_revoked" }, { status: 410 });
+  }
+
+  if (handoff.expiresAt.getTime() <= now.getTime()) {
+    return NextResponse.json({ error: "handoff_expired" }, { status: 410 });
+  }
 
   const baseUrl = new URL(request.url).origin;
   const publicId = handoff.publicId;
