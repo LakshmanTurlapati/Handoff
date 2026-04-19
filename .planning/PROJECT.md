@@ -22,6 +22,16 @@ v1.0 shipped the full planned product path:
 
 The archive state is intentionally conservative. Implementation is complete, but v1.0 was archived with accepted verification debt rather than a fully passed milestone audit. See `.planning/MILESTONES.md` and `.planning/milestones/v1.0-MILESTONE-AUDIT.md`.
 
+## Current Milestone: v1.1 Handoff Install & Launch
+
+**Goal:** Make Handoff installable from npm and callable from inside Codex as `/handoff`, generating a Fly-hosted handoff URL that pairs the phone and lands on the active session.
+
+**Target features:**
+- npm-distributed `handoff` CLI with a real install surface outside this monorepo
+- Codex-native `/handoff` command that starts from the active local session
+- automatic local bootstrap instead of manual bridge credential and env wiring
+- hosted launch flow that opens the Fly site, completes pairing, and deep-links into the active session
+
 ## Requirements
 
 ### Validated
@@ -30,9 +40,10 @@ No milestone is fully validated yet. v1.0 shipped with deferred manual verificat
 
 ### Active
 
-- [ ] Close archived v1.0 verification gaps for pairing, attach/live control, reconnect, and multi-instance Fly behavior
-- [ ] Decide whether the next milestone is hardening-only or also includes notifications and observer-style workflows
-- [ ] Improve contributor and self-host ergonomics now that the core web, relay, and bridge surfaces exist
+- [ ] Install Handoff from npm without cloning the monorepo
+- [ ] Run `/handoff` inside Codex to generate a hosted handoff URL and QR code
+- [ ] Open the hosted Fly site, complete pairing, and land on the active session rather than a generic picker
+- [ ] Start or reuse the local bridge automatically without manual `userId` and `deviceSessionId` env wiring
 
 ### Out of Scope
 
@@ -40,6 +51,7 @@ No milestone is fully validated yet. v1.0 shipped with deferred manual verificat
 - General-purpose remote shell, SSH, or tmux replacement — this expands the blast radius far beyond "remote Codex control"
 - Native iOS/Android apps in v1 — a mobile web app is sufficient for the first validation loop
 - Team collaboration and shared-edit sessions in v1 — single-user remote continuation is the first market and security boundary to validate
+- A milestone-wide sweep of all archived v1.0 verification debt — that remains separate follow-up work unless it directly blocks `/handoff`
 
 ## Context
 
@@ -50,14 +62,14 @@ The repository now contains first-party product code under `apps/` and `packages
 - `apps/bridge`: local daemon that talks outbound to the relay and locally to `codex app-server`
 - `packages/protocol`, `packages/db`, and related shared packages: protocol schemas, control-plane repositories, and shared helpers
 
-The product direction remains the same as at initialization: remote continuation of local Codex sessions, not hosted execution. The biggest open question after v1.0 is not product shape but validation depth: the code paths exist, but the milestone audit still wants staged Fly verification and fuller cross-phase evidence.
+The product direction remains the same as at initialization: remote continuation of local Codex sessions, not hosted execution. The immediate product gap is no longer the hosted pairing or live-control substrate; it is the install and entrypoint UX. Today Handoff is still a repo-local bridge CLI plus hosted website. This milestone turns that into the shape the user actually wants: `npm install handoff`, then `/handoff` inside Codex.
 
 ## Next Milestone Goals
 
-- Convert the archived v1.0 audit and paused Phase 5 UAT into explicit follow-up phases rather than leaving them as implicit debt
-- Fill missing `VERIFICATION.md` coverage for `01.1`, `02`, `03`, and `04`
-- Run staged/manual validation for pairing, attach/resume, reconnect, owner loss, and degraded multi-instance relay behavior
-- Decide whether notifications and observer flows should stay backlog-only until after hardening or enter the next planned milestone
+- Package Handoff as a distributable CLI with a stable bootstrap path
+- Add Codex-native `/handoff` invocation that captures the active session context
+- Route the generated URL through the existing Fly-hosted site and active-session handoff flow
+- Keep the older v1.0 audit debt deferred unless it blocks the new install-and-launch path
 
 ## Constraints
 
@@ -96,4 +108,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-19 after v1.0 milestone archive*
+*Last updated: 2026-04-18 after starting v1.1 milestone*
