@@ -2,45 +2,42 @@
 description: Start or reuse a thread-bound handoff from the current Codex session.
 ---
 
-# `/handoff`
-
-Start or reuse a remote continuation handoff for the active Codex thread.
+# /handoff
 
 ## Preflight
 
-1. Confirm the local `handoff` CLI is installed and available on `PATH`.
-2. Confirm this command is running from an active Codex thread with resolvable thread context.
-3. If the active thread context is missing, return `missing_active_thread_context` with repair guidance and stop.
-4. Do not widen sandbox or approval behavior. This command must preserve the current Codex session semantics.
+- Confirm the current Codex thread is active and its thread/session context can be resolved.
+- If the current thread cannot be resolved, the command must return `missing_active_thread_context` and must not call any generic session-picker flow such as `thread/list` for user selection.
+- No session picker fallback.
+- Confirm the local `handoff` package is installed and the bridge bootstrap has already completed on this machine.
 
 ## Plan
 
-1. Resolve the current Codex thread context.
-2. Fail closed if the current thread cannot be resolved.
-3. Invoke the local Handoff helper for the active thread.
-4. Return a concise result block for the active thread only.
+1. Resolve the active Codex thread and session context from the current conversation.
+2. Ensure the local bridge daemon is running through the packaged `handoff` CLI.
+3. Ask the local helper for a concise JSON handoff result bound to the current thread.
+4. Return only the launch details, expiry, reuse state, and repair guidance needed for remote continuation.
 
 ## Commands
 
-1. Once the active thread context is available, call the exact local helper command `handoff codex-handoff --format json`.
-2. Parse the JSON response and present the concise handoff result to the user.
-3. If the current thread cannot be resolved, the command must return `missing_active_thread_context`.
-4. If the current thread cannot be resolved, the command must not call any generic session-picker flow such as `thread/list` for user selection.
+- Once the active thread context is available, call the local helper command `handoff codex-handoff --format json`.
+- Bind the resolved thread and session context into that helper invocation.
+- Never fall back to `thread/list` or any other generic picker flow if the current thread is unavailable.
 
 ## Verification
 
-1. Confirm the helper returned structured JSON for the same active thread that invoked `/handoff`.
-2. Confirm the result describes one thread-bound handoff outcome instead of a generic session-selection flow.
-3. Confirm no fallback to `thread/list` was used for user selection.
+- Confirm the helper returns structured JSON for exactly one thread-bound handoff.
+- Confirm the response includes launch details, expiry, and whether the handoff was reused.
+- Confirm failures stay fail-closed and surface actionable repair guidance instead of listing sessions.
 
 ## Summary
 
-- **Action**: Start or reuse a thread-bound handoff for the active Codex session
-- **Status**: success | partial | failed
-- **Details**: thread-bound handoff result from `handoff codex-handoff --format json`
+- Reuse or start a thread-bound remote handoff for the current Codex session only.
+- No session picker fallback.
+- If the active thread context is missing, stop with `missing_active_thread_context`.
 
 ## Next Steps
 
-1. Open the returned handoff URL on the target phone browser.
-2. Complete pairing if prompted by the hosted flow.
-3. Re-run `/handoff` from the same thread if the existing handoff expires or is revoked.
+- Open or scan the returned launch URL/QR code on the paired phone.
+- Re-run `/handoff` from the same thread to reuse the still-valid handoff if needed.
+- If the command reports missing bootstrap or thread context, repair that local state and run `/handoff` again from the active Codex thread.
