@@ -28,6 +28,7 @@ Commands:
   pair    Start device pairing
   daemon  Start the long-running bridge daemon
   launch  Start or reuse the background bridge daemon
+  codex-handoff  Start or reuse a thread-bound Codex handoff
   install-codex-command  Install or update the packaged /handoff Codex command
 
 Environment:
@@ -90,6 +91,20 @@ async function main(): Promise<void> {
       const { runLaunchCommand } = await import("./cli/launch.js");
       const result = await runLaunchCommand();
       process.exitCode = result.exitCode;
+      return;
+    }
+
+    case "codex-handoff": {
+      const { runCodexHandoffCommand } = await import("./cli/codex-handoff.js");
+      const result = await runCodexHandoffCommand({
+        threadId: readFlagValue("--thread-id"),
+        sessionId: readFlagValue("--session-id"),
+        format: readFlagValue("--format"),
+      });
+      process.exitCode = result.exitCode;
+      if (result.exitCode !== 0) {
+        process.stderr.write(`${result.message}\n`);
+      }
       return;
     }
 
