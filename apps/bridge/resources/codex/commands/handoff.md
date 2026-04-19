@@ -8,7 +8,7 @@ description: Start or reuse a thread-bound handoff from the current Codex sessio
 
 - Confirm the current Codex thread is active and its thread/session context can be resolved.
 - If the current thread cannot be resolved, the command must return `missing_active_thread_context` and must not call any generic session-picker flow such as `thread/list` for user selection.
-- No session picker fallback.
+- No session picker fallback
 - Confirm the local `handoff` package is installed and the bridge bootstrap has already completed on this machine.
 
 ## Plan
@@ -33,7 +33,7 @@ description: Start or reuse a thread-bound handoff from the current Codex sessio
 ## Summary
 
 - Reuse or start a thread-bound remote handoff for the current Codex session only.
-- No session picker fallback.
+- No session picker fallback
 - If the active thread context is missing, stop with `missing_active_thread_context`.
 
 ## Next Steps

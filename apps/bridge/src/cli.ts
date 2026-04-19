@@ -104,6 +104,9 @@ async function main(): Promise<void> {
       process.exitCode = result.exitCode;
       if (result.exitCode !== 0) {
         process.stderr.write(`${result.message}\n`);
+        if (result.guidance) {
+          process.stderr.write(`${result.guidance}\n`);
+        }
       }
       return;
     }

@@ -38,7 +38,29 @@ export interface CodexHandoffCommandOptions {
 export interface CodexHandoffCommandResult {
   exitCode: number;
   message: string;
+  guidance?: string;
   payload?: CodexHandoffResult;
+}
+
+const HANDOFF_FAILURE_GUIDANCE: Record<string, string> = {
+  missing_active_thread_context:
+    "Run /handoff from the active Codex thread you want to continue remotely. No session picker fallback.",
+  missing_bridge_bootstrap_state:
+    "Repair local bridge bootstrap on this machine, then run /handoff again from the same active Codex thread.",
+  handoff_expired:
+    "The previous handoff expired. Run /handoff again from the same active Codex thread to mint a fresh short-lived handoff.",
+  handoff_revoked:
+    "The previous handoff was revoked. Re-pair this machine and retry /handoff from the same active Codex thread.",
+  handoff_not_authorized:
+    "This machine is not authorized for that handoff. Repair bridge pairing on this machine and retry from the same active Codex thread.",
+};
+
+function createFailureResult(message: string): CodexHandoffCommandResult {
+  return {
+    exitCode: 1,
+    message,
+    guidance: HANDOFF_FAILURE_GUIDANCE[message],
+  };
 }
 
 function createSilentOutput(): Writable {
@@ -56,10 +78,7 @@ export async function runCodexHandoffCommand(
   const sessionId = options.sessionId?.trim();
 
   if (!threadId || !sessionId) {
-    return {
-      exitCode: 1,
-      message: "missing_active_thread_context",
-    };
+    return createFailureResult("missing_active_thread_context");
   }
 
   if (options.format && options.format !== "json") {
@@ -75,19 +94,18 @@ export async function runCodexHandoffCommand(
   });
 
   if (launchResult.exitCode !== 0) {
-    return {
-      exitCode: launchResult.exitCode,
-      message: launchResult.message,
-    };
+    return launchResult.message in HANDOFF_FAILURE_GUIDANCE
+      ? createFailureResult(launchResult.message)
+      : {
+          exitCode: launchResult.exitCode,
+          message: launchResult.message,
+        };
   }
 
   const loadBootstrapState = options.loadBootstrapState ?? loadBridgeBootstrapState;
   const bootstrap = await loadBootstrapState();
   if (!bootstrap) {
-    return {
-      exitCode: 1,
-      message: "missing_bridge_bootstrap_state",
-    };
+    return createFailureResult("missing_bridge_bootstrap_state");
   }
 
   const client =
@@ -100,12 +118,21 @@ export async function runCodexHandoffCommand(
       bridgeBootstrapToken: bootstrap.bridgeBootstrapToken,
     });
 
-  const handoff = await client.createHandoff({
-    bridgeInstallationId: bootstrap.bridgeInstallationId,
-    bridgeInstanceId: bootstrap.bridgeInstanceId,
-    threadId,
-    sessionId,
-  });
+  let handoff: ThreadHandoffRecord;
+  try {
+    handoff = await client.createHandoff({
+      bridgeInstallationId: bootstrap.bridgeInstallationId,
+      bridgeInstanceId: bootstrap.bridgeInstanceId,
+      threadId,
+      sessionId,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown_error";
+    if (message in HANDOFF_FAILURE_GUIDANCE) {
+      return createFailureResult(message);
+    }
+    throw error;
+  }
 
   const payload = CodexHandoffResultSchema.parse({
     ...handoff,

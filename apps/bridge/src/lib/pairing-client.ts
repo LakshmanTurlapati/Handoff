@@ -322,8 +322,12 @@ export class PairingClient {
     });
 
     if (!response.ok) {
+      const body = await response
+        .json()
+        .catch(() => null) as { error?: string } | null;
       throw new Error(
-        `POST /api/handoffs failed: ${response.status} ${response.statusText}`,
+        body?.error ??
+          `POST /api/handoffs failed: ${response.status} ${response.statusText}`,
       );
     }
 
