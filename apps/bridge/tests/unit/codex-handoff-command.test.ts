@@ -29,9 +29,11 @@ describe("codex-handoff command", () => {
       createPairingClient,
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       exitCode: 1,
       message: "missing_active_thread_context",
+      guidance:
+        "Run /handoff from the active Codex thread you want to continue remotely. No session picker fallback.",
     });
     expect(launchCommand).not.toHaveBeenCalled();
     expect(createPairingClient).not.toHaveBeenCalled();
