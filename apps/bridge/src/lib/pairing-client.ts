@@ -18,13 +18,16 @@
  *     port and never stores long-lived credentials on disk; raw
  *     bearer tokens passed here are kept in memory only.
  */
+import { z } from "zod";
 import {
   PairingCreateResponseSchema,
   PairingStatusResponseSchema,
   PairingConfirmResponseSchema,
+  ThreadHandoffRecordSchema,
   type PairingCreateResponse,
   type PairingStatusResponse,
   type PairingConfirmResponse,
+  type ThreadHandoffRecord,
 } from "@codex-mobile/protocol";
 
 /**
@@ -47,6 +50,8 @@ export interface PairingClientOptions {
   fetchImpl?: typeof fetch;
   /** Optional User-Agent header value sent on every request. */
   userAgent?: string;
+  /** Optional bridge bootstrap token for bridge-owned routes. */
+  bridgeBootstrapToken?: string;
 }
 
 export interface CreatePairingRequest {
@@ -60,6 +65,34 @@ export interface ConfirmPairingRequest {
   /** Cookie header value the browser must have supplied (for tests). */
   cookie?: string;
 }
+
+export interface BridgeConnectTicketRequest {
+  bridgeInstallationId: string;
+  bridgeBootstrapToken: string;
+}
+
+export interface CreateHandoffRequest {
+  bridgeInstallationId: string;
+  bridgeInstanceId: string;
+  threadId: string;
+  sessionId: string;
+}
+
+export interface BridgeConnectTicketResponse {
+  relayUrl: string;
+  ticket: string;
+  expiresAt: string;
+  bridgeInstallationId: string;
+}
+
+const BridgeConnectTicketResponseSchema: z.ZodType<BridgeConnectTicketResponse> = z
+  .object({
+    relayUrl: z.string().url(),
+    ticket: z.string().min(1),
+    expiresAt: z.string().datetime(),
+    bridgeInstallationId: z.string().uuid(),
+  })
+  .strict();
 
 /**
  * Thrown by `getPairingStatus` (and therefore observed by `waitForRedeem`)
@@ -89,6 +122,7 @@ export class PairingClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly userAgent: string;
+  private readonly bridgeBootstrapToken: string | null;
   /**
    * One-time pairing bearer returned by `POST /api/pairings` in the
    * `pairingToken` response field. Held in process memory only — NEVER
@@ -103,7 +137,8 @@ export class PairingClient {
   constructor(options: PairingClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.userAgent = options.userAgent ?? "codex-mobile-bridge/0.1.0";
+    this.userAgent = options.userAgent ?? "handoff/0.1.0";
+    this.bridgeBootstrapToken = options.bridgeBootstrapToken ?? null;
   }
 
   /**
@@ -224,6 +259,82 @@ export class PairingClient {
         `confirm returned an invalid payload: ${parsed.error.message}`,
       );
     }
+    return parsed.data;
+  }
+
+  async createBridgeConnectTicket(
+    request: BridgeConnectTicketRequest,
+  ): Promise<BridgeConnectTicketResponse> {
+    const response = await this.fetchImpl(
+      this.buildUrl("/api/bridge/connect-ticket"),
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "user-agent": this.userAgent,
+          accept: "application/json",
+          authorization: `Bearer ${request.bridgeBootstrapToken}`,
+        },
+        body: JSON.stringify({
+          bridgeInstallationId: request.bridgeInstallationId,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `POST /api/bridge/connect-ticket failed: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const raw = await response.json();
+    const parsed = BridgeConnectTicketResponseSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error(
+        `/api/bridge/connect-ticket returned an invalid payload: ${parsed.error.message}`,
+      );
+    }
+
+    return parsed.data;
+  }
+
+  async createHandoff(
+    request: CreateHandoffRequest,
+  ): Promise<ThreadHandoffRecord> {
+    if (!this.bridgeBootstrapToken) {
+      throw new Error("missing_bridge_bootstrap_token");
+    }
+
+    const response = await this.fetchImpl(this.buildUrl("/api/handoffs"), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": this.userAgent,
+        accept: "application/json",
+        authorization: `Bearer ${this.bridgeBootstrapToken}`,
+      },
+      body: JSON.stringify({
+        bridgeInstallationId: request.bridgeInstallationId,
+        bridgeInstanceId: request.bridgeInstanceId,
+        threadId: request.threadId,
+        sessionId: request.sessionId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `POST /api/handoffs failed: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const raw = await response.json();
+    const parsed = ThreadHandoffRecordSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error(
+        `/api/handoffs returned an invalid payload: ${parsed.error.message}`,
+      );
+    }
+
     return parsed.data;
   }
 

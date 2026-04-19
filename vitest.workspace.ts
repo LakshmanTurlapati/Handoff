@@ -1,4 +1,34 @@
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineWorkspace } from "vitest/config";
+
+const ROOT_DIR = fileURLToPath(new URL(".", import.meta.url));
+const workspaceAlias = [
+  {
+    find: "@codex-mobile/protocol",
+    replacement: resolve(ROOT_DIR, "packages/protocol/src/index.ts"),
+  },
+  {
+    find: /^@codex-mobile\/protocol\/(.+)$/,
+    replacement: resolve(ROOT_DIR, "packages/protocol/src/$1.ts"),
+  },
+  {
+    find: "@codex-mobile/auth",
+    replacement: resolve(ROOT_DIR, "packages/auth/src/index.ts"),
+  },
+  {
+    find: /^@codex-mobile\/auth\/(.+)$/,
+    replacement: resolve(ROOT_DIR, "packages/auth/src/$1.ts"),
+  },
+  {
+    find: "@codex-mobile/db",
+    replacement: resolve(ROOT_DIR, "packages/db/src/index.ts"),
+  },
+  {
+    find: /^@codex-mobile\/db\/(.+)$/,
+    replacement: resolve(ROOT_DIR, "packages/db/src/$1.ts"),
+  },
+];
 
 /**
  * Codex Mobile Vitest workspace.
@@ -12,6 +42,9 @@ import { defineWorkspace } from "vitest/config";
  */
 export default defineWorkspace([
   {
+    resolve: {
+      alias: workspaceAlias,
+    },
     test: {
       name: "phase-01-unit",
       include: [
@@ -26,6 +59,9 @@ export default defineWorkspace([
     },
   },
   {
+    resolve: {
+      alias: workspaceAlias,
+    },
     esbuild: {
       jsx: "automatic",
       jsxImportSource: "react",
