@@ -42,7 +42,7 @@ Plans:
 Plans:
 - [x] 07-01: Add the Codex-facing command/plugin surface for `/handoff`
 - [x] 07-02: Capture active-session context and handoff metadata at command invocation time
-- [ ] 07-03: Validate the command path against approval, sandbox, and bridge-boundary constraints
+- [x] 07-03: Validate the command path against approval, sandbox, and bridge-boundary constraints
 
 ### Phase 8: Hosted Launch & Active-Session Handoff
 **Goal**: Complete the user-facing handoff launch so the generated URL opens the Fly-hosted site, pairs the device, and lands on the active session
