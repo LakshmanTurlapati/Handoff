@@ -1,12 +1,18 @@
 {
-  "name": "@codex-mobile/bridge",
+  "name": "handoff",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Codex Mobile local bridge CLI - outbound-only daemon that mediates codex app-server",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/cli.js",
+  "types": "dist/cli.d.ts",
+  "files": [
+    "dist",
+    "resources/codex",
+    "README.md"
+  ],
   "bin": {
-    "codex-mobile-bridge": "dist/cli.js"
+    "handoff": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
