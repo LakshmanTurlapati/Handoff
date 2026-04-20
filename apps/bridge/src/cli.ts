@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 const CLI_NAME = "handoff";
 
 function readFlagValue(flag: string): string | undefined {
