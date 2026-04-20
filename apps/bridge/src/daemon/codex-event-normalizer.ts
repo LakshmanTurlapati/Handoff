@@ -2,6 +2,7 @@ import type {
   LiveActivity,
   LiveCommandActionOption,
   LiveSessionEvent,
+  LiveSessionEndedReason,
   LiveTurn,
   SessionHistoryParams,
 } from "@codex-mobile/protocol";
@@ -35,6 +36,21 @@ function toOccurredAt(
     fallback ??
     new Date().toISOString()
   );
+}
+
+function normalizeEndedReason(
+  value: string | null,
+): LiveSessionEndedReason {
+  switch (value) {
+    case "device_session_revoked":
+    case "device_session_expired":
+    case "bridge_unavailable":
+    case "codex_process_exited":
+    case "detached":
+      return value;
+    default:
+      return "detached";
+  }
 }
 
 function toDecisionActionOption(
@@ -308,9 +324,9 @@ export function normalizeCodexServerEvent(input: {
         sessionId: input.sessionId,
         cursor: input.cursor,
         occurredAt,
-        reason:
-          (params ? readString(params, "reason", "message") : null) ??
-          "codex_session_ended",
+        reason: normalizeEndedReason(
+          params ? readString(params, "reason", "message") : null,
+        ),
       };
     default:
       return null;

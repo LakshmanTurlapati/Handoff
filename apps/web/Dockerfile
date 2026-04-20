@@ -37,14 +37,13 @@ COPY packages/auth/package.json packages/auth/package.json
 COPY packages/db/package.json packages/db/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
 
-# Install every workspace's dependencies with the root lock file as the
-# authoritative source. `--include-workspace-root` ensures root-level
-# devDependencies (vitest, drizzle-kit, typescript) are available for
-# the build stage.
-RUN npm ci --workspaces --include-workspace-root
+# This repo currently does not check in a root package-lock.json, so a
+# clean `npm ci` cannot run inside Fly's remote builder yet. Use
+# workspace-aware `npm install` until the lockfile becomes authoritative.
+RUN npm install --workspaces --include-workspace-root
 
 # -----------------------------------------------------------------------------
-# Stage 2: Next.js build
+# Stage 2: build shared packages, then the Next.js app
 # -----------------------------------------------------------------------------
 FROM node:22-alpine AS build
 WORKDIR /repo
@@ -61,6 +60,12 @@ COPY apps/web ./apps/web
 COPY packages/auth ./packages/auth
 COPY packages/db ./packages/db
 COPY packages/protocol ./packages/protocol
+
+# Build the shared packages first so the app can resolve workspace
+# imports through their emitted `dist/` entrypoints during `next build`.
+RUN npm run build --workspace @codex-mobile/protocol --if-present \
+  && npm run build --workspace @codex-mobile/auth --if-present \
+  && npm run build --workspace @codex-mobile/db --if-present
 
 # Next.js production build. `--if-present` guards against the build
 # script being intentionally absent during Phase 1 scaffolding; in

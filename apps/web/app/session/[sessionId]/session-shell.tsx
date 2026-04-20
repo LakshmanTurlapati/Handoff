@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useEffect, useEffectEvent, useReducer, useRef } from "react";
+import { startTransition, useCallback, useEffect, useReducer, useRef } from "react";
 import { Composer } from "../../../components/session/composer";
 import { JumpToLive } from "../../../components/session/jump-to-live";
 import { ReconnectBanner } from "../../../components/session/reconnect-banner";
@@ -30,6 +30,20 @@ import type {
 interface SessionShellProps {
   sessionId: string;
   initialConnection: "connecting" | "connected" | "reconnecting";
+}
+
+function useEventCallback<Args extends unknown[], Return>(
+  callback: (...args: Args) => Return,
+) {
+  const callbackRef = useRef(callback);
+
+  useEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
+
+  return useCallback((...args: Args) => callbackRef.current(...args), []) as (
+    ...args: Args
+  ) => Return;
 }
 
 export function SessionShell({
@@ -85,7 +99,7 @@ export function SessionShell({
     });
   };
 
-  const applyTransportEvent = useEffectEvent((event: LiveSessionEvent) => {
+  const applyTransportEvent = useEventCallback((event: LiveSessionEvent) => {
     startTransition(() => {
       switch (event.kind) {
         case "session.history":
@@ -147,13 +161,13 @@ export function SessionShell({
     });
   });
 
-  const handleConnectionChange = useEffectEvent((connection: LiveConnectionState) => {
+  const handleConnectionChange = useEventCallback((connection: LiveConnectionState) => {
     startTransition(() => {
       dispatch({ type: "set_connection", connection });
     });
   });
 
-  const handleTransportError = useEffectEvent((error: Error) => {
+  const handleTransportError = useEventCallback((error: Error) => {
     startTransition(() => {
       appendLocalActivity(
         "error",
@@ -194,7 +208,7 @@ export function SessionShell({
     };
   }, [applyTransportEvent, handleConnectionChange, handleTransportError, sessionId]);
 
-  const syncFollowMode = useEffectEvent(() => {
+  const syncFollowMode = useEventCallback(() => {
     const nearBottom =
       window.scrollY + window.innerHeight >=
       document.documentElement.scrollHeight - 160;
@@ -220,7 +234,7 @@ export function SessionShell({
     liveAnchorRef.current?.scrollIntoView({ block: "end" });
   }, [state.connection, state.followMode, state.turns]);
 
-  const dispatchCommand = useEffectEvent(async (command: SessionCommand) => {
+  const dispatchCommand = useEventCallback(async (command: SessionCommand) => {
     if (transportRef.current) {
       await transportRef.current.send(command);
       return;
@@ -229,7 +243,7 @@ export function SessionShell({
     await sendSessionCommand(sessionId, command);
   });
 
-  const handleRetryAction = useEffectEvent(async (activity: LiveActivity, actionId: string) => {
+  const handleRetryAction = useEventCallback(async (activity: LiveActivity, actionId: string) => {
     if (activity.kind !== "error") return;
 
     if (actionId === "retry") {
@@ -377,7 +391,7 @@ export function SessionShell({
                       },
                     );
                   },
-                  (error) => {
+                  (error: unknown) => {
                     appendLocalActivity(
                       "error",
                       "Approval action failed",
@@ -415,7 +429,7 @@ export function SessionShell({
                 stateLabel: "Prompt queued",
               },
             );
-            void dispatchCommand({ kind: "prompt", text }).catch((error) => {
+            void dispatchCommand({ kind: "prompt", text }).catch((error: unknown) => {
               appendLocalActivity(
                 "error",
                 "Prompt send failed",
@@ -441,7 +455,7 @@ export function SessionShell({
                 stateLabel: "Steering",
               },
             );
-            void dispatchCommand({ kind: "steer", text }).catch((error) => {
+            void dispatchCommand({ kind: "steer", text, mode: "append" }).catch((error: unknown) => {
               appendLocalActivity(
                 "error",
                 "Steer send failed",
@@ -459,7 +473,7 @@ export function SessionShell({
           onInterrupt={() => {
             dispatch({ type: "request_interrupt" });
             void dispatchCommand({ kind: "interrupt", reason: "user_request" }).catch(
-              (error) => {
+              (error: unknown) => {
                 dispatch({
                   type: "interrupt_finished",
                   stateLabel: "Running bash",

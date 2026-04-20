@@ -23,26 +23,6 @@ const relayConnectionMocks = vi.hoisted(() => {
       return this;
     }
 
-    once(event: string, listener: (...args: any[]) => void): this {
-      const wrapped = (...args: any[]) => {
-        this.off(event, wrapped);
-        listener(...args);
-      };
-      return this.on(event, wrapped);
-    }
-
-    off(event: string, listener: (...args: any[]) => void): this {
-      const listeners = this.listeners.get(event);
-      if (!listeners) {
-        return this;
-      }
-      this.listeners.set(
-        event,
-        listeners.filter((candidate) => candidate !== listener),
-      );
-      return this;
-    }
-
     emit(event: string, ...args: any[]): boolean {
       const listeners = this.listeners.get(event);
       if (!listeners || listeners.length === 0) {
@@ -66,16 +46,11 @@ const relayConnectionMocks = vi.hoisted(() => {
 
   return {
     MockWebSocket,
-    mintWsTicket: vi.fn(),
   };
 });
 
 vi.mock("ws", () => ({
   default: relayConnectionMocks.MockWebSocket,
-}));
-
-vi.mock("@codex-mobile/auth/ws-ticket", () => ({
-  mintWsTicket: relayConnectionMocks.mintWsTicket,
 }));
 
 import { RelayConnection } from "../../src/daemon/relay-connection.js";
@@ -84,10 +59,6 @@ describe("RelayConnection reconnect identity", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     relayConnectionMocks.MockWebSocket.instances.length = 0;
-    relayConnectionMocks.mintWsTicket.mockReset();
-    relayConnectionMocks.mintWsTicket
-      .mockResolvedValueOnce({ ticket: "ticket-1" })
-      .mockResolvedValueOnce({ ticket: "ticket-2" });
   });
 
   afterEach(() => {
@@ -95,12 +66,20 @@ describe("RelayConnection reconnect identity", () => {
   });
 
   it("re-sends bridge.register with the same bridgeInstanceId after reconnect", async () => {
+    const ticketProvider = vi
+      .fn()
+      .mockResolvedValueOnce({
+        relayUrl: "ws://relay.example.test",
+        ticket: "ticket-1",
+      })
+      .mockResolvedValueOnce({
+        relayUrl: "ws://relay.example.test",
+        ticket: "ticket-2",
+      });
+
     const connection = new RelayConnection({
-      relayUrl: "ws://relay.example.test",
-      secret: new Uint8Array([1, 2, 3]),
-      userId: "user-1",
-      deviceSessionId: "device-1",
       bridgeInstanceId: "bridge-stable",
+      ticketProvider,
       initialReconnectDelay: 1000,
       maxReconnectDelay: 1000,
     });
@@ -133,7 +112,7 @@ describe("RelayConnection reconnect identity", () => {
         bridgeInstanceId: "bridge-stable",
       },
     });
-    expect(relayConnectionMocks.mintWsTicket).toHaveBeenCalledTimes(2);
+    expect(ticketProvider).toHaveBeenCalledTimes(2);
 
     connection.disconnect();
   });

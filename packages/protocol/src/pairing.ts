@@ -86,6 +86,8 @@ export interface PairingConfirmResponse {
   verificationPhrase: string;
   confirmedAt?: string;
   deviceSessionId?: string;
+  bridgeInstallationId?: string;
+  bridgeBootstrapToken?: string;
 }
 
 export const PairingConfirmResponseSchema: z.ZodType<PairingConfirmResponse> = z
@@ -93,6 +95,8 @@ export const PairingConfirmResponseSchema: z.ZodType<PairingConfirmResponse> = z
     verificationPhrase: z.string().min(3),
     confirmedAt: z.string().datetime().optional(),
     deviceSessionId: z.string().min(1).optional(),
+    bridgeInstallationId: z.string().min(1).optional(),
+    bridgeBootstrapToken: z.string().min(32).optional(),
   })
   .strict();
 

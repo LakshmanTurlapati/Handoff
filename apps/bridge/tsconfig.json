@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "tsBuildInfoFile": "./.tsbuildinfo",
+    "paths": {
+      "@codex-mobile/auth": ["packages/auth/dist/index.d.ts"],
+      "@codex-mobile/auth/*": ["packages/auth/dist/*.d.ts"],
+      "@codex-mobile/protocol": ["packages/protocol/dist/index.d.ts"],
+      "@codex-mobile/protocol/*": ["packages/protocol/dist/*.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests"]
+}

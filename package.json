@@ -15,9 +15,14 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "build:handoff-support": "npm run build --workspace @codex-mobile/protocol && npm run build --workspace @codex-mobile/auth",
+    "build:handoff-publish": "npm run build:handoff-support && npm --prefix apps/bridge run build",
+    "stage:handoff-publish": "node scripts/stage-handoff-publish.mjs",
     "typecheck": "tsc -p tsconfig.base.json --noEmit && npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "validate:handoff-pack": "node scripts/validate-handoff-pack.mjs",
+    "validate:handoff-publish-install": "node scripts/validate-handoff-publish-install.mjs",
     "test:phase-01:quick": "vitest run --project phase-01-unit",
     "test:phase-01:full": "vitest run --project phase-01-unit && playwright test --project=phase-01-e2e-mobile",
     "db:generate": "npm run db:generate --workspace packages/db"

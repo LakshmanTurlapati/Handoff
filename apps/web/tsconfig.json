@@ -1,0 +1,27 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "incremental": true,
+    "paths": {
+      "@codex-mobile/protocol": ["packages/protocol"],
+      "@codex-mobile/protocol/*": ["packages/protocol/dist/*"],
+      "@codex-mobile/auth": ["packages/auth"],
+      "@codex-mobile/auth/*": ["packages/auth/dist/*"],
+      "@codex-mobile/db": ["packages/db"],
+      "@codex-mobile/db/*": ["packages/db/dist/*"]
+    },
+    "plugins": [{ "name": "next" }]
+  },
+  "include": [
+    "next-env.d.ts",
+    "app/**/*",
+    "components/**/*",
+    "lib/**/*",
+    "auth.ts",
+    "auth.config.ts",
+    "middleware.ts"
+  ],
+  "exclude": ["node_modules", "tests"]
+}

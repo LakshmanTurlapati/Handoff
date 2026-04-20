@@ -1,5 +1,5 @@
 /**
- * `codex-mobile-bridge pair` command.
+ * `handoff pair` command.
  *
  * The entry point a developer runs on their laptop to start pairing a
  * phone. It:
@@ -22,7 +22,9 @@
  *   - The command exits non-zero on any failure so CI can detect
  *     regressions in the pairing flow.
  */
+import { randomUUID } from "node:crypto";
 import { PairingClient } from "../lib/pairing-client";
+import { saveBridgeBootstrapState } from "../lib/local-state.js";
 import { renderTerminalQr } from "../lib/qr";
 import type { PairingStatusResponse } from "@codex-mobile/protocol";
 
@@ -77,17 +79,18 @@ export async function runPairCommand(
   const log = (line: string) => out.write(`${line}\n`);
   const client =
     options.client ??
-    new PairingClient({ baseUrl: options.baseUrl, userAgent: "codex-mobile-bridge/0.1.0" });
+    new PairingClient({ baseUrl: options.baseUrl, userAgent: "handoff/0.1.0" });
   const qr = options.renderQr ?? renderTerminalQr;
   const approver = options.approver ?? stdinApprovalPrompt();
+  const bridgeInstanceId = options.bridgeInstanceId ?? randomUUID();
 
-  log("codex-mobile-bridge · starting pairing");
+  log("handoff · starting pairing");
 
   let created;
   try {
     created = await client.createPairing({
       deviceLabel: options.deviceLabel,
-      bridgeInstanceId: options.bridgeInstanceId,
+      bridgeInstanceId,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -153,8 +156,32 @@ export async function runPairCommand(
       verificationPhrase,
       deviceLabel: options.deviceLabel,
     });
+    if (!confirmed.bridgeInstallationId || !confirmed.bridgeBootstrapToken) {
+      return {
+        exitCode: 1,
+        message: "pairing confirmed but bridge bootstrap response was incomplete",
+        pairingId: created.pairingId,
+        status: "confirmed",
+      };
+    }
+
+    const connectTicket = await client.createBridgeConnectTicket({
+      bridgeInstallationId: confirmed.bridgeInstallationId,
+      bridgeBootstrapToken: confirmed.bridgeBootstrapToken,
+    });
+
+    await saveBridgeBootstrapState({
+      baseUrl: options.baseUrl,
+      relayUrl: connectTicket.relayUrl,
+      bridgeInstallationId: confirmed.bridgeInstallationId,
+      bridgeInstanceId,
+      deviceLabel: options.deviceLabel ?? null,
+      bridgeBootstrapToken: confirmed.bridgeBootstrapToken,
+    });
+
     log("");
-    log(`Pairing confirmed. deviceSessionId=${confirmed.deviceSessionId}`);
+    log("Pairing confirmed.");
+    log("Local bridge bootstrap saved.");
     return {
       exitCode: 0,
       message: "pairing confirmed",

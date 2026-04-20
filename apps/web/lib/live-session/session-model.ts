@@ -1,5 +1,7 @@
 import type { LiveSessionEndedReason } from "@codex-mobile/protocol/live-session";
 
+export type { LiveSessionEndedReason } from "@codex-mobile/protocol/live-session";
+
 export type LiveConnectionState =
   | "connecting"
   | "connected"
@@ -55,7 +57,7 @@ export interface CommandActivity extends LiveActivityBase {
 
 export interface ApprovalActivity extends LiveActivityBase {
   kind: "approval";
-  requestId: string;
+  requestId: string | number;
   actions: LiveActionOption[];
 }
 

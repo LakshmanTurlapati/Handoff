@@ -1,8 +1,11 @@
 {
-  "name": "handoff",
+  "name": "@codex-mobile/handoff",
   "version": "0.1.0",
   "private": false,
   "description": "Codex Mobile local bridge CLI - outbound-only daemon that mediates codex app-server",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "dist/cli.js",
   "types": "dist/cli.d.ts",
@@ -15,9 +18,10 @@
     "handoff": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist .tsbuildinfo && tsc -p tsconfig.json",
     "dev": "node --watch --experimental-strip-types src/cli.ts",
     "start": "node dist/cli.js",
+    "prepack": "npm --prefix ../.. run build:handoff-support && npm run build",
     "typecheck": "tsc --noEmit",
     "lint": "echo \"(lint placeholder for apps/bridge)\"",
     "test": "vitest run"

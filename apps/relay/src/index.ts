@@ -10,7 +10,7 @@
  * registration — belongs in `./server.ts` or `./routes/*` so the bootstrap
  * layer stays trivial and easy to audit.
  */
-import { startRelayServer } from "./server";
+import { startRelayServer } from "./server.js";
 
 async function main(): Promise<void> {
   const app = await startRelayServer({ logger: true });

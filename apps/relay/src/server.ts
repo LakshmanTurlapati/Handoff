@@ -19,7 +19,7 @@
  */
 import Fastify, { type FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
-import { registerHealthRoutes } from "./routes/health";
+import { registerHealthRoutes } from "./routes/health.js";
 import { registerOpsRoutes } from "./routes/ops.js";
 import { registerBridgeWsRoutes } from "./routes/ws-bridge.js";
 import { registerBrowserWsRoutes } from "./routes/ws-browser.js";

@@ -3,17 +3,18 @@
 # Dockerfile for apps/relay (Codex Mobile Phase 1 control plane).
 #
 # Build strategy:
-#   - Multi-stage with a deps stage, a build stage, and a minimal runtime
-#     stage so the production image carries only production dependencies
-#     plus the compiled JavaScript.
-#   - Node 22 Alpine for a small base layer. `--experimental-strip-types`
-#     is used in dev, but production runs compiled JS emitted by `tsc`
-#     to avoid shipping the TypeScript parser at runtime.
+#   - Multi-stage with a deps stage, a validation stage, and a runtime
+#     stage so the production image carries a fresh workspace install and
+#     validated relay sources.
+#   - Node 22 Alpine for a small base layer. Production uses `tsx` to
+#     execute the relay TypeScript directly because this repo's workspace
+#     packages export source files and `.js`-style specifiers that are
+#     meant to be resolved by a TS-aware loader.
 #   - The repo is an npm workspaces monorepo. The relay depends on
 #     `@codex-mobile/{auth,db,protocol}`, so the Docker context MUST be
 #     the repo root (configured in `apps/relay/fly.toml`) and we copy
-#     every workspace package.json before `npm ci` so the install is
-#     deterministic and maximally cacheable.
+#     every workspace package.json before `npm install` so the install is
+#     cacheable.
 #
 # Image exposes port 8080 (matched by `apps/relay/fly.toml` internal_port).
 # The Fly.io health check targets `/readyz` (see the fly.toml entry).
@@ -35,13 +36,13 @@ COPY packages/auth/package.json packages/auth/package.json
 COPY packages/db/package.json packages/db/package.json
 COPY packages/protocol/package.json packages/protocol/package.json
 
-# Install every workspace's production + dev dependencies. `npm ci` is
-# used instead of `npm install` so the lock file is authoritative and
-# the build fails fast if the lock is out of date.
-RUN npm ci --workspaces --include-workspace-root
+# This repo currently does not check in a root package-lock.json, so a
+# clean `npm ci` cannot run inside Fly's remote builder yet. Use
+# workspace-aware `npm install` until the lockfile becomes authoritative.
+RUN npm install --workspaces --include-workspace-root
 
 # -----------------------------------------------------------------------------
-# Stage 2: compile TypeScript for the relay + the packages it depends on
+# Stage 2: validate relay sources before producing a runtime image
 # -----------------------------------------------------------------------------
 FROM node:22-alpine AS build
 WORKDIR /repo
@@ -59,21 +60,12 @@ COPY packages/auth ./packages/auth
 COPY packages/db ./packages/db
 COPY packages/protocol ./packages/protocol
 
-# Build the relay (tsc -p apps/relay/tsconfig.json). If the relay build
-# script is a noop on a fresh monorepo, this still succeeds because npm
-# run build --if-present returns exit 0 when the target is missing.
-#
-# CR-03 fix: the previous version piped this step to a shell-true
-# fallback so a failing `tsc` produced a green image. The fallback
-# is gone; if `tsc` fails the image build fails.
-RUN npm run build --workspace @codex-mobile/relay --if-present
+# Typecheck the relay during the image build so broken imports or type
+# regressions fail the deploy before Fly boots a machine.
+RUN npm run typecheck --workspace @codex-mobile/relay --if-present
 
-# The relay still uses `node --experimental-strip-types` at runtime
-# (see the CMD line below) so a compiled `dist/` tree is not STRICTLY
-# required for the container to boot. However, the source entry point
-# MUST exist, otherwise `node --experimental-strip-types apps/relay/src/index.ts`
-# will crash on start. If a future plan lands a real tsc build, change
-# this assertion to `test -d /repo/apps/relay/dist`.
+# The runtime executes the source entry point through `tsx`, so the
+# checked source tree MUST exist in the image.
 RUN test -f /repo/apps/relay/src/index.ts \
   || (echo "relay entry file apps/relay/src/index.ts missing after build" && exit 1)
 
@@ -92,11 +84,8 @@ ENV NODE_ENV=production \
 USER node
 
 # Bring over the installed node_modules (workspace hoisted) and the
-# relay plus shared package sources. We keep the TypeScript sources so
-# `node --experimental-strip-types` can run them directly if the
-# compiled build output is absent; production deploys should prefer the
-# compiled output but this fallback keeps the container bootable during
-# Phase 1 before the relay build script is wired up.
+# relay plus shared package sources. `tsx` needs the TypeScript source
+# tree at runtime because `@codex-mobile/db` still exports source files.
 COPY --from=build --chown=node:node /repo/node_modules /repo/node_modules
 COPY --from=build --chown=node:node /repo/package.json /repo/package.json
 COPY --from=build --chown=node:node /repo/tsconfig.base.json /repo/tsconfig.base.json
@@ -109,9 +98,6 @@ COPY --from=build --chown=node:node /repo/packages/protocol /repo/packages/proto
 # internal_port in Fly must match the EXPOSE line below.
 EXPOSE 8080
 
-# Entry point: the bootstrap in apps/relay/src/index.ts wires the
-# Fastify instance (buildRelayServer -> startRelayServer) and installs
-# SIGINT/SIGTERM handlers. --experimental-strip-types lets Node 22 run
-# the TypeScript source directly so Phase 1 does not require a build
-# step on every deploy; Plan 02-01 will swap this for compiled JS.
-CMD ["node", "--experimental-strip-types", "apps/relay/src/index.ts"]
+# Entry point: `tsx` matches the repo's TS-first module layout and can
+# resolve `.js` import specifiers back to the corresponding source files.
+CMD ["./node_modules/.bin/tsx", "apps/relay/src/index.ts"]

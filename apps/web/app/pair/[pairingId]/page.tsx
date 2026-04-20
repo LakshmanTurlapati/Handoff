@@ -67,7 +67,6 @@ export default async function PairingPage({ params }: PairingPageProps) {
         initialStatus={pairing.status}
         verificationPhrase={pairing.verificationPhrase ?? ""}
         userCode={pairing.userCode ?? ""}
-        expiresAt={pairing.expiresAt}
       />
 
       <Link

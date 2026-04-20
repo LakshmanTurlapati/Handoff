@@ -16,10 +16,10 @@
  * liveness and readiness now live in separate modules.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { registerReadyzRoute } from "./readyz";
+import { registerReadyzRoute } from "./readyz.js";
 
-export type { ReadyzPayload } from "./readyz";
-export { handleReadyz, registerReadyzRoute } from "./readyz";
+export type { ReadyzPayload } from "./readyz.js";
+export { handleReadyz, registerReadyzRoute } from "./readyz.js";
 
 /** Machine-readable liveness payload. */
 export interface HealthzPayload {

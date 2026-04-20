@@ -3,12 +3,16 @@ status: partial
 phase: 07-codex-native-handoff-command
 source: [07-VERIFICATION.md]
 started: 2026-04-19T22:20:13Z
-updated: 2026-04-19T22:20:13Z
+updated: 2026-04-19T22:40:38Z
 ---
 
 ## Current Test
 
-[awaiting human testing]
+number: 1
+name: Codex command discovery after install
+expected: |
+  After `handoff install-codex-command`, `/handoff` resolves as a real Codex slash command in an active Codex thread instead of plain text.
+awaiting: user response
 
 ## Tests
 

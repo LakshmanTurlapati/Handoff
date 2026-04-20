@@ -34,6 +34,7 @@ import {
   randomUUID,
   timingSafeEqual,
 } from "node:crypto";
+import { eq } from "drizzle-orm";
 import {
   AUDIT_EVENT_TYPES,
   PAIRING_STATUS_VALUES,
@@ -42,6 +43,12 @@ import {
   type PairingStatus,
   type PairingStatusResponse,
 } from "@codex-mobile/protocol";
+import {
+  createBridgeInstallation,
+  getDb,
+  pairing_sessions,
+  type PairingSessionRow,
+} from "@codex-mobile/db";
 // issueDeviceSession moved to /claim route handler (Phase 01.1, D-09)
 
 // ---------------------------------------------------------------------------
@@ -262,6 +269,7 @@ export async function createPairing(
   };
 
   await store.insert(row);
+  await maybePersistPairingRow(row);
 
   await auditStore.record({
     eventType: AUDIT_EVENT_TYPES.pairingCreated,
@@ -361,6 +369,7 @@ export async function redeemPairing(
     redeemedAt,
     redeemedByUserId: input.userId,
   });
+  await maybePersistPairingRow(updated);
 
   await auditStore.record({
     eventType: AUDIT_EVENT_TYPES.pairingRedeemed,
@@ -403,6 +412,8 @@ export interface ConfirmPairingResult {
   pairingId: string;
   verificationPhrase: string;
   confirmedAt: Date;
+  bridgeInstallationId?: string;
+  bridgeBootstrapToken?: string;
 }
 
 /**
@@ -487,11 +498,13 @@ export async function confirmPairing(
   }
 
   const confirmedByUserId = row.redeemedByUserId ?? input.userId;
-  await store.update(row.id, {
+  const updated = await store.update(row.id, {
     status: "confirmed",
     confirmedAt,
     confirmedByUserId,
+    deviceLabel: input.deviceLabel ?? row.deviceLabel,
   });
+  await maybePersistPairingRow(updated);
 
   await auditStore.record({
     eventType: AUDIT_EVENT_TYPES.pairingConfirmed,
@@ -504,6 +517,28 @@ export async function confirmPairing(
     },
     createdAt: confirmedAt,
   });
+
+  if (row.bridgeInstanceId) {
+    const bridgeBootstrapToken = randomBytes(32).toString("base64url");
+    const installTokenHash = createHash("sha256")
+      .update(bridgeBootstrapToken)
+      .digest("hex");
+    const installation = await createBridgeInstallation({
+      userId: confirmedByUserId,
+      pairingId: row.id,
+      bridgeInstanceId: row.bridgeInstanceId,
+      deviceLabel: input.deviceLabel ?? row.deviceLabel,
+      installTokenHash,
+    });
+
+    return {
+      pairingId: row.id,
+      verificationPhrase: row.verificationPhrase,
+      confirmedAt,
+      bridgeInstallationId: installation.id,
+      bridgeBootstrapToken,
+    };
+  }
 
   return {
     pairingId: row.id,
@@ -551,7 +586,9 @@ export async function updatePairingRow(
   ctx?: PairingServiceContext,
 ): Promise<PairingRow> {
   const { store } = resolveCtx(ctx);
-  return store.update(pairingId, patch);
+  const updated = await store.update(pairingId, patch);
+  await maybePersistPairingRow(updated);
+  return updated;
 }
 
 /**
@@ -575,7 +612,13 @@ async function loadOrExpire(
   ctx?: PairingServiceContext,
 ): Promise<PairingRow> {
   const { store, auditStore, now } = resolveCtx(ctx);
-  const row = await store.get(pairingId);
+  let row = await store.get(pairingId);
+  if (!row) {
+    row = await maybeLoadPersistedPairingRow(pairingId);
+    if (row) {
+      await store.insert(row);
+    }
+  }
   if (!row) {
     throw new Error(`pairing_session ${pairingId} not found`);
   }
@@ -589,6 +632,7 @@ async function loadOrExpire(
       status: "expired",
       cancelledAt: currentTime,
     });
+    await maybePersistPairingRow(expired);
     await auditStore.record({
       eventType: AUDIT_EVENT_TYPES.pairingExpired,
       userId: null,
@@ -617,6 +661,82 @@ function toStatusResponse(
 function buildPairingUrl(hostname: string, pairingId: string): string {
   const base = hostname.endsWith("/") ? hostname.slice(0, -1) : hostname;
   return `${base}/pair/${pairingId}`;
+}
+
+function hasControlPlaneDb(): boolean {
+  return Boolean(process.env.DATABASE_URL);
+}
+
+function toPairingInsert(row: PairingRow) {
+  return {
+    id: row.id,
+    status: row.status,
+    userCode: row.userCode,
+    verificationPhrase: row.verificationPhrase,
+    pairingTokenHash: row.pairingTokenHash,
+    deviceLabel: row.deviceLabel,
+    bridgeInstanceId: row.bridgeInstanceId,
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt,
+    redeemedAt: row.redeemedAt,
+    redeemedByUserId: row.redeemedByUserId,
+    confirmedAt: row.confirmedAt,
+    confirmedByUserId: row.confirmedByUserId,
+    claimedAt: row.claimedAt,
+    cancelledAt: row.cancelledAt,
+  };
+}
+
+function fromPersistedPairingRow(row: PairingSessionRow): PairingRow {
+  return {
+    id: row.id,
+    status: row.status as PairingStatus,
+    userCode: row.userCode,
+    verificationPhrase: row.verificationPhrase,
+    pairingTokenHash: row.pairingTokenHash,
+    deviceLabel: row.deviceLabel,
+    bridgeInstanceId: row.bridgeInstanceId,
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt,
+    redeemedAt: row.redeemedAt,
+    confirmedAt: row.confirmedAt,
+    confirmedByUserId: row.confirmedByUserId,
+    redeemedByUserId: row.redeemedByUserId,
+    claimedAt: row.claimedAt,
+    cancelledAt: row.cancelledAt,
+  };
+}
+
+async function maybePersistPairingRow(row: PairingRow): Promise<void> {
+  if (!hasControlPlaneDb()) {
+    return;
+  }
+
+  const db = getDb();
+  await db
+    .insert(pairing_sessions)
+    .values(toPairingInsert(row))
+    .onConflictDoUpdate({
+      target: pairing_sessions.id,
+      set: toPairingInsert(row),
+    });
+}
+
+async function maybeLoadPersistedPairingRow(
+  pairingId: string,
+): Promise<PairingRow | null> {
+  if (!hasControlPlaneDb()) {
+    return null;
+  }
+
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(pairing_sessions)
+    .where(eq(pairing_sessions.id, pairingId))
+    .limit(1);
+
+  return row ? fromPersistedPairingRow(row) : null;
 }
 
 /**

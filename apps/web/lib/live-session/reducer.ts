@@ -88,13 +88,14 @@ function upsertTurn(state: LiveSessionState, action: Extract<LiveSessionAction, 
   }
 
   const existingTurn = nextTurns[existingIndex];
+  const currentTurn = existingTurn!;
   const updatedTurn: LiveTurn = {
-    ...existingTurn,
-    stateLabel: action.stateLabel ?? existingTurn.stateLabel,
-    actorDetail: action.actorDetail ?? existingTurn.actorDetail,
-    isLive: action.isLive ?? existingTurn.isLive,
+    ...currentTurn,
+    stateLabel: action.stateLabel ?? currentTurn.stateLabel,
+    actorDetail: action.actorDetail ?? currentTurn.actorDetail,
+    isLive: action.isLive ?? currentTurn.isLive,
     collapsed: false,
-    activities: [...existingTurn.activities, action.activity],
+    activities: [...currentTurn.activities, action.activity],
   };
   updatedTurn.assistantPreview = deriveAssistantPreview(updatedTurn, action.activity);
 

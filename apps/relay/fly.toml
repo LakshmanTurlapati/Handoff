@@ -14,12 +14,13 @@
 #     "process is alive" distinction.
 #   - The build context is the REPO ROOT, not apps/relay, because the
 #     Dockerfile copies packages/auth, packages/db, and packages/protocol
-#     from the workspace layout.
+#     from the workspace layout. The deploy working directory stays at the
+#     repo root, while `dockerfile = "Dockerfile"` resolves relative to this
+#     config file's directory.
 #
-# Replace `codex-mobile-relay` with the real Fly app name from
-# `.env.example` (`FLY_APP_NAME_RELAY`) before running `fly deploy`.
+# This repo targets the public Fly app `handoff-relay`.
 
-app = "codex-mobile-relay"
+app = "handoff-relay"
 primary_region = "iad"
 kill_signal = "SIGTERM"
 kill_timeout = "15s"
@@ -28,7 +29,7 @@ kill_timeout = "15s"
   # Build from the repo root so the npm workspaces monorepo is visible
   # to the Dockerfile COPY instructions. apps/relay/Dockerfile does the
   # heavy lifting of selecting the correct workspace packages.
-  dockerfile = "apps/relay/Dockerfile"
+  dockerfile = "Dockerfile"
 
 [env]
   NODE_ENV = "production"
@@ -101,7 +102,7 @@ kill_timeout = "15s"
 
 # -- Concurrency -----------------------------------------------------------
 
-[[http_service.concurrency]]
+[http_service.concurrency]
   type = "connections"
   soft_limit = 200
   hard_limit = 250

@@ -26,7 +26,6 @@ interface PairingClaimFlowProps {
   initialStatus: string;
   verificationPhrase: string;
   userCode: string;
-  expiresAt: string;
 }
 
 /** D-07: 2-second fixed polling interval */
@@ -82,14 +81,12 @@ export function PairingClaimFlow({
   initialStatus,
   verificationPhrase,
   userCode,
-  expiresAt,
 }: PairingClaimFlowProps) {
   const [status, setStatus] = useState<ClaimFlowStatus>(
     initialStatus as ClaimFlowStatus,
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const [deviceSessionId, setDeviceSessionId] = useState<string | null>(null);
 
   // Refs for mutable state the interval callback reads (Pitfall 3: stale closure)
   const claimInProgress = useRef(false);
@@ -112,8 +109,7 @@ export function PairingClaimFlow({
       });
 
       if (res.ok) {
-        const data = await res.json();
-        setDeviceSessionId(data.deviceSessionId);
+        await res.json();
         setStatus("claimed");
         return;
       }
@@ -139,8 +135,7 @@ export function PairingClaimFlow({
           headers: { "content-type": "application/json" },
         });
         if (retry.ok) {
-          const data = await retry.json();
-          setDeviceSessionId(data.deviceSessionId);
+          await retry.json();
           setStatus("claimed");
           return;
         }

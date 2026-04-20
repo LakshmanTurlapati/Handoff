@@ -165,7 +165,7 @@ npm run dev --workspace @codex-mobile/web
 npm run dev --workspace @codex-mobile/relay
 
 # apps/bridge -- local CLI daemon (only needed once you are pairing a device)
-npm run dev --workspace @codex-mobile/bridge
+npm run dev --workspace @codex-mobile/handoff
 ```
 
 Health endpoints are served by the first two:
@@ -184,13 +184,14 @@ Copy `.env.example` to `.env.local` at the repo root (Next.js will pick it up au
 | `AUTH_GITHUB_ID` | apps/web | GitHub OAuth app Client ID. |
 | `AUTH_GITHUB_SECRET` | apps/web | GitHub OAuth app Client Secret. |
 | `NEXTAUTH_URL` | apps/web | Absolute URL the web app is reachable at (e.g. `https://app.example.com`). Used for Auth.js callbacks. |
+| `AUTH_SECRET` | apps/web | 32+ byte Auth.js signing secret for browser-session JWTs and CSRF protection. |
 | `SESSION_COOKIE_SECRET` | apps/web, apps/relay | 32+ byte random signing key for `cm_web_session` and `cm_device_session` cookies. |
 | `PAIRING_TOKEN_SECRET` | apps/web | 32+ byte signing key for single-use pairing tokens minted by `POST /api/pairings`. |
 | `WS_TICKET_SECRET` | apps/web, apps/relay | 32+ byte signing key for short-lived `cm_ws_ticket` WebSocket upgrade tickets. MUST be distinct from `SESSION_COOKIE_SECRET`. |
 | `FLY_APP_NAME_WEB` | deploys | Fly app slug used by `apps/web/fly.toml`. |
-| `FLY_APP_NAME_RELAY` | deploys | Fly app slug used by `apps/relay/fly.toml`. |
+| `FLY_APP_NAME_RELAY` | deploys, apps/web | Fly app slug used by `apps/relay/fly.toml` and injected into the web runtime so it can derive relay URLs on Fly. |
 
-The three random secrets (`SESSION_COOKIE_SECRET`, `PAIRING_TOKEN_SECRET`, `WS_TICKET_SECRET`) **must be different values**. Compromising one cannot be allowed to replay as another. Generate each one with `openssl rand -base64 48` or equivalent.
+The four random secrets (`AUTH_SECRET`, `SESSION_COOKIE_SECRET`, `PAIRING_TOKEN_SECRET`, `WS_TICKET_SECRET`) should be generated independently. Compromising one must not let an attacker replay it as another. Generate each one with `openssl rand -base64 48` or equivalent.
 
 ## Authentication Setup
 
@@ -253,8 +254,8 @@ Handoff's public services run on Fly.io. Phase 1 ships two separate Fly apps:
 
 | Fly app (slug) | Source | Fly config | Internal port | Fly health check path |
 | --- | --- | --- | --- | --- |
-| `${FLY_APP_NAME_WEB}` (example: `codex-mobile-web`) | `apps/web` | [`apps/web/fly.toml`](./apps/web/fly.toml) | 3000 | `/api/healthz` |
-| `${FLY_APP_NAME_RELAY}` (example: `codex-mobile-relay`) | `apps/relay` | [`apps/relay/fly.toml`](./apps/relay/fly.toml) | 8080 | `/readyz` (HTTP service) plus `/healthz` (machine liveness) |
+| `${FLY_APP_NAME_WEB}` (example: `handoff-web`) | `apps/web` | [`apps/web/fly.toml`](./apps/web/fly.toml) | 3000 | `/api/healthz` |
+| `${FLY_APP_NAME_RELAY}` (example: `handoff-relay`) | `apps/relay` | [`apps/relay/fly.toml`](./apps/relay/fly.toml) | 8080 | `/readyz` (HTTP service) plus `/healthz` (machine liveness) |
 
 Both services are built with multi-stage `node:22-alpine` Dockerfiles that `COPY` the repo root as the build context so the npm workspaces layout stays intact inside the image. The build context is set implicitly by `fly.toml` because the `dockerfile = "apps/<service>/Dockerfile"` path is relative to the repo root.
 
@@ -264,7 +265,7 @@ Phase 1 ships with an **in-memory pairing store** (`apps/web/lib/pairing-service
 
 Required Fly configuration until the Drizzle-backed adapter ships:
 
-- `apps/web/fly.toml`: set `min_machines_running = 1` under `[http_service]` (the current value is `0`, which allows Fly to scale to zero and then cold-start a fresh second machine that has no pairing state).
+- `apps/web/fly.toml`: keep `min_machines_running = 1` under `[http_service]` so Fly never scales the pairing store down to zero.
 - `apps/web/fly.toml`: keep `auto_start_machines` as-is (`true` is acceptable because only ONE machine will ever run).
 - `apps/relay/fly.toml`: already sets `min_machines_running = 1` and `auto_start_machines = false`. No change needed.
 
@@ -275,8 +276,8 @@ This constraint is also why the in-memory rate limiter at `apps/web/lib/rate-lim
 ### Prerequisites
 
 - A Fly.io organization and an account logged in via `fly auth login`.
-- Two Fly apps created (`fly apps create <slug>` for web and relay). The slugs go into `FLY_APP_NAME_WEB` and `FLY_APP_NAME_RELAY`, and also into the `app = "..."` line at the top of each `fly.toml`.
-- A shared Postgres database. Create it with `fly postgres create` and attach it to both apps with `fly postgres attach --app <slug>`. The attach command injects `DATABASE_URL` as a Fly secret for the target app.
+- Two Fly apps created (`fly apps create <slug>` for web and relay). Export the slugs as `FLY_APP_NAME_WEB` and `FLY_APP_NAME_RELAY`. The CI workflow passes them via `flyctl --app`, so the checked-in `app = "..."` lines in each `fly.toml` can stay generic.
+- A shared Fly Managed Postgres cluster. Create it with `fly mpg create`, then attach it to both apps with `fly mpg attach <cluster> --app <slug>`. The attach command injects `DATABASE_URL` as a Fly secret for the target app.
 - A personal access token from the Fly dashboard under **Personal Access Tokens**. Store it as the `FLY_API_TOKEN` GitHub Actions secret (see below).
 
 ### Secrets to push before first deploy
@@ -289,32 +290,35 @@ fly secrets set \
   --app ${FLY_APP_NAME_WEB} \
   AUTH_GITHUB_ID=... \
   AUTH_GITHUB_SECRET=... \
+  AUTH_SECRET=... \
   SESSION_COOKIE_SECRET=... \
   PAIRING_TOKEN_SECRET=... \
   WS_TICKET_SECRET=... \
-  NEXTAUTH_URL=https://<your-web-domain>
+  FLY_APP_NAME_RELAY=${FLY_APP_NAME_RELAY} \
+  NEXTAUTH_URL=https://handoff-web.fly.dev
 
 # Relay
 fly secrets set \
   --app ${FLY_APP_NAME_RELAY} \
   SESSION_COOKIE_SECRET=... \
-  PAIRING_TOKEN_SECRET=... \
   WS_TICKET_SECRET=...
 ```
 
-`DATABASE_URL` is expected to be set automatically by `fly postgres attach` on both apps.
+`DATABASE_URL` is expected to be set automatically by `fly mpg attach` on both apps.
 
 ### Deploying manually
 
 ```bash
 # Web app
 fly deploy \
+  --app ${FLY_APP_NAME_WEB} \
   --config apps/web/fly.toml \
   --dockerfile apps/web/Dockerfile \
   --remote-only
 
 # Relay
 fly deploy \
+  --app ${FLY_APP_NAME_RELAY} \
   --config apps/relay/fly.toml \
   --dockerfile apps/relay/Dockerfile \
   --remote-only
@@ -331,10 +335,17 @@ Required GitHub Actions secrets (set under **Settings -> Secrets and variables -
 - `FLY_API_TOKEN`
 - `AUTH_GITHUB_ID`
 - `AUTH_GITHUB_SECRET`
+- `AUTH_SECRET`
 - `SESSION_COOKIE_SECRET`
 - `PAIRING_TOKEN_SECRET`
 - `WS_TICKET_SECRET`
 - `DATABASE_URL`
+
+Required GitHub Actions variables:
+
+- `FLY_APP_NAME_WEB`
+- `FLY_APP_NAME_RELAY`
+- `NEXTAUTH_URL`
 
 The workflow stages secrets via `flyctl secrets set --stage` before each deploy so the rolling release uses the new values on the first machine.
 
@@ -350,7 +361,7 @@ The workflow stages secrets via `flyctl secrets set --stage` before each deploy 
 Once both services are deployed, hit the health endpoints from anywhere on the public internet:
 
 ```bash
-curl -i https://<your-web-domain>/api/healthz
+curl -i https://handoff-web.fly.dev/api/healthz
 curl -i https://<your-relay-domain>/healthz
 curl -i https://<your-relay-domain>/readyz
 ```

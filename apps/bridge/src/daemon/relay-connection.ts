@@ -1,15 +1,11 @@
 import WebSocket from "ws";
 import { EventEmitter } from "node:events";
-import { mintWsTicket } from "@codex-mobile/auth/ws-ticket";
 import { createNotification } from "../lib/jsonrpc.js";
 
 export interface RelayConnectionOptions {
-  relayUrl: string;
-  secret: Uint8Array;
-  userId: string;
-  deviceSessionId: string;
   bridgeInstanceId: string;
   bridgeVersion?: string;
+  ticketProvider: () => Promise<{ relayUrl: string; ticket: string }>;
   /** Initial reconnect delay in ms. Default 1000. */
   initialReconnectDelay?: number;
   /** Max reconnect delay in ms. Default 30000. */
@@ -41,15 +37,8 @@ export class RelayConnection extends EventEmitter {
   async connect(): Promise<void> {
     this.intentionalClose = false;
     this._state = "connecting";
-
-    // Mint a FRESH ws-ticket on every connection attempt
-    const { ticket } = await mintWsTicket({
-      userId: this.options.userId,
-      deviceSessionId: this.options.deviceSessionId,
-      secret: this.options.secret,
-    });
-
-    const wsUrl = `${this.options.relayUrl}/ws/bridge`;
+    const { relayUrl, ticket } = await this.options.ticketProvider();
+    const wsUrl = `${relayUrl}/ws/bridge`;
     this.ws = new WebSocket(wsUrl, {
       headers: { authorization: `Bearer ${ticket}` },
     });

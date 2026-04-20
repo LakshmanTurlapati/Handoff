@@ -23,6 +23,10 @@
 #     GitHub OAuth app Client Secret. Set on the web app as a Fly
 #     secret by this workflow before deploy.
 #
+#   AUTH_SECRET
+#     32+ byte random Auth.js signing secret for browser-session JWTs
+#     and CSRF protection. Set on the web app.
+#
 #   SESSION_COOKIE_SECRET
 #     32+ byte random signing key for cm_web_session and
 #     cm_device_session cookies. Set on both web and relay.
@@ -39,8 +43,27 @@
 #
 #   DATABASE_URL
 #     Shared Postgres connection string. Attach Postgres to the web
-#     and relay apps via the Fly dashboard (or `fly postgres attach`)
+#     and relay apps via the Fly dashboard (or `fly mpg attach`)
 #     and re-use the same connection string across both services.
+#
+# REQUIRED GITHUB ACTIONS VARIABLES (set under Settings -> Secrets and
+# variables -> Actions for this repository)
+#
+#   FLY_APP_NAME_WEB
+#     Fly app slug for apps/web. The workflow passes it via `--app`,
+#     so the checked-in placeholder `app = "..."` line in
+#     apps/web/fly.toml can stay generic in the repo.
+#
+#   FLY_APP_NAME_RELAY
+#     Fly app slug for apps/relay. Passed via `--app` for the same
+#     reason as the web app slug above.
+#     Also injected into the web app runtime so server-side code can
+#     derive the relay's public Fly URL without hard-coding a hostname.
+#
+#   NEXTAUTH_URL
+#     Absolute public URL for the web app, injected as a Fly secret so
+#     Auth.js callback handling and pairing links resolve correctly in
+#     production.
 #
 # All of the above are pushed to Fly as app secrets via
 # `flyctl secrets set` before `flyctl deploy` so a production image
@@ -111,28 +134,51 @@ jobs:
         # shell expand $VAR references at runtime. (CR-02 fix.)
         env:
           FLY_API_TOKEN:         ${{ secrets.FLY_API_TOKEN }}
+          FLY_APP_NAME_WEB:      ${{ vars.FLY_APP_NAME_WEB }}
+          FLY_APP_NAME_RELAY:    ${{ vars.FLY_APP_NAME_RELAY }}
+          NEXTAUTH_URL:          ${{ vars.NEXTAUTH_URL }}
           AUTH_GITHUB_ID:        ${{ secrets.AUTH_GITHUB_ID }}
           AUTH_GITHUB_SECRET:    ${{ secrets.AUTH_GITHUB_SECRET }}
+          AUTH_SECRET:           ${{ secrets.AUTH_SECRET }}
           SESSION_COOKIE_SECRET: ${{ secrets.SESSION_COOKIE_SECRET }}
           PAIRING_TOKEN_SECRET:  ${{ secrets.PAIRING_TOKEN_SECRET }}
           WS_TICKET_SECRET:      ${{ secrets.WS_TICKET_SECRET }}
           DATABASE_URL:          ${{ secrets.DATABASE_URL }}
         run: |
+          : "${FLY_API_TOKEN:?missing GitHub Actions secret FLY_API_TOKEN}"
+          : "${FLY_APP_NAME_WEB:?missing GitHub Actions variable FLY_APP_NAME_WEB}"
+          : "${FLY_APP_NAME_RELAY:?missing GitHub Actions variable FLY_APP_NAME_RELAY}"
+          : "${NEXTAUTH_URL:?missing GitHub Actions variable NEXTAUTH_URL}"
+          : "${AUTH_GITHUB_ID:?missing GitHub Actions secret AUTH_GITHUB_ID}"
+          : "${AUTH_GITHUB_SECRET:?missing GitHub Actions secret AUTH_GITHUB_SECRET}"
+          : "${AUTH_SECRET:?missing GitHub Actions secret AUTH_SECRET}"
+          : "${SESSION_COOKIE_SECRET:?missing GitHub Actions secret SESSION_COOKIE_SECRET}"
+          : "${PAIRING_TOKEN_SECRET:?missing GitHub Actions secret PAIRING_TOKEN_SECRET}"
+          : "${WS_TICKET_SECRET:?missing GitHub Actions secret WS_TICKET_SECRET}"
+          : "${DATABASE_URL:?missing GitHub Actions secret DATABASE_URL}"
           flyctl secrets set \
+            --app "$FLY_APP_NAME_WEB" \
             --stage \
             --config apps/web/fly.toml \
             AUTH_GITHUB_ID="$AUTH_GITHUB_ID" \
             AUTH_GITHUB_SECRET="$AUTH_GITHUB_SECRET" \
+            AUTH_SECRET="$AUTH_SECRET" \
             SESSION_COOKIE_SECRET="$SESSION_COOKIE_SECRET" \
             PAIRING_TOKEN_SECRET="$PAIRING_TOKEN_SECRET" \
             WS_TICKET_SECRET="$WS_TICKET_SECRET" \
+            FLY_APP_NAME_RELAY="$FLY_APP_NAME_RELAY" \
+            NEXTAUTH_URL="$NEXTAUTH_URL" \
             DATABASE_URL="$DATABASE_URL"
 
       - name: Deploy apps/web
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN:    ${{ secrets.FLY_API_TOKEN }}
+          FLY_APP_NAME_WEB: ${{ vars.FLY_APP_NAME_WEB }}
         run: |
+          : "${FLY_API_TOKEN:?missing GitHub Actions secret FLY_API_TOKEN}"
+          : "${FLY_APP_NAME_WEB:?missing GitHub Actions variable FLY_APP_NAME_WEB}"
           flyctl deploy \
+            --app "$FLY_APP_NAME_WEB" \
             --config apps/web/fly.toml \
             --dockerfile apps/web/Dockerfile \
             --remote-only \
@@ -161,24 +207,33 @@ jobs:
         # env vars, and the run: script references them via $VAR.
         env:
           FLY_API_TOKEN:         ${{ secrets.FLY_API_TOKEN }}
+          FLY_APP_NAME_RELAY:    ${{ vars.FLY_APP_NAME_RELAY }}
           SESSION_COOKIE_SECRET: ${{ secrets.SESSION_COOKIE_SECRET }}
-          PAIRING_TOKEN_SECRET:  ${{ secrets.PAIRING_TOKEN_SECRET }}
           WS_TICKET_SECRET:      ${{ secrets.WS_TICKET_SECRET }}
           DATABASE_URL:          ${{ secrets.DATABASE_URL }}
         run: |
+          : "${FLY_API_TOKEN:?missing GitHub Actions secret FLY_API_TOKEN}"
+          : "${FLY_APP_NAME_RELAY:?missing GitHub Actions variable FLY_APP_NAME_RELAY}"
+          : "${SESSION_COOKIE_SECRET:?missing GitHub Actions secret SESSION_COOKIE_SECRET}"
+          : "${WS_TICKET_SECRET:?missing GitHub Actions secret WS_TICKET_SECRET}"
+          : "${DATABASE_URL:?missing GitHub Actions secret DATABASE_URL}"
           flyctl secrets set \
+            --app "$FLY_APP_NAME_RELAY" \
             --stage \
             --config apps/relay/fly.toml \
             SESSION_COOKIE_SECRET="$SESSION_COOKIE_SECRET" \
-            PAIRING_TOKEN_SECRET="$PAIRING_TOKEN_SECRET" \
             WS_TICKET_SECRET="$WS_TICKET_SECRET" \
             DATABASE_URL="$DATABASE_URL"
 
       - name: Deploy apps/relay
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN:      ${{ secrets.FLY_API_TOKEN }}
+          FLY_APP_NAME_RELAY: ${{ vars.FLY_APP_NAME_RELAY }}
         run: |
+          : "${FLY_API_TOKEN:?missing GitHub Actions secret FLY_API_TOKEN}"
+          : "${FLY_APP_NAME_RELAY:?missing GitHub Actions variable FLY_APP_NAME_RELAY}"
           flyctl deploy \
+            --app "$FLY_APP_NAME_RELAY" \
             --config apps/relay/fly.toml \
             --dockerfile apps/relay/Dockerfile \
             --remote-only \

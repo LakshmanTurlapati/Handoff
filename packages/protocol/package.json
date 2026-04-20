@@ -1,33 +1,40 @@
 {
   "name": "@codex-mobile/protocol",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Shared protocol contracts and event schema for Codex Mobile web, relay, and bridge",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./pairing": {
-      "types": "./src/pairing.ts",
-      "default": "./src/pairing.ts"
+      "types": "./dist/pairing.d.ts",
+      "default": "./dist/pairing.js"
     },
     "./session": {
-      "types": "./src/session.ts",
-      "default": "./src/session.ts"
+      "types": "./dist/session.d.ts",
+      "default": "./dist/session.js"
     },
     "./live-session": {
-      "types": "./src/live-session.ts",
-      "default": "./src/live-session.ts"
+      "types": "./dist/live-session.d.ts",
+      "default": "./dist/live-session.js"
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist .tsbuildinfo && tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "lint": "echo \"(lint placeholder for packages/protocol)\"",
+    "prepack": "npm run build",
     "test": "vitest run"
   },
   "dependencies": {

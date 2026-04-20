@@ -17,7 +17,15 @@
  * See docs/adr/0001-phase-1-trust-boundary.md for the full derivation rule.
  */
 import { SignJWT, jwtVerify } from "jose";
-import type { WsTicketClaims } from "@codex-mobile/protocol/session";
+
+export interface WsTicketClaims {
+  sub: string;
+  userId: string;
+  deviceSessionId: string;
+  iat: number;
+  exp: number;
+  jti: string;
+}
 
 /** Ticket cookie/header name recognized by the relay. */
 export const WS_TICKET_NAME = "cm_ws_ticket";

@@ -27,14 +27,6 @@ export interface CodexAdapterOptions {
   spawnProcess?: () => SpawnedCodexProcess;
 }
 
-interface CodexConversationSummary {
-  conversationId?: string;
-  preview?: string | null;
-  modelProvider?: string | null;
-  timestamp?: string | null;
-  updatedAt?: string | null;
-}
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object"
     ? (value as Record<string, unknown>)
@@ -236,8 +228,8 @@ export class CodexAdapter extends EventEmitter {
   private async initialize(): Promise<void> {
     await this.requestWithId(0, "initialize", {
       clientInfo: {
-        name: "codex-mobile-bridge",
-        title: "Codex Mobile Bridge",
+        name: "handoff",
+        title: "Handoff Bridge",
         version: "0.1.0",
       },
       capabilities: {

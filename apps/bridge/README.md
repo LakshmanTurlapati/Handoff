@@ -7,7 +7,7 @@ daemon that connects back to the hosted relay.
 ## Install
 
 ```bash
-npm install handoff
+npm install --global remote-handoff
 ```
 
 ## Codex Setup
@@ -22,8 +22,8 @@ handoff install-codex-command
 ## Commands
 
 ```bash
-npx handoff install-codex-command
-npx handoff pair --base-url https://your-handoff-web.fly.dev
-npx handoff daemon --help
-npx handoff launch
+npx remote-handoff install-codex-command
+npx remote-handoff pair --base-url https://handoff-web.fly.dev
+npx remote-handoff daemon --help
+npx remote-handoff launch
 ```

@@ -131,6 +131,8 @@ export async function POST(
     const validated = PairingConfirmResponseSchema.safeParse({
       verificationPhrase: result.verificationPhrase,
       confirmedAt: result.confirmedAt.toISOString(),
+      bridgeInstallationId: result.bridgeInstallationId,
+      bridgeBootstrapToken: result.bridgeBootstrapToken,
     });
     if (!validated.success) {
       return NextResponse.json(
