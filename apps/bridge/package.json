@@ -18,7 +18,7 @@
     "handoff": "dist/cli.js"
   },
   "scripts": {
-    "build": "rm -rf dist .tsbuildinfo && tsc -p tsconfig.json",
+    "build": "rm -rf dist .tsbuildinfo && tsc -p tsconfig.json && node scripts/ensure-cli-executable.mjs",
     "dev": "node --watch --experimental-strip-types src/cli.ts",
     "start": "node dist/cli.js",
     "prepack": "npm --prefix ../.. run build:handoff-support && npm run build",

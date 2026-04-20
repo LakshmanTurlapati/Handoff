@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,7 +9,7 @@ const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = resolve(dirname(scriptPath), "..");
 const workspaceName = "@codex-mobile/handoff";
 const packCommand = `npm pack --workspace ${workspaceName}`;
-const cliHelpCommand = "node package/dist/cli.js --help";
+const cliHelpCommand = "package/dist/cli.js --help";
 const expectedNameSnippet = '"name": "@codex-mobile/handoff"';
 const expectedBinSnippet = '"handoff": "dist/cli.js"';
 
@@ -78,7 +78,14 @@ try {
     'packed bin.handoff must equal "dist/cli.js"',
   );
 
-  execFileSync("node", ["package/dist/cli.js", "--help"], {
+  const packedCliPath = join(extractDir, "package", "dist", "cli.js");
+  const packedCliMode = statSync(packedCliPath).mode & 0o777;
+  assert(
+    (packedCliMode & 0o111) !== 0,
+    `packed dist/cli.js must be executable, got mode ${packedCliMode.toString(8)}`,
+  );
+
+  execFileSync(packedCliPath, ["--help"], {
     cwd: extractDir,
     stdio: ["ignore", "pipe", "pipe"],
   });

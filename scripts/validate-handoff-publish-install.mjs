@@ -38,6 +38,10 @@ function resolveInstalledPackagePath(root, packageName, filePath) {
   return join(root, "node_modules", packageName, filePath);
 }
 
+function resolveInstalledBinPath(root, binName) {
+  return join(root, "node_modules", ".bin", binName);
+}
+
 run("node", [
   "scripts/stage-handoff-publish.mjs",
   "--scope",
@@ -76,14 +80,9 @@ try {
     throw new Error(`installed package name mismatch: ${manifest.name}`);
   }
 
-  const helpOutput = run(
-    "node",
-    [
-      resolveInstalledPackagePath(installRoot, handoffPackageName, join("dist", "cli.js")),
-      "--help",
-    ],
-    { cwd: installRoot },
-  );
+  const helpOutput = run(resolveInstalledBinPath(installRoot, "handoff"), ["--help"], {
+    cwd: installRoot,
+  });
 
   if (!helpOutput.includes("handoff <command>")) {
     throw new Error("handoff CLI help output missing expected usage header");

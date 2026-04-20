@@ -10,6 +10,14 @@ daemon that connects back to the hosted relay.
 npm install --global remote-handoff
 ```
 
+If `handoff --help` fails with `permission denied` or the bin resolves to a stale
+local `@codex-mobile/handoff` install, remove the old global packages and reinstall:
+
+```bash
+npm uninstall --global @codex-mobile/handoff remote-handoff
+npm install --global remote-handoff
+```
+
 ## Codex Setup
 
 After installing the package, install the packaged `/handoff` slash command into
