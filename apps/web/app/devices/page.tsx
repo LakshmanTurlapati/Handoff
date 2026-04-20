@@ -2,12 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   listAuditEventsForUser,
-  listDeviceSessionsForUser,
+  listDeviceSessionsForBridgeInstallation,
 } from "@codex-mobile/db";
 import {
   SessionListResponseSchema,
   type BrowserSessionListItem,
-} from "@codex-mobile/protocol/live-session";
+} from "@codex-mobile/protocol";
 import {
   AuditFeed,
   type AuditFeedItem,
@@ -30,7 +30,9 @@ async function loadDeviceManagementState(): Promise<{
   auditEvents: AuditFeedItem[];
 }> {
   const principal = await requireRemotePrincipal();
-  const devices = await listDeviceSessionsForUser(principal.userId);
+  const devices = await listDeviceSessionsForBridgeInstallation({
+    bridgeInstallationId: principal.bridgeInstallationId,
+  });
   const auditEvents = await listAuditEventsForUser({
     userId: principal.userId,
     limit: 25,
@@ -137,8 +139,8 @@ export default async function DevicesPage() {
                 color: "#4B4032",
               }}
             >
-              Review the phones tied to this Codex account and cut off any device
-              that should no longer control your local session.
+              Review the phones tied to this Codex setup and cut off any device
+              that should no longer control the local bridge.
             </p>
           </header>
 
@@ -218,10 +220,6 @@ export default async function DevicesPage() {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown_error";
-
-    if (message === "unauthenticated") {
-      redirect("/sign-in?callbackUrl=/devices");
-    }
 
     if (
       message === "device_session_required" ||

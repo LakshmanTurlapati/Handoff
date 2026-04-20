@@ -20,7 +20,9 @@ export async function POST(
   context: RouteContext,
 ): Promise<Response> {
   let sessionId: string | null = null;
-  let principal: { userId: string; deviceSessionId: string } | null = null;
+  let principal:
+    | { userId: string; deviceSessionId: string; bridgeInstallationId: string }
+    | null = null;
 
   try {
     const params = await context.params;
@@ -57,7 +59,6 @@ export async function POST(
       sessionId &&
       [
         "cross_origin_not_allowed",
-        "unauthenticated",
         "device_session_required",
         "device_session_expired",
         "device_session_revoked",
@@ -78,7 +79,6 @@ export async function POST(
     }
 
     if (
-      message === "unauthenticated" ||
       message === "device_session_required" ||
       message === "device_session_expired"
     ) {

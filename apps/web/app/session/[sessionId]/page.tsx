@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { auth } from "../../../auth";
+import { requireRemotePrincipal } from "../../../lib/live-session/server";
 import { SessionShell } from "./session-shell";
 
 interface SessionPageProps {
@@ -8,10 +8,10 @@ interface SessionPageProps {
 
 export default async function SessionPage({ params }: SessionPageProps) {
   const { sessionId } = await params;
-  const session = await auth();
-
-  if (!session?.user) {
-    redirect(`/sign-in?callbackUrl=/session/${sessionId}`);
+  try {
+    await requireRemotePrincipal();
+  } catch {
+    redirect("/");
   }
 
   return (

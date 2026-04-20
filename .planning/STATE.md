@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: verifying
-stopped_at: Phase 7 context gathered
-last_updated: "2026-04-19T22:18:28.980Z"
-last_activity: 2026-04-19
+milestone: v1.1
+milestone_name: Handoff Install & Launch
+status: executing
+stopped_at: Phase 08.1 inserted and ready for implementation
+last_updated: "2026-04-20T14:10:00.000Z"
+last_activity: 2026-04-20
 progress:
-  total_phases: 3
+  total_phases: 4
   completed_phases: 2
-  total_plans: 6
+  total_plans: 9
   completed_plans: 6
   percent: 33
 ---
@@ -21,16 +21,23 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-18)
 
 **Core value:** A developer can safely continue a local Codex session from anywhere, with live progress and approvals, without exposing raw shell access or moving their local environment into the cloud.
-**Current focus:** Phase 07 — codex-native-handoff-command
+**Current focus:** Phase 08.1 — authless-hosted-launch
 
 ## Current Position
 
-Phase: 07 (codex-native-handoff-command) — EXECUTING
-Plan: 3 of 3
-Status: Phase complete — ready for verification
-Last activity: 2026-04-19
+Phase: 08.1 (authless-hosted-launch) — EXECUTING
+Plan: 0 of 3
+Status: Inserted urgent phase — implementation in progress
+Last activity: 2026-04-20
 
-Progress: [███░░░░░░░] 33%
+Progress: [████░░░░░░] 44%
+
+## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 08.1 inserted after Phase 8: Authless Hosted Launch (URGENT)
+- Hosted launch no longer routes through GitHub OAuth; the Fly launch URL and durable device session are the browser trust basis for this phase
 
 ## Prior Milestone Archive
 
@@ -41,18 +48,18 @@ Progress: [███░░░░░░░] 33%
 
 ## Pending Todos
 
-- Start Phase 07 discussion/planning for the Codex-native `/handoff` command that calls the new local `handoff launch` seam
-- Keep the archived v1.0 audit debt deferred unless it directly blocks `/handoff` command integration or hosted launch work
-- Defer full manual UAT and device verification until the final v1.1 verification pass unless a Phase 07 blocker forces an earlier check
+- Implement `/launch/[publicId]` so opening a handoff URL can establish or reuse a trusted device session without GitHub OAuth
+- Replace hosted browser `auth()` checks with durable device-session principals across session/device routes
+- Keep the archived v1.0 audit debt deferred unless it directly blocks the authless handoff launch path
 
 ## Blockers/Concerns
 
-- Phase 06 now depends on durable pairing persistence in the hosted app so bridge-installation rows can remain tied to real pairing ids
-- Bridge leases now treat the ws-ticket subject as a generic bridge-auth id, which Phase 07 should preserve rather than re-assuming browser device-session semantics
-- Manual real-device launch verification is still deferred; the current confidence is from targeted unit tests, typechecks, and tarball validation
+- Existing hosted runtime still imports Auth.js/NextAuth in middleware, pairing pages, and the browser principal path
+- The Fly deployment already mints `/launch/[publicId]` URLs from `/api/handoffs`, but there is no corresponding launch page yet
+- Manual real-device launch verification is still deferred; current confidence comes from targeted tests, local inspection, and previous Fly smoke checks
 
 ## Session Continuity
 
-Last session: 2026-04-19T18:21:56.046Z
-Stopped at: Phase 7 context gathered
-Resume file: .planning/phases/07-codex-native-handoff-command/07-CONTEXT.md
+Last session: 2026-04-20T13:30:00.000Z
+Stopped at: Phase 08.1 insertion approved
+Resume file: .planning/phases/08.1-authless-hosted-launch/08.1-CONTEXT.md

@@ -104,6 +104,19 @@ export async function createOrReuseThreadHandoff(
   };
 }
 
+export async function findThreadHandoffByPublicId(input: {
+  publicId: string;
+}): Promise<ThreadHandoffRow | null> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(thread_handoffs)
+    .where(eq(thread_handoffs.publicId, input.publicId))
+    .limit(1);
+
+  return row ?? null;
+}
+
 export async function revokeThreadHandoff(input: {
   threadHandoffId?: string;
   publicId?: string;

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   listAuditEventsForUser,
-  listDeviceSessionsForUser,
+  listDeviceSessionsForBridgeInstallation,
 } from "@codex-mobile/db";
 import {
   SessionListResponseSchema,
@@ -18,7 +18,9 @@ export const dynamic = "force-dynamic";
 export async function GET(): Promise<Response> {
   try {
     const principal = await requireRemotePrincipal();
-    const devices = await listDeviceSessionsForUser(principal.userId);
+    const devices = await listDeviceSessionsForBridgeInstallation({
+      bridgeInstallationId: principal.bridgeInstallationId,
+    });
     const auditEvents = await listAuditEventsForUser({
       userId: principal.userId,
       limit: 25,
@@ -66,7 +68,6 @@ export async function GET(): Promise<Response> {
     const message = error instanceof Error ? error.message : "unknown_error";
 
     if (
-      message === "unauthenticated" ||
       message === "device_session_required" ||
       message === "device_session_expired"
     ) {

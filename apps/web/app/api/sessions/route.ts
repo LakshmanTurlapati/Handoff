@@ -35,7 +35,6 @@ export async function GET(): Promise<Response> {
     const message = error instanceof Error ? error.message : "unknown_error";
 
     if (
-      message === "unauthenticated" ||
       message === "device_session_required" ||
       message === "device_session_expired"
     ) {

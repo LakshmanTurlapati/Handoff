@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { getDb } from "../client.js";
 import {
+  bridge_installations,
   device_sessions,
   type DeviceSessionRow,
 } from "../schema.js";
@@ -19,6 +20,7 @@ export interface FindDeviceSessionForPrincipalInput {
   deviceSessionId: string;
   userId?: string;
   cookieTokenHash?: string;
+  bridgeInstallationId?: string;
 }
 
 export async function createDeviceSessionRecord(
@@ -60,6 +62,7 @@ export async function findDeviceSessionForPrincipal({
   deviceSessionId,
   userId,
   cookieTokenHash,
+  bridgeInstallationId,
 }: FindDeviceSessionForPrincipalInput): Promise<DeviceSessionRow | null> {
   const db = getDb();
   const conditions = [eq(device_sessions.id, deviceSessionId)];
@@ -70,6 +73,27 @@ export async function findDeviceSessionForPrincipal({
 
   if (cookieTokenHash) {
     conditions.push(eq(device_sessions.cookieTokenHash, cookieTokenHash));
+  }
+
+  if (bridgeInstallationId) {
+    const [joined] = await db
+      .select({
+        deviceSession: device_sessions,
+      })
+      .from(device_sessions)
+      .innerJoin(
+        bridge_installations,
+        eq(device_sessions.issuedFromPairingId, bridge_installations.pairingId),
+      )
+      .where(
+        and(
+          ...conditions,
+          eq(bridge_installations.id, bridgeInstallationId),
+        ),
+      )
+      .limit(1);
+
+    return joined?.deviceSession ?? null;
   }
 
   const [row] = await db
@@ -111,13 +135,46 @@ export async function listDeviceSessionsForUser(
     .orderBy(desc(device_sessions.lastSeenAt), desc(device_sessions.createdAt));
 }
 
+export async function listDeviceSessionsForBridgeInstallation(input: {
+  bridgeInstallationId: string;
+}): Promise<DeviceSessionRow[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      deviceSession: device_sessions,
+    })
+    .from(device_sessions)
+    .innerJoin(
+      bridge_installations,
+      eq(device_sessions.issuedFromPairingId, bridge_installations.pairingId),
+    )
+    .where(eq(bridge_installations.id, input.bridgeInstallationId))
+    .orderBy(desc(device_sessions.lastSeenAt), desc(device_sessions.createdAt));
+
+  return rows.map((row) => row.deviceSession);
+}
+
 export async function revokeDeviceSession(input: {
   deviceSessionId: string;
   userId: string;
+  bridgeInstallationId?: string;
   revokedAt?: Date;
 }): Promise<DeviceSessionRow | null> {
   const db = getDb();
   const revokedAt = input.revokedAt ?? new Date();
+
+  if (input.bridgeInstallationId) {
+    const allowed = await findDeviceSessionForPrincipal({
+      deviceSessionId: input.deviceSessionId,
+      userId: input.userId,
+      bridgeInstallationId: input.bridgeInstallationId,
+    });
+
+    if (!allowed) {
+      return null;
+    }
+  }
+
   const [updated] = await db
     .update(device_sessions)
     .set({ revokedAt })

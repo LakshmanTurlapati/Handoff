@@ -36,6 +36,7 @@ export async function POST(
     const revokedDevice = await revokeDeviceSession({
       deviceSessionId,
       userId: principal.userId,
+      bridgeInstallationId: principal.bridgeInstallationId,
     });
     if (!revokedDevice) {
       return NextResponse.json(
@@ -74,7 +75,6 @@ export async function POST(
     }
 
     if (
-      message === "unauthenticated" ||
       message === "device_session_required" ||
       message === "device_session_expired"
     ) {

@@ -6,7 +6,7 @@ const devicePageMocks = vi.hoisted(() => ({
   requireRemotePrincipal: vi.fn(),
   relayInternalFetch: vi.fn(),
   listAuditEventsForUser: vi.fn(),
-  listDeviceSessionsForUser: vi.fn(),
+  listDeviceSessionsForBridgeInstallation: vi.fn(),
   refresh: vi.fn(),
 }));
 
@@ -38,7 +38,19 @@ vi.mock("../../lib/live-session/server", () => ({
 
 vi.mock("@codex-mobile/db", () => ({
   listAuditEventsForUser: devicePageMocks.listAuditEventsForUser,
-  listDeviceSessionsForUser: devicePageMocks.listDeviceSessionsForUser,
+  listDeviceSessionsForBridgeInstallation:
+    devicePageMocks.listDeviceSessionsForBridgeInstallation,
+}));
+
+vi.mock("@codex-mobile/protocol/live-session", () => ({
+  SessionListResponseSchema: {
+    safeParse(input: unknown) {
+      return {
+        success: true,
+        data: input,
+      };
+    },
+  },
 }));
 
 import DevicesPage from "../../app/devices/page";
@@ -50,8 +62,9 @@ describe("DevicesPage", () => {
     devicePageMocks.requireRemotePrincipal.mockResolvedValue({
       userId: "user-123",
       deviceSessionId: "device-session-123",
+      bridgeInstallationId: "bridge-installation-123",
     });
-    devicePageMocks.listDeviceSessionsForUser.mockResolvedValue([
+    devicePageMocks.listDeviceSessionsForBridgeInstallation.mockResolvedValue([
       {
         id: "device-session-123",
         deviceLabel: "Pocket phone",

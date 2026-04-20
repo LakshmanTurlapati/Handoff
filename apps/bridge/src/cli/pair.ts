@@ -23,9 +23,9 @@
  *     regressions in the pairing flow.
  */
 import { randomUUID } from "node:crypto";
-import { PairingClient } from "../lib/pairing-client";
+import { PairingClient } from "../lib/pairing-client.js";
 import { saveBridgeBootstrapState } from "../lib/local-state.js";
-import { renderTerminalQr } from "../lib/qr";
+import { renderTerminalQr } from "../lib/qr.js";
 import type { PairingStatusResponse } from "@codex-mobile/protocol";
 
 /** Options accepted by {@link runPairCommand}. */

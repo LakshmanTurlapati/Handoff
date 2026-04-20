@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import {
   findBridgeInstallationByTokenHash,
+  findBridgeInstallationForDeviceSession,
   findDeviceSessionForPrincipal,
   touchBridgeInstallationLastUsed,
   touchDeviceSessionLastSeen,
   type BridgeInstallationRow,
 } from "@codex-mobile/db";
-import { mintWsTicket } from "@codex-mobile/auth/ws-ticket";
-import { auth } from "../../auth";
+import { mintWsTicket } from "@codex-mobile/auth";
 import {
   hashCookieToken,
   readDeviceSession,
@@ -17,6 +17,7 @@ import {
 export interface RemotePrincipal {
   userId: string;
   deviceSessionId: string;
+  bridgeInstallationId: string;
 }
 
 export interface RequireBridgeInstallationPrincipalOptions {
@@ -41,16 +42,6 @@ export function loadWsTicketSecret(): Uint8Array {
 }
 
 export async function requireRemotePrincipal(): Promise<RemotePrincipal> {
-  const session = await auth();
-  if (!session?.user) {
-    throw new Error("unauthenticated");
-  }
-
-  const userId =
-    (session.user as { id?: string }).id ??
-    session.user.email ??
-    "unknown-user";
-
   const rawDeviceSessionToken = await readRawDeviceSessionToken();
   if (!rawDeviceSessionToken) {
     throw new Error("device_session_required");
@@ -64,7 +55,6 @@ export async function requireRemotePrincipal(): Promise<RemotePrincipal> {
   const cookieTokenHash = hashCookieToken(rawDeviceSessionToken);
   const deviceSessionRow = await findDeviceSessionForPrincipal({
     deviceSessionId: deviceSession.deviceSessionId,
-    userId,
     cookieTokenHash,
   });
   if (!deviceSessionRow) {
@@ -76,8 +66,7 @@ export async function requireRemotePrincipal(): Promise<RemotePrincipal> {
   }
 
   if (
-    deviceSession.userId !== userId ||
-    deviceSessionRow.userId !== userId
+    deviceSession.userId !== deviceSessionRow.userId
   ) {
     throw new Error("user_mismatch");
   }
@@ -90,11 +79,19 @@ export async function requireRemotePrincipal(): Promise<RemotePrincipal> {
     throw new Error("device_session_expired");
   }
 
+  const bridgeInstallation = await findBridgeInstallationForDeviceSession({
+    deviceSessionId: deviceSessionRow.id,
+  });
+  if (!bridgeInstallation || bridgeInstallation.revokedAt) {
+    throw new Error("device_session_required");
+  }
+
   await touchDeviceSessionLastSeen(deviceSessionRow.id);
 
   return {
-    userId,
+    userId: deviceSessionRow.userId,
     deviceSessionId: deviceSessionRow.id,
+    bridgeInstallationId: bridgeInstallation.id,
   };
 }
 

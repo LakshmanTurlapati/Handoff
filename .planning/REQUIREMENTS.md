@@ -19,7 +19,7 @@
 ### Hosted Launch Flow
 
 - [ ] **LAUNCH-01**: `/handoff` generates a single-use Fly-hosted handoff URL and terminal QR code
-- [ ] **LAUNCH-02**: Opening the URL in a phone browser routes through the hosted website sign-in and pairing flow
+- [ ] **LAUNCH-02**: Opening the URL in a phone browser uses the hosted handoff launch flow directly, without a secondary GitHub sign-in requirement
 - [ ] **LAUNCH-03**: After pairing, the phone lands directly on the active session that initiated `/handoff`
 - [ ] **LAUNCH-04**: Starting a handoff automatically starts or reuses the local bridge without opening any inbound port on the developer machine
 
@@ -65,12 +65,12 @@
 | CMD-01 | Phase 7 | Pending |
 | CMD-02 | Phase 7 | Pending |
 | LAUNCH-01 | Phase 8 | Pending |
-| LAUNCH-02 | Phase 8 | Pending |
-| LAUNCH-03 | Phase 8 | Pending |
+| LAUNCH-02 | Phase 08.1 | Pending |
+| LAUNCH-03 | Phase 08.1 | Pending |
 | LAUNCH-04 | Phase 6 | Pending |
 | SAFE-01 | Phase 7 | Pending |
-| SAFE-02 | Phase 8 | Pending |
-| DX-01 | Phase 8 | Pending |
+| SAFE-02 | Phase 08.1 | Pending |
+| DX-01 | Phase 08.1 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 12 total

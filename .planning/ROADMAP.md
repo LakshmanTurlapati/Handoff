@@ -6,7 +6,7 @@
 
 ## Current Milestone
 
-- [ ] **v1.1 Handoff Install & Launch** - Phases 6-8, planned
+- [ ] **v1.1 Handoff Install & Launch** - Phases 6-8.1, in progress
 
 ## Phase Details
 
@@ -61,13 +61,31 @@ Plans:
 - [ ] 08-02: Consume launch metadata on the web side and deep-link into the active session after pairing
 - [ ] 08-03: Publish install and usage docs for npm install plus Codex `/handoff`
 
+### Phase 08.1: Authless Hosted Launch (INSERTED)
+**Goal**: Remove hosted GitHub OAuth from the handoff path so the short-lived `/launch/[publicId]` URL can establish or reuse a trusted device session and land on the active session directly
+**Depends on**: Phase 8
+**Requirements**: LAUNCH-02, LAUNCH-03, SAFE-02, DX-01
+**UI hint**: yes
+**Success Criteria** (what must be TRUE):
+  1. Opening a valid `/launch/[publicId]` URL on Fly no longer redirects through GitHub sign-in
+  2. The hosted app can establish or reuse a 7-day `cm_device_session` from the launch URL and handoff metadata alone
+  3. Device, session, and relay browser flows use the durable device session as the browser principal instead of Auth.js
+  4. Hosted docs and operators no longer need GitHub OAuth configuration for the Fly handoff flow
+**Plans**: 3 plans
+
+Plans:
+- [ ] 08.1-01: Add the hosted `/launch/[publicId]` entrypoint and launch-claim device session flow
+- [ ] 08.1-02: Replace Auth.js browser identity checks with device-session principals in the live/session APIs
+- [ ] 08.1-03: Remove GitHub OAuth runtime surfaces and update tests/docs for the authless Fly launch
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 6 -> 7 -> 8
+Phases execute in numeric order: 6 -> 7 -> 8 -> 08.1
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 6. npm Distribution & Local Bootstrap | v1.1 | 3/3 | Complete | 2026-04-19 |
 | 7. Codex-Native `/handoff` Command | v1.1 | 0/3 | Not started | - |
 | 8. Hosted Launch & Active-Session Handoff | v1.1 | 0/3 | Not started | - |
+| 08.1. Authless Hosted Launch | v1.1 | 0/3 | Ready to execute | - |

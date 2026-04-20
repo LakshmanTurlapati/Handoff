@@ -75,7 +75,6 @@ export async function POST(
     }
 
     if (
-      message === "unauthenticated" ||
       message === "device_session_required" ||
       message === "device_session_expired"
     ) {

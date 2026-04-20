@@ -74,7 +74,7 @@ flowchart LR
     end
 ```
 
-**The cloud layer owns auth, pairing, audit, and routing.** `apps/web` is the mobile-first Next.js surface you sign into and manage devices from. `apps/relay` is the Fastify plus `ws` control plane that routes live browser-to-bridge channels and holds the durable state in Postgres.
+**The cloud layer owns launch, pairing, audit, and routing.** `apps/web` is the mobile-first Next.js surface that consumes short-lived handoff URLs, manages trusted devices, and lands the phone on the active local session. `apps/relay` is the Fastify plus `ws` control plane that routes live browser-to-bridge channels and holds the durable state in Postgres.
 
 **The local bridge owns the Codex process boundary.** `apps/bridge` is a small daemon that talks outbound over WSS to the relay and locally over stdio to `codex app-server`. It normalizes Codex events into the product protocol shared by every component in the system (`packages/protocol`).
 
@@ -133,7 +133,7 @@ Handoff is an npm workspaces monorepo. Everything under `apps/` and `packages/` 
 - **Node.js 22 or newer.** The repo declares `"engines": { "node": ">=22.0.0" }` and the Dockerfiles pin `node:22-alpine`. Older versions will fail `npm ci`.
 - **npm 10 or newer.** Comes with Node 22. The repo pins `"packageManager": "npm@10.9.3"` so other package managers are not supported.
 - **A Postgres database** reachable from the web app and the relay. For local development this is usually a single `postgres://` URL pointing at Docker, Fly Postgres, or a shared dev instance.
-- **A GitHub OAuth application** — see [Authentication Setup](#authentication-setup) below. Phase 1 only supports GitHub as a sign-in provider.
+- **A GitHub OAuth application (optional)** — only needed if you still use the legacy `/pair/<pairingId>` bootstrap pairing path. The active `/launch/<publicId>` handoff flow does not require secondary OAuth.
 
 ### Installing and building
 
@@ -170,7 +170,7 @@ npm run dev --workspace @codex-mobile/handoff
 
 Health endpoints are served by the first two:
 
-- **Web app liveness:** `GET http://localhost:3000/api/healthz` returns `{"status":"ok","service":"codex-mobile-web",...}`. This path is explicitly allowlisted in `apps/web/auth.config.ts` so it never redirects to GitHub OAuth.
+- **Web app liveness:** `GET http://localhost:3000/api/healthz` returns `{"status":"ok","service":"codex-mobile-web",...}`.
 - **Relay liveness:** `GET http://localhost:8080/healthz` returns `{"status":"ok","service":"codex-mobile-relay",...}`.
 - **Relay readiness:** `GET http://localhost:8080/readyz` returns `{"status":"ready","service":"codex-mobile-relay",...}`. Phase 1 treats this as identical to liveness; Plan 02-01 will make it ownership-aware once bridges start connecting.
 
@@ -181,10 +181,10 @@ Copy `.env.example` to `.env.local` at the repo root (Next.js will pick it up au
 | Key | Who uses it | Notes |
 | --- | --- | --- |
 | `DATABASE_URL` | apps/web, apps/relay, packages/db | Shared Postgres connection string. Attach the same database to both Fly apps. |
-| `AUTH_GITHUB_ID` | apps/web | GitHub OAuth app Client ID. |
-| `AUTH_GITHUB_SECRET` | apps/web | GitHub OAuth app Client Secret. |
+| `AUTH_GITHUB_ID` | apps/web | Optional. GitHub OAuth app Client ID for the legacy `/pair/<pairingId>` bootstrap flow. |
+| `AUTH_GITHUB_SECRET` | apps/web | Optional. GitHub OAuth app Client Secret for the legacy `/pair/<pairingId>` bootstrap flow. |
 | `NEXTAUTH_URL` | apps/web | Absolute URL the web app is reachable at (e.g. `https://app.example.com`). Used for Auth.js callbacks. |
-| `AUTH_SECRET` | apps/web | 32+ byte Auth.js signing secret for browser-session JWTs and CSRF protection. |
+| `AUTH_SECRET` | apps/web | Optional. 32+ byte Auth.js signing secret for the legacy bootstrap sign-in flow. |
 | `SESSION_COOKIE_SECRET` | apps/web, apps/relay | 32+ byte random signing key for `cm_web_session` and `cm_device_session` cookies. |
 | `PAIRING_TOKEN_SECRET` | apps/web | 32+ byte signing key for single-use pairing tokens minted by `POST /api/pairings`. |
 | `WS_TICKET_SECRET` | apps/web, apps/relay | 32+ byte signing key for short-lived `cm_ws_ticket` WebSocket upgrade tickets. MUST be distinct from `SESSION_COOKIE_SECRET`. |
@@ -193,9 +193,18 @@ Copy `.env.example` to `.env.local` at the repo root (Next.js will pick it up au
 
 The four random secrets (`AUTH_SECRET`, `SESSION_COOKIE_SECRET`, `PAIRING_TOKEN_SECRET`, `WS_TICKET_SECRET`) should be generated independently. Compromising one must not let an attacker replay it as another. Generate each one with `openssl rand -base64 48` or equivalent.
 
-## Authentication Setup
+## Hosted Handoff Launch
 
-Handoff uses Auth.js (next-auth v5) with GitHub as the only Phase 1 sign-in provider. The sign-in flow is:
+The active `/handoff` flow is now URL-native:
+
+1. Codex runs `/handoff` from the active thread and the local helper mints a short-lived hosted `/launch/<publicId>` URL.
+2. Opening that URL on the phone does **not** redirect through GitHub OAuth.
+3. The hosted app validates the handoff, establishes or reuses the durable `cm_device_session`, and redirects the browser straight to `/session/<sessionId>`.
+4. Once the durable device session exists, the root, device-management, and live-session pages all authenticate from that cookie instead of a separate `cm_web_session`.
+
+## Legacy Bootstrap Sign-In
+
+Auth.js plus GitHub OAuth still exist only for the older bootstrap pairing path. If you are debugging or using `/pair/<pairingId>` directly, the sign-in flow is:
 
 1. The user visits any authenticated path on the web app.
 2. Middleware redirects them to `/sign-in?callbackUrl=<original-path>`.
@@ -224,6 +233,8 @@ npm run db:generate
 This emits SQL migration files from `packages/db/src/schema.ts`. Apply them with your preferred Postgres migration tool, or use `drizzle-kit push --config packages/db/drizzle.config.ts` for a fast local dev loop. Plan 01-03 does not automate production migrations — operators run them out-of-band before deploy.
 
 ## Pairing Flow
+
+This section describes the legacy bootstrap pairing path used by the dedicated bridge `pair` command. The active `/handoff` launch path above no longer requires this secondary sign-in flow.
 
 Pairing is how a phone browser proves it is allowed to remote-control a local Codex session. Phase 1 implements the full handshake without any inbound port on the developer machine.
 

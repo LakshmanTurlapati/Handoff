@@ -1,16 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const remotePrincipalMocks = vi.hoisted(() => ({
-  auth: vi.fn(),
   readDeviceSession: vi.fn(),
   readRawDeviceSessionToken: vi.fn(),
   hashCookieToken: vi.fn(),
   findDeviceSessionForPrincipal: vi.fn(),
+  findBridgeInstallationForDeviceSession: vi.fn(),
   touchDeviceSessionLastSeen: vi.fn(),
-}));
-
-vi.mock("../../auth", () => ({
-  auth: remotePrincipalMocks.auth,
 }));
 
 vi.mock("../../lib/device-session", () => ({
@@ -21,7 +17,13 @@ vi.mock("../../lib/device-session", () => ({
 
 vi.mock("@codex-mobile/db", () => ({
   findDeviceSessionForPrincipal: remotePrincipalMocks.findDeviceSessionForPrincipal,
+  findBridgeInstallationForDeviceSession:
+    remotePrincipalMocks.findBridgeInstallationForDeviceSession,
   touchDeviceSessionLastSeen: remotePrincipalMocks.touchDeviceSessionLastSeen,
+}));
+
+vi.mock("@codex-mobile/auth", () => ({
+  mintWsTicket: vi.fn(),
 }));
 
 import { requireRemotePrincipal } from "../../lib/live-session/server";
@@ -30,12 +32,6 @@ describe("requireRemotePrincipal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    remotePrincipalMocks.auth.mockResolvedValue({
-      user: {
-        id: "user-123",
-        email: "user@example.com",
-      },
-    });
     remotePrincipalMocks.readRawDeviceSessionToken.mockResolvedValue("raw-device-token");
     remotePrincipalMocks.readDeviceSession.mockResolvedValue({
       deviceSessionId: "device-session-123",
@@ -48,6 +44,10 @@ describe("requireRemotePrincipal", () => {
       cookieTokenHash: "hash-123",
       revokedAt: null,
       expiresAt: new Date("2026-04-25T12:00:00.000Z"),
+    });
+    remotePrincipalMocks.findBridgeInstallationForDeviceSession.mockResolvedValue({
+      id: "bridge-installation-123",
+      revokedAt: null,
     });
     remotePrincipalMocks.touchDeviceSessionLastSeen.mockResolvedValue({
       id: "device-session-123",
@@ -100,11 +100,16 @@ describe("requireRemotePrincipal", () => {
     expect(principal).toEqual({
       userId: "user-123",
       deviceSessionId: "device-session-123",
+      bridgeInstallationId: "bridge-installation-123",
     });
     expect(remotePrincipalMocks.findDeviceSessionForPrincipal).toHaveBeenCalledWith({
       deviceSessionId: "device-session-123",
-      userId: "user-123",
       cookieTokenHash: "hash-123",
+    });
+    expect(
+      remotePrincipalMocks.findBridgeInstallationForDeviceSession,
+    ).toHaveBeenCalledWith({
+      deviceSessionId: "device-session-123",
     });
     expect(remotePrincipalMocks.touchDeviceSessionLastSeen).toHaveBeenCalledWith(
       "device-session-123",

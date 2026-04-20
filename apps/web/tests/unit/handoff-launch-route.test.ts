@@ -1,0 +1,54 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const launchRouteMocks = vi.hoisted(() => ({
+  claimHandoffLaunch: vi.fn(),
+}));
+
+vi.mock("../../lib/handoff-launch", () => ({
+  claimHandoffLaunch: launchRouteMocks.claimHandoffLaunch,
+}));
+
+import { GET } from "../../app/launch/[publicId]/route";
+
+describe("GET /launch/[publicId]", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("redirects a valid launch directly into the target session", async () => {
+    launchRouteMocks.claimHandoffLaunch.mockResolvedValue({
+      sessionId: "session-123",
+      reusedDeviceSession: false,
+    });
+
+    const response = await GET(
+      new Request("https://handoff.example.test/launch/public-123"),
+      {
+        params: Promise.resolve({ publicId: "public-123" }),
+      },
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://handoff.example.test/session/session-123",
+    );
+  });
+
+  it("redirects invalid launches to the hosted error page", async () => {
+    launchRouteMocks.claimHandoffLaunch.mockRejectedValue(
+      new Error("handoff_expired"),
+    );
+
+    const response = await GET(
+      new Request("https://handoff.example.test/launch/public-123"),
+      {
+        params: Promise.resolve({ publicId: "public-123" }),
+      },
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://handoff.example.test/launch/error?code=handoff_expired",
+    );
+  });
+});

@@ -2,6 +2,7 @@ import { and, eq, or } from "drizzle-orm";
 import { getDb } from "../client.js";
 import {
   bridge_installations,
+  device_sessions,
   type BridgeInstallationRow,
 } from "../schema.js";
 
@@ -89,6 +90,38 @@ export async function findBridgeInstallationByTokenHash(input: {
     .limit(1);
 
   return row ?? null;
+}
+
+export async function findBridgeInstallationById(input: {
+  bridgeInstallationId: string;
+}): Promise<BridgeInstallationRow | null> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(bridge_installations)
+    .where(eq(bridge_installations.id, input.bridgeInstallationId))
+    .limit(1);
+
+  return row ?? null;
+}
+
+export async function findBridgeInstallationForDeviceSession(input: {
+  deviceSessionId: string;
+}): Promise<BridgeInstallationRow | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      bridgeInstallation: bridge_installations,
+    })
+    .from(device_sessions)
+    .innerJoin(
+      bridge_installations,
+      eq(device_sessions.issuedFromPairingId, bridge_installations.pairingId),
+    )
+    .where(eq(device_sessions.id, input.deviceSessionId))
+    .limit(1);
+
+  return row?.bridgeInstallation ?? null;
 }
 
 export async function touchBridgeInstallationLastUsed(input: {

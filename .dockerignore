@@ -1,0 +1,9 @@
+.git
+.next
+node_modules
+test-results
+.tmp-handoff-publish
+**/.next
+**/.tsbuildinfo
+**/dist
+**/node_modules
