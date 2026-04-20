@@ -8,8 +8,23 @@ interface RouteContext {
   params: Promise<{ publicId: string }>;
 }
 
+function resolvePublicOrigin(request: Request): string {
+  const forwardedHost =
+    request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (!forwardedHost) {
+    return new URL(request.url).origin;
+  }
+
+  const forwardedProto = request.headers.get("x-forwarded-proto") ?? "https";
+  return `${forwardedProto}://${forwardedHost}`;
+}
+
+function buildPublicUrl(request: Request, pathname: string): URL {
+  return new URL(pathname, resolvePublicOrigin(request));
+}
+
 function buildLaunchErrorUrl(request: Request, code: string): string {
-  const url = new URL("/launch/error", request.url);
+  const url = buildPublicUrl(request, "/launch/error");
   url.searchParams.set("code", code);
   return url.toString();
 }
@@ -30,7 +45,10 @@ export async function GET(
     });
 
     return NextResponse.redirect(
-      new URL(`/session/${encodeURIComponent(result.sessionId)}`, request.url),
+      buildPublicUrl(
+        request,
+        `/session/${encodeURIComponent(result.sessionId)}`,
+      ),
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "handoff_not_found";

@@ -51,4 +51,27 @@ describe("GET /launch/[publicId]", () => {
       "https://handoff.example.test/launch/error?code=handoff_expired",
     );
   });
+
+  it("prefers the forwarded public origin over the internal request url", async () => {
+    launchRouteMocks.claimHandoffLaunch.mockRejectedValue(
+      new Error("handoff_not_found"),
+    );
+
+    const response = await GET(
+      new Request("http://localhost:3000/launch/public-123", {
+        headers: {
+          "x-forwarded-host": "handoff-web.fly.dev",
+          "x-forwarded-proto": "https",
+        },
+      }),
+      {
+        params: Promise.resolve({ publicId: "public-123" }),
+      },
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://handoff-web.fly.dev/launch/error?code=handoff_not_found",
+    );
+  });
 });
