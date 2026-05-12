@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const remotePrincipalMocks = vi.hoisted(() => ({
   readDeviceSession: vi.fn(),
@@ -31,6 +31,8 @@ import { requireRemotePrincipal } from "../../lib/live-session/server";
 describe("requireRemotePrincipal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-19T12:00:00.000Z"));
 
     remotePrincipalMocks.readRawDeviceSessionToken.mockResolvedValue("raw-device-token");
     remotePrincipalMocks.readDeviceSession.mockResolvedValue({
@@ -52,6 +54,10 @@ describe("requireRemotePrincipal", () => {
     remotePrincipalMocks.touchDeviceSessionLastSeen.mockResolvedValue({
       id: "device-session-123",
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("rejects revoked device sessions with the exact device_session_revoked error", async () => {
