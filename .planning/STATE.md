@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Handoff Install & Launch
+milestone: v1.0
+milestone_name: milestone
 status: executing
-stopped_at: Phase 08.1 inserted and ready for implementation
-last_updated: "2026-04-20T14:10:00.000Z"
-last_activity: 2026-04-20
+stopped_at: Session resumed; awaiting Phase 08.1-01 browser pairing/bootstrap verification and `$handoff` rerun
+last_updated: "2026-05-12T07:44:32.656Z"
+last_activity: 2026-05-12
 progress:
-  total_phases: 4
-  completed_phases: 2
-  total_plans: 9
-  completed_plans: 6
-  percent: 33
+  total_phases: 5
+  completed_phases: 3
+  total_plans: 7
+  completed_plans: 7
+  percent: 100
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-04-18)
 
 ## Current Position
 
-Phase: 08.1 (authless-hosted-launch) — EXECUTING
-Plan: 0 of 3
+Phase: 08.1
+Plan: Not started
 Status: Inserted urgent phase — implementation in progress
-Last activity: 2026-04-20
+Last activity: 2026-05-12
 
 Progress: [████░░░░░░] 44%
 
@@ -36,6 +36,7 @@ Progress: [████░░░░░░] 44%
 
 ### Roadmap Evolution
 
+- Phase 07.1 inserted after Phase 7: Codex CLI Handoff Skill Migration (URGENT)
 - Phase 08.1 inserted after Phase 8: Authless Hosted Launch (URGENT)
 - Hosted launch no longer routes through GitHub OAuth; the Fly launch URL and durable device session are the browser trust basis for this phase
 
@@ -60,6 +61,6 @@ Progress: [████░░░░░░] 44%
 
 ## Session Continuity
 
-Last session: 2026-04-20T13:30:00.000Z
-Stopped at: Phase 08.1 insertion approved
-Resume file: .planning/phases/08.1-authless-hosted-launch/08.1-CONTEXT.md
+Last session: 2026-04-20T15:42:58Z
+Stopped at: Session resumed; awaiting Phase 08.1-01 browser pairing/bootstrap verification and `$handoff` rerun
+Resume file: .planning/phases/08.1-authless-hosted-launch/.continue-here.md

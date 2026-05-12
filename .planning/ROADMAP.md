@@ -44,6 +44,23 @@ Plans:
 - [x] 07-02: Capture active-session context and handoff metadata at command invocation time
 - [x] 07-03: Validate the command path against approval, sandbox, and bridge-boundary constraints
 
+### Phase 07.1: Codex CLI Handoff Skill Migration (INSERTED)
+**Goal**: Replace the unsupported custom `/handoff` command packaging with an explicit Codex CLI skill and env-derived thread binding that works in the current CLI runtime
+**Depends on:** Phase 7
+**Requirements**: CMD-01, CMD-02, SAFE-01, DX-01
+**UI hint**: no
+**Success Criteria** (what must be TRUE):
+  1. Codex CLI exposes Handoff through `$handoff` or `/skills` instead of relying on unsupported custom slash-command discovery
+  2. The packaged local installer writes a `handoff` skill into `.codex/skills` and removes stale legacy prompt-command copies
+  3. `handoff codex-handoff --format json` succeeds when Codex CLI only exposes `CODEX_THREAD_ID` by deriving the session binding safely
+  4. Docs and hosted copy stop promising `/handoff` as the supported CLI surface
+**Plans**: 3 plans
+
+Plans:
+- [ ] 07.1-01: Package the explicit `$handoff` Codex skill and update install aliases
+- [ ] 07.1-02: Resolve Codex CLI thread and session context from supported environment bindings
+- [ ] 07.1-03: Update docs, web copy, and tests to match the skill-based invocation
+
 ### Phase 8: Hosted Launch & Active-Session Handoff
 **Goal**: Complete the user-facing handoff launch so the generated URL opens the Fly-hosted site, pairs the device, and lands on the active session
 **Depends on**: Phase 7
@@ -74,7 +91,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 08.1-01: Add the hosted `/launch/[publicId]` entrypoint and launch-claim device session flow
+- [x] 08.1-01: Add the hosted `/launch/[publicId]` entrypoint and launch-claim device session flow
 - [ ] 08.1-02: Replace Auth.js browser identity checks with device-session principals in the live/session APIs
 - [ ] 08.1-03: Remove GitHub OAuth runtime surfaces and update tests/docs for the authless Fly launch
 
@@ -88,4 +105,4 @@ Phases execute in numeric order: 6 -> 7 -> 8 -> 08.1
 | 6. npm Distribution & Local Bootstrap | v1.1 | 3/3 | Complete | 2026-04-19 |
 | 7. Codex-Native `/handoff` Command | v1.1 | 0/3 | Not started | - |
 | 8. Hosted Launch & Active-Session Handoff | v1.1 | 0/3 | Not started | - |
-| 08.1. Authless Hosted Launch | v1.1 | 0/3 | Ready to execute | - |
+| 08.1. Authless Hosted Launch | v1.1 | 1/1 | Complete    | 2026-05-12 |
