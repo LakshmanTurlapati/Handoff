@@ -57,9 +57,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 07.1-01: Package the explicit `$handoff` Codex skill and update install aliases
-- [ ] 07.1-02: Resolve Codex CLI thread and session context from supported environment bindings
-- [ ] 07.1-03: Update docs, web copy, and tests to match the skill-based invocation
+- [x] 07.1-01: Package the explicit `$handoff` Codex skill and update install aliases
+- [x] 07.1-02: Resolve Codex CLI thread and session context from supported environment bindings
+- [x] 07.1-03: Update docs, web copy, and tests to match the skill-based invocation
 
 ### Phase 8: Hosted Launch & Active-Session Handoff
 **Goal**: Complete the user-facing handoff launch so the generated URL opens the Fly-hosted site, pairs the device, and lands on the active session
