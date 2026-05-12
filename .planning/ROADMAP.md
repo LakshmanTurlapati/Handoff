@@ -74,9 +74,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 08-01: Generate hosted handoff launch URLs and QR output from the active-session flow
-- [ ] 08-02: Consume launch metadata on the web side and deep-link into the active session after pairing
-- [ ] 08-03: Publish install and usage docs for npm install plus Codex `/handoff`
+- [x] 08-01: Generate hosted handoff launch URLs and QR output from the active-session flow
+- [x] 08-02: Consume launch metadata on the web side and deep-link into the active session after pairing
+- [x] 08-03: Publish install and usage docs for npm install plus Codex `/handoff`
 
 ### Phase 08.1: Authless Hosted Launch (INSERTED)
 **Goal**: Remove hosted GitHub OAuth from the handoff path so the short-lived `/launch/[publicId]` URL can establish or reuse a trusted device session and land on the active session directly
@@ -104,5 +104,5 @@ Phases execute in numeric order: 6 -> 7 -> 8 -> 08.1
 |-------|-----------|----------------|--------|-----------|
 | 6. npm Distribution & Local Bootstrap | v1.1 | 3/3 | Complete | 2026-04-19 |
 | 7. Codex-Native `/handoff` Command | v1.1 | 0/3 | Not started | - |
-| 8. Hosted Launch & Active-Session Handoff | v1.1 | 0/3 | Not started | - |
+| 8. Hosted Launch & Active-Session Handoff | v1.1 | 3/3 | Complete    | 2026-05-12 |
 | 08.1. Authless Hosted Launch | v1.1 | 1/1 | Complete    | 2026-05-12 |
