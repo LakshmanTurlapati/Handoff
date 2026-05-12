@@ -22,28 +22,31 @@ v1.0 shipped the full planned product path:
 
 The archive state is intentionally conservative. Implementation is complete, but v1.0 was archived with accepted verification debt rather than a fully passed milestone audit. See `.planning/MILESTONES.md` and `.planning/milestones/v1.0-MILESTONE-AUDIT.md`.
 
-## Current Milestone: v1.1 Handoff Install & Launch
+## Current Milestone
 
-**Goal:** Make Handoff installable from npm and callable from inside Codex as `/handoff`, generating a Fly-hosted handoff URL that pairs the phone and lands on the active session.
+_(none — v1.1 shipped 2026-05-12. Run `/gsd-new-milestone` to start the next cycle.)_
 
-**Target features:**
-- npm-distributed `handoff` CLI with a real install surface outside this monorepo
-- Codex-native `/handoff` command that starts from the active local session
-- automatic local bootstrap instead of manual bridge credential and env wiring
-- hosted launch flow that opens the Fly site, completes pairing, and deep-links into the active session
+## Recently Shipped: v1.1 Handoff Install & Launch (2026-05-12)
+
+**Delivered:** Handoff is now installable from npm and invokable from inside Codex via `$handoff`. The skill mints a single-use Fly-hosted `/launch/<publicId>` URL plus terminal QR, the authless launch flow exchanges the publicId for a durable device session, and the phone lands directly on the active session that initiated the handoff. Status: tech_debt — code complete, one-time hosted pairing bootstrap deferred as HUMAN-UAT.
 
 ## Requirements
 
 ### Validated
 
-No milestone is fully validated yet. v1.0 shipped with deferred manual verification and missing milestone verification artifacts across several phases.
+- v1.0 (Codex Mobile MVP, 2026-04-18) — secure remote-control substrate; archived with accepted verification debt.
+- v1.1 (Handoff Install & Launch, 2026-05-12) — 12/12 requirements satisfied, audit status `tech_debt`:
+  - DIST-01/02/03 — npm install, usable CLI, bootstrap without raw env wiring
+  - LAUNCH-01/02/03/04 — single-use Fly-hosted URL + QR, authless launch, active-session deep-link, no inbound ports
+  - CMD-01/02 — Codex `$handoff` skill bound to active thread
+  - SAFE-01/02 — approval/sandbox semantics preserved, short-lived single-purpose credentials
+  - DX-01 — public install + usage docs
 
 ### Active
 
-- [ ] Install Handoff from npm without cloning the monorepo
-- [ ] Run `/handoff` inside Codex to generate a hosted handoff URL and QR code
-- [ ] Open the hosted Fly site, complete pairing, and land on the active session rather than a generic picker
-- [ ] Start or reuse the local bridge automatically without manual `userId` and `deviceSessionId` env wiring
+- [ ] HUMAN-UAT: complete one-time hosted pairing bootstrap in a real signed-in browser (`08.1-HUMAN-UAT.md`)
+- [ ] HUMAN-UAT: `$handoff` end-to-end smoke from a real Codex thread (`08.1-HUMAN-UAT.md`, supersedes `07-HUMAN-UAT.md`)
+- [ ] Address pre-existing `apps/bridge/tests/unit/event-relay.test.ts` failures (out of v1.1 scope, carried into next milestone)
 
 ### Out of Scope
 
@@ -89,6 +92,8 @@ The product direction remains the same as at initialization: remote continuation
 | Pair devices with authenticated web sessions, short-lived QR tokens, and terminal confirmation phrases | QR-based login is hijack-prone without explicit human confirmation and short-lived trust material | ✓ Good |
 | Model remote activity as product-owned structured events instead of terminal-byte scraping | Structured events preserve approvals, history, and typed mobile rendering without pretending the terminal is the source of truth | ✓ Good |
 | Use Fly.io relay ownership and replay routing instead of a single in-memory node | This keeps the first version deployable while leaving a credible path to multi-instance scale | ⚠ Revisit after staged Fly validation |
+| Use a Codex CLI skill (`$handoff` / `/skills`) instead of a custom `/handoff` slash command | The custom slash-command surface was not actually supported by the Codex CLI runtime, while the skills surface is | ✓ Good — shipped in v1.1 (phase 07.1) |
+| Make the hosted `/launch/[publicId]` flow authless and back the browser principal by the durable device session | A single-use launch token plus a server-issued device-session cookie is the smallest hosted trust boundary that still lands a phone on the active session, and it avoids a second GitHub round-trip on every handoff | ✓ Good — shipped in v1.1 (phase 08.1) |
 
 ## Evolution
 
@@ -108,4 +113,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-18 after starting v1.1 milestone*
+*Last updated: 2026-05-12 after completing v1.1 milestone*

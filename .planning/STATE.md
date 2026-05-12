@@ -1,10 +1,9 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: executing
-stopped_at: Session resumed; awaiting Phase 08.1-01 browser pairing/bootstrap verification and `$handoff` rerun
-last_updated: "2026-05-12T08:12:11.256Z"
+milestone: v1.1
+milestone_name: handoff-install-and-launch
+status: archived
+last_updated: "2026-05-12T00:00:00.000Z"
 last_activity: 2026-05-12
 progress:
   total_phases: 5
@@ -18,49 +17,45 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-18)
+See: .planning/PROJECT.md
+See: .planning/MILESTONES.md (full milestone history)
 
 **Core value:** A developer can safely continue a local Codex session from anywhere, with live progress and approvals, without exposing raw shell access or moving their local environment into the cloud.
-**Current focus:** Phase 08.1 — authless-hosted-launch
+**Current focus:** Planning next milestone — run `/gsd-new-milestone` to begin.
 
 ## Current Position
 
-Phase: 08.1
-Plan: Not started
-Status: Inserted urgent phase — implementation in progress
-Last activity: 2026-05-12
-
-Progress: [████░░░░░░] 44%
+Milestone: v1.1 archived (Handoff Install and Launch — shipped 2026-05-12)
+Status: All v1.1 phases complete, milestone tagged, awaiting next milestone definition.
 
 ## Accumulated Context
 
-### Roadmap Evolution
+### Open Operational Items (carried into next milestone)
 
-- Phase 07.1 inserted after Phase 7: Codex CLI Handoff Skill Migration (URGENT)
-- Phase 08.1 inserted after Phase 8: Authless Hosted Launch (URGENT)
-- Hosted launch no longer routes through GitHub OAuth; the Fly launch URL and durable device session are the browser trust basis for this phase
+- 08.1 HUMAN-UAT: one-time hosted pairing bootstrap in a real signed-in browser still pending.
+- 08.1 HUMAN-UAT: `$handoff` end-to-end smoke from a real Codex thread still pending.
+- 07 HUMAN-UAT: 3 Codex-thread checks predate the 07.1 skill migration; remap or retire in the next progress review.
+- `apps/bridge/tests/unit/event-relay.test.ts`: 2 pre-existing failures in event-relay subsystem (out of v1.1 scope; flagged for visibility).
 
 ## Prior Milestone Archive
 
 - Milestone summary: `.planning/MILESTONES.md`
-- Roadmap archive: `.planning/milestones/v1.0-ROADMAP.md`
-- Requirements archive: `.planning/milestones/v1.0-REQUIREMENTS.md`
-- Audit archive: `.planning/milestones/v1.0-MILESTONE-AUDIT.md`
+- v1.0 Roadmap: `.planning/milestones/v1.0-ROADMAP.md`
+- v1.0 Requirements: `.planning/milestones/v1.0-REQUIREMENTS.md`
+- v1.0 Audit: `.planning/milestones/v1.0-MILESTONE-AUDIT.md`
+- v1.1 Roadmap: `.planning/milestones/v1.1-ROADMAP.md`
+- v1.1 Requirements: `.planning/milestones/v1.1-REQUIREMENTS.md`
+- v1.1 Audit: `.planning/milestones/v1.1-MILESTONE-AUDIT.md`
 
 ## Pending Todos
 
-- Implement `/launch/[publicId]` so opening a handoff URL can establish or reuse a trusted device session without GitHub OAuth
-- Replace hosted browser `auth()` checks with durable device-session principals across session/device routes
-- Keep the archived v1.0 audit debt deferred unless it directly blocks the authless handoff launch path
+_(none — milestone v1.1 complete)_
 
 ## Blockers/Concerns
 
-- Existing hosted runtime still imports Auth.js/NextAuth in middleware, pairing pages, and the browser principal path
-- The Fly deployment already mints `/launch/[publicId]` URLs from `/api/handoffs`, but there is no corresponding launch page yet
-- Manual real-device launch verification is still deferred; current confidence comes from targeted tests, local inspection, and previous Fly smoke checks
+_(none — see Open Operational Items above for accepted tech debt)_
 
 ## Session Continuity
 
-Last session: 2026-04-20T15:42:58Z
-Stopped at: Session resumed; awaiting Phase 08.1-01 browser pairing/bootstrap verification and `$handoff` rerun
-Resume file: .planning/phases/08.1-authless-hosted-launch/.continue-here.md
+Last session: 2026-05-12
+Stopped at: v1.1 milestone archived and tagged.
