@@ -395,4 +395,4 @@ MIT.
 
 I'm Lakshman Turlapati. I wanted to keep working on my Codex sessions from the couch without ever shipping my environment to a cloud agent, and I couldn't find anything that did exactly that without making me trade away either security or the actual feel of a local session. So I'm building it.
 
-More of what I make lives at [www.audienclature.com](https://www.audienclature.com).
+More of what I make lives at [parzival.live](https://parzival.live).
