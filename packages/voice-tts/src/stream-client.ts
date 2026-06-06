@@ -190,6 +190,8 @@ export function createTtsStreamClient(
   const buffer: TtsEvent[] = [];
   let awaiter: Pending | null = null;
   let completed = false;
+  // WR-03: single-consumer enforcement (see voice-stt for the rationale).
+  let iteratorClaimed = false;
 
   function emit(event: TtsEvent): void {
     if (completed) {
@@ -218,10 +220,26 @@ export function createTtsStreamClient(
 
   const events$: AsyncIterable<TtsEvent> = {
     [Symbol.asyncIterator](): AsyncIterator<TtsEvent> {
+      // WR-03: enforce the documented single-consumer contract. A
+      // second `for await` would silently race the first for shared
+      // buffer.shift() and awaiter — emit a loud error instead.
+      if (iteratorClaimed) {
+        throw new Error(
+          "[voice-tts] events$ is single-consumer: only one `for await` loop is permitted per TtsStreamClient. Construct a separate client per consumer.",
+        );
+      }
+      iteratorClaimed = true;
       return {
         async next(): Promise<IteratorResult<TtsEvent>> {
           if (buffer.length > 0) {
-            const value = buffer.shift() as TtsEvent;
+            // WR-09: defensive undefined check rather than `as TtsEvent`
+            // cast. shift() returns TtsEvent | undefined; the length
+            // check covers the runtime case but the explicit guard
+            // makes the type system enforce the invariant.
+            const value = buffer.shift();
+            if (value === undefined) {
+              return { value: undefined as unknown as TtsEvent, done: true };
+            }
             return { value, done: false };
           }
           if (completed) {

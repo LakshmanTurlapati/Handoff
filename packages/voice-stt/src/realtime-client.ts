@@ -236,6 +236,14 @@ export function createRealtimeSttClient(
   const pendingEvents: SttEvent[] = [];
   let awaiter: (() => void) | null = null;
   let iterableDone = false;
+  // WR-03: the events$ AsyncIterable contract is single-consumer. Two
+  // concurrent `for await` loops would race for the shared
+  // `pendingEvents.shift()` and overwrite each other's `awaiter`. We
+  // detect a second [Symbol.asyncIterator]() call and throw rather
+  // than letting the race happen silently. WR-09: also fixes the
+  // `as SttEvent` cast at line ~247 by replacing it with a defensive
+  // undefined check.
+  let iteratorClaimed = false;
 
   function emit(event: SttEvent): void {
     pendingEvents.push(event);
@@ -255,6 +263,15 @@ export function createRealtimeSttClient(
 
   const events$: AsyncIterable<SttEvent> = {
     [Symbol.asyncIterator](): AsyncIterator<SttEvent> {
+      // WR-03: enforce the documented single-consumer contract. Two
+      // `for await` loops on the same events$ would silently race and
+      // partially drain each other's events; throw loud instead.
+      if (iteratorClaimed) {
+        throw new Error(
+          "[voice-stt] events$ is single-consumer: only one `for await` loop is permitted per RealtimeSttClient. Construct a separate client per consumer.",
+        );
+      }
+      iteratorClaimed = true;
       return {
         async next(): Promise<IteratorResult<SttEvent>> {
           while (pendingEvents.length === 0 && !iterableDone) {
@@ -263,7 +280,15 @@ export function createRealtimeSttClient(
             });
           }
           if (pendingEvents.length > 0) {
-            const value = pendingEvents.shift() as SttEvent;
+            // WR-09: defensive undefined check rather than `as SttEvent`
+            // cast. The prior `pendingEvents.length > 0` check already
+            // covers the runtime case, but the explicit guard makes
+            // the type system enforce the invariant if a refactor
+            // moves the length check away.
+            const value = pendingEvents.shift();
+            if (value === undefined) {
+              return { value: undefined, done: true };
+            }
             return { value, done: false };
           }
           return { value: undefined, done: true };
