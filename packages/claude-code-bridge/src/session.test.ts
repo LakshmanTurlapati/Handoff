@@ -1044,3 +1044,63 @@ describe("createClaudeSession — CR-fix regressions (CR-03: stderr drain)", () 
     });
   });
 });
+
+/**
+ * WR-01 regression: wire-mapper drops content blocks beyond content[0].
+ * The session-level test below exercises the same code path via a
+ * synthetic stdout fixture that puts a text block AND a tool_use block
+ * in one assistant message. After the WR-01 fix in wire-mapper.ts, the
+ * session emits a separate event for each block in document order.
+ */
+describe("createClaudeSession — WR-01 regression (multi-block assistant content)", () => {
+  it("emits one event per content block when a single assistant message contains both text and tool_use", async () => {
+    const { spawnImpl, childRef } = makeFakeSpawn();
+    const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+    const session = createClaudeSession(
+      { systemPromptFile: "/tmp/companion.md" },
+      { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+    );
+    const child = childRef.current as FakeChildProcess;
+    const drainPromise = drainEvents(session);
+    // Multi-block assistant message: a "thinking aloud" text delta
+    // FOLLOWED by a tool_use, all in the same wire line. Before WR-01,
+    // only the text block was emitted; after WR-01, both events emit
+    // in order.
+    const multiBlockLine = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "Let me check that file." },
+          {
+            type: "tool_use",
+            id: "tu-multi-1",
+            name: "Read",
+            input: { path: "/tmp/x" },
+          },
+        ],
+      },
+      partial: true,
+    });
+    child.stdout.write(Buffer.from(`${multiBlockLine}\n`, "utf8"));
+    child.stdout.end();
+    child.emit("exit", 0, null);
+    const events = await drainPromise;
+    // Expected: the multi-block line produces TWO events in document
+    // order (text delta, then tool_use), then process_exit.
+    const types = events.map((e) => e.type);
+    expect(types).toEqual([
+      "assistant_text_delta",
+      "tool_use",
+      "process_exit",
+    ]);
+    const textEv = events[0];
+    if (textEv?.type === "assistant_text_delta") {
+      expect(textEv.text).toBe("Let me check that file.");
+    }
+    const toolEv = events[1];
+    if (toolEv?.type === "tool_use") {
+      expect(toolEv.id).toBe("tu-multi-1");
+      expect(toolEv.name).toBe("Read");
+    }
+  });
+});

@@ -50,7 +50,7 @@ import type { ChildProcess } from "node:child_process";
 import { LOCKED_FLAGS } from "./constants.js";
 import { createLineParser } from "./line-parser.js";
 import type { ParseErrorPayload } from "./line-parser.js";
-import { mapWireEvent } from "./wire-mapper.js";
+import { mapWireEvents } from "./wire-mapper.js";
 import { runVersionCheck } from "./version-check.js";
 import { deriveOutcome } from "./outcome.js";
 import { cancelChildProcess } from "./cancellation.js";
@@ -316,10 +316,16 @@ function createSessionState(
   }
 
   // ─── line parser pipeline ──────────────────────────────────────────
+  // CR-fix WR-01: route through mapWireEvents (not mapWireEvent) so
+  // multi-block assistant messages (e.g. a "thinking aloud" text block
+  // followed by a tool_use block in the same wire line) emit one event
+  // per block in document order. The legacy mapWireEvent helper only
+  // returned the first block.
   const parser = createLineParser();
   parser.on("json", (obj: unknown) => {
-    const event = mapWireEvent(obj);
-    pushEvent(event);
+    for (const event of mapWireEvents(obj)) {
+      pushEvent(event);
+    }
   });
   parser.on("parse_error", (err: ParseErrorPayload) => {
     const payload: ClaudeBridgeEvent = {

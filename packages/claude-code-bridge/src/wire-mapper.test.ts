@@ -16,7 +16,7 @@
  */
 import { describe, it, expect } from "vitest";
 
-import { mapWireEvent } from "./wire-mapper.js";
+import { mapWireEvent, mapWireEvents } from "./wire-mapper.js";
 import { ClaudeStreamEventSchema } from "./event-schemas.js";
 
 describe("mapWireEvent", () => {
@@ -205,5 +205,118 @@ describe("mapWireEvent", () => {
       const parsed = ClaudeStreamEventSchema.safeParse(out);
       expect(parsed.success).toBe(true);
     }
+  });
+});
+
+/**
+ * CR-fix WR-01 regression coverage for mapWireEvents — the multi-block
+ * iterator added by the wire-mapper rewrite.
+ */
+describe("mapWireEvents (CR-fix WR-01)", () => {
+  it("single-block messages return a one-element array equivalent to mapWireEvent", () => {
+    const wire = {
+      type: "assistant",
+      message: { content: [{ type: "text", text: "Hello." }] },
+    };
+    const arr = mapWireEvents(wire);
+    expect(arr.length).toBe(1);
+    expect(arr[0]?.type).toBe("assistant_text_done");
+    // Equivalence with mapWireEvent (single-event surface): the first
+    // element matches the legacy single-event return.
+    const legacy = mapWireEvent(wire);
+    expect(arr[0]).toEqual(legacy);
+  });
+
+  it("multi-block assistant content emits one event per block, in document order", () => {
+    const wire = {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "thinking..." },
+          {
+            type: "tool_use",
+            id: "tu-1",
+            name: "Read",
+            input: { path: "/tmp/x" },
+          },
+        ],
+      },
+      partial: true,
+    };
+    const arr = mapWireEvents(wire);
+    expect(arr.length).toBe(2);
+    expect(arr[0]?.type).toBe("assistant_text_delta");
+    if (arr[0]?.type === "assistant_text_delta") {
+      expect(arr[0].text).toBe("thinking...");
+    }
+    expect(arr[1]?.type).toBe("tool_use");
+    if (arr[1]?.type === "tool_use") {
+      expect(arr[1].id).toBe("tu-1");
+      expect(arr[1].name).toBe("Read");
+    }
+  });
+
+  it("multi-block: partial:false on a text+tool_use message emits assistant_text_done", () => {
+    const wire = {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "Final text." },
+          { type: "tool_use", id: "tu-2", name: "Write", input: {} },
+        ],
+      },
+      // partial is absent — treated as false.
+    };
+    const arr = mapWireEvents(wire);
+    expect(arr.length).toBe(2);
+    expect(arr[0]?.type).toBe("assistant_text_done");
+    if (arr[0]?.type === "assistant_text_done") {
+      expect(arr[0].full_text).toBe("Final text.");
+    }
+    expect(arr[1]?.type).toBe("tool_use");
+  });
+
+  it("multi-block with TWO tool_use blocks emits both, preserving order", () => {
+    const wire = {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "tool_use", id: "tu-a", name: "Read", input: {} },
+          { type: "tool_use", id: "tu-b", name: "Write", input: {} },
+        ],
+      },
+    };
+    const arr = mapWireEvents(wire);
+    expect(arr.length).toBe(2);
+    if (arr[0]?.type === "tool_use") {
+      expect(arr[0].id).toBe("tu-a");
+    }
+    if (arr[1]?.type === "tool_use") {
+      expect(arr[1].id).toBe("tu-b");
+    }
+  });
+
+  it("non-assistant wire returns a one-element array (single-event semantics)", () => {
+    const wire = { type: "result", subtype: "success" };
+    const arr = mapWireEvents(wire);
+    expect(arr.length).toBe(1);
+    expect(arr[0]?.type).toBe("assistant_done");
+  });
+
+  it("a malformed content block within an assistant message becomes UnknownEvent for that block only", () => {
+    const wire = {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "valid" },
+          // missing required tool_use fields:
+          { type: "tool_use", id: 42 /* not a string */, name: "Read" },
+        ],
+      },
+    };
+    const arr = mapWireEvents(wire);
+    expect(arr.length).toBe(2);
+    expect(arr[0]?.type).toBe("assistant_text_done");
+    expect(arr[1]?.type).toBe("unknown_event");
   });
 });
