@@ -209,3 +209,66 @@ describe("createAchillesWindow — positioning", () => {
     expect(DRAG_HANDLE_HEIGHT_PX).toBe(30);
   });
 });
+
+describe("createAchillesWindow — CR-05 off-screen guard", () => {
+  it("restores the persisted position when it overlaps an attached display", () => {
+    const { ctor, instances } = makeStubCtor();
+    const logger = vi.fn();
+    createAchillesWindow({
+      BrowserWindowCtor: ctor as never,
+      appRef: { dock: { hide: vi.fn() } },
+      initialPosition: { x: 100, y: 100 },
+      platform: "win32",
+      workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+      allDisplays: [
+        { workArea: { x: 0, y: 0, width: 1920, height: 1080 } },
+      ],
+      logger,
+    });
+    expect(instances[0]!.setPosition).toHaveBeenCalledWith(100, 100);
+    expect(logger).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the top-right default when the persisted position lies off every display (disconnected monitor)", () => {
+    const { ctor, instances } = makeStubCtor();
+    const logger = vi.fn();
+    createAchillesWindow({
+      BrowserWindowCtor: ctor as never,
+      appRef: { dock: { hide: vi.fn() } },
+      // Persisted on a now-disconnected secondary monitor at x=3000.
+      initialPosition: { x: 3000, y: 200 },
+      platform: "win32",
+      workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+      allDisplays: [
+        { workArea: { x: 0, y: 0, width: 1920, height: 1080 } },
+      ],
+      logger,
+    });
+    const [callX, callY] = instances[0]!.setPosition.mock.calls[0] as [
+      number,
+      number,
+    ];
+    // Top-right default applied: workArea.right - WINDOW_WIDTH - margin.
+    expect(callX).toBe(1920 - WINDOW_WIDTH - DEFAULT_MARGIN_PX);
+    expect(callY).toBe(DEFAULT_MARGIN_PX);
+    expect(logger).toHaveBeenCalled();
+    const msg = String((logger as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]);
+    expect(msg).toContain("CR-05");
+  });
+
+  it("accepts a position on the secondary display when the secondary display is attached", () => {
+    const { ctor, instances } = makeStubCtor();
+    createAchillesWindow({
+      BrowserWindowCtor: ctor as never,
+      appRef: { dock: { hide: vi.fn() } },
+      initialPosition: { x: 2500, y: 200 },
+      platform: "win32",
+      workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+      allDisplays: [
+        { workArea: { x: 0, y: 0, width: 1920, height: 1080 } },
+        { workArea: { x: 1920, y: 0, width: 1920, height: 1080 } },
+      ],
+    });
+    expect(instances[0]!.setPosition).toHaveBeenCalledWith(2500, 200);
+  });
+});

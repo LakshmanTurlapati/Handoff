@@ -44,6 +44,13 @@ export interface AchillesBrowserWindow {
   loadURL(url: string): Promise<void> | void;
   webContents: {
     send(channel: string, payload: unknown): void;
+    /**
+     * WR-06: opaque webContents id. WireIpcBridge uses this to reject
+     * IPC envelopes from non-floating-window senders. Optional so unit
+     * tests can omit it (the bridge falls open when undefined, which is
+     * the safe default in test-only scopes).
+     */
+    id?: number;
   };
 }
 
@@ -96,12 +103,64 @@ export interface CreateAchillesWindowOptions {
   workArea?: { x: number; y: number; width: number; height: number };
 
   /**
+   * Override for the all-displays workArea check used by the
+   * CR-05 off-screen guard. When provided the persisted position is
+   * validated against every display's workArea; if no display
+   * contains a sufficient overlap, the window falls back to the
+   * top-right default. Defaults to a single-display setup using
+   * `workArea` when undefined.
+   */
+  allDisplays?: Array<{
+    workArea: { x: number; y: number; width: number; height: number };
+  }>;
+
+  /**
+   * Logger for off-screen guard warnings (CR-05). Defaults to
+   * `console.warn`. Tests inject a recording stub.
+   */
+  logger?: (msg: string) => void;
+
+  /**
    * Path to the preload script. Defaults to the electron-vite
    * output: `out/preload/index.js` next to `out/main/index.js`.
    * Tests can pass an arbitrary string — the value only flows into
    * `webPreferences.preload`.
    */
   preloadPath?: string;
+}
+
+/**
+ * CR-05: Off-screen guard.
+ *
+ * A persisted window position from a now-disconnected monitor can
+ * leave the floating window off the visible workspace on next launch.
+ * Validate the position against every display's workArea: the window
+ * must have at least VISIBLE_PX of overlap with at least one display.
+ * If no display provides the required overlap, the position is
+ * rejected and the caller falls back to the top-right default.
+ */
+const OFF_SCREEN_VISIBLE_PX = 40;
+
+function isPositionOnAnyDisplay(
+  pos: { x: number; y: number },
+  displays: Array<{
+    workArea: { x: number; y: number; width: number; height: number };
+  }>,
+  winWidth: number,
+  winHeight: number,
+): boolean {
+  if (displays.length === 0) return false;
+  for (const display of displays) {
+    const wa = display.workArea;
+    const winRight = pos.x + winWidth;
+    const winBottom = pos.y + winHeight;
+    const overlapX = Math.min(winRight, wa.x + wa.width) - Math.max(pos.x, wa.x);
+    const overlapY = Math.min(winBottom, wa.y + wa.height) - Math.max(pos.y, wa.y);
+    if (overlapX >= OFF_SCREEN_VISIBLE_PX && overlapY >= OFF_SCREEN_VISIBLE_PX) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -188,13 +247,38 @@ export function createAchillesWindow(
     opts.appRef?.dock?.hide();
   }
 
-  // Position the window. If a persisted position exists, restore it
-  // verbatim; otherwise lay out top-right of the primary display
-  // workArea with DEFAULT_MARGIN_PX inset.
+  // Position the window. If a persisted position exists AND it would
+  // land on at least one currently-attached display, restore it;
+  // otherwise (first launch, or persisted position is off-screen on
+  // every attached display per CR-05) fall back to the top-right of
+  // the primary workArea with DEFAULT_MARGIN_PX inset.
+  const wa = opts.workArea ?? { x: 0, y: 0, width: 1920, height: 1080 };
+  const displays = opts.allDisplays ?? [{ workArea: wa }];
+  const logger =
+    opts.logger ??
+    ((msg: string) => {
+      // eslint-disable-next-line no-console
+      console.warn(msg);
+    });
+
   if (opts.initialPosition !== null && opts.initialPosition !== undefined) {
-    win.setPosition(opts.initialPosition.x, opts.initialPosition.y);
+    const onScreen = isPositionOnAnyDisplay(
+      opts.initialPosition,
+      displays,
+      WINDOW_WIDTH,
+      WINDOW_HEIGHT,
+    );
+    if (onScreen) {
+      win.setPosition(opts.initialPosition.x, opts.initialPosition.y);
+    } else {
+      logger(
+        `[achilles] persisted window position (${opts.initialPosition.x}, ${opts.initialPosition.y}) lies off all attached displays; falling back to default top-right (CR-05)`,
+      );
+      const x = wa.x + wa.width - WINDOW_WIDTH - DEFAULT_MARGIN_PX;
+      const y = wa.y + DEFAULT_MARGIN_PX;
+      win.setPosition(x, y);
+    }
   } else {
-    const wa = opts.workArea ?? { x: 0, y: 0, width: 1920, height: 1080 };
     const x = wa.x + wa.width - WINDOW_WIDTH - DEFAULT_MARGIN_PX;
     const y = wa.y + DEFAULT_MARGIN_PX;
     win.setPosition(x, y);
