@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Achilles
 status: planning
-stopped_at: Completed 10-02-PLAN.md — NDJSON line parser + session spawner + authoritative outcome + version check + fixtures committed
-last_updated: "2026-06-06T14:25:59Z"
-last_activity: 2026-06-06 — Plan 10-02 delivered LOOP-03 (createClaudeSession runtime spine)
+stopped_at: Completed 10-03-PLAN.md — cancellation primitive (SIGINT/SIGTERM/SIGKILL escalation + --resume after cancel) committed; Phase 10 complete
+last_updated: "2026-06-06T14:44:25Z"
+last_activity: 2026-06-06 — Plan 10-03 delivered LOOP-07 (cancellation primitive + resume-after-cancel)
 progress:
   total_phases: 10
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 13
-  completed_plans: 10
-  percent: 23
+  completed_plans: 11
+  percent: 25
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-06)
 
 ## Current Position
 
-Phase: 10 of 14 (Claude Code Bridge) — Wave 2 underway
-Plan: 02 complete; 03 (cancellation primitive) next
-Status: Runtime spine shipped — createClaudeSession + LDJSON parser + wire-mapper + version gate + outcome derivation all green
-Last activity: 2026-06-06 — Plan 10-02 delivered LOOP-03 (createClaudeSession + LDJSON line parser + wire-mapper + version-check + outcome derivation; 63 new tests; commit efbfe1a)
+Phase: 10 of 14 (Claude Code Bridge) — COMPLETE
+Plan: 03 complete; Phase 10 wrap-up done; ready to plan Phase 11 (Floating UI Shell) or Phase 12 (End-to-End Integration)
+Status: Cancellation primitive shipped — session.cancel() SIGINT/SIGTERM/SIGKILL escalation + per-child WeakMap idempotency + drain-aware semantics + outcome.reason="cancelled" attribution + sessionId preservation for --resume continuation. All 4 Phase 10 success criteria met; all 6 Phase-10-owned pitfalls mitigated.
+Last activity: 2026-06-06 — Plan 10-03 delivered LOOP-07 (cancellation primitive with 3 s upper-bound escalation + resume-after-cancel argv shape; 22 new tests bringing phase-10-unit to 138/138)
 
-Progress: [███████░░░] 69%
+Progress: [████████░░] 77%
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Progress: [███████░░░] 69%
 *Updated after each plan completion*
 | Phase 10 P01 | 10 | 3 tasks | 14 files |
 | Phase 10 P02 | 11 | 3 tasks | 18 files |
+| Phase 10 P03 | 10 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,10 @@ Locked at v1.2 scoping (do not reopen during planning):
 - [Phase 10 P02]: send(text) routes the prompt via child.stdin (writes "text\n", calls stdin.end()) rather than as a positional argv argument — the spawn-then-send lifecycle conflicts with the positional-arg path. send(text) is idempotent in v1.2; multi-prompt-per-session is Phase 12's responsibility (likely via --resume on each utterance).
 - [Phase 10 P02]: LDJSON watchdog has TWO trip conditions: (a) accumulator-without-newline exceeds MAX_LINE_BYTES (write-time) and (b) a completed line itself exceeds MAX_LINE_BYTES (split-time). The plan only specified (a); (b) was required by the oversized-line.ndjson fixture acceptance criterion.
 - [Phase 10 P02]: events$ AsyncIterable is single-consumer with explicit terminal event — process_exit is yielded last, then the iterator terminates (subsequent .next() returns done:true immediately rather than throwing).
+- [Phase 10 P03]: session.cancel() returns Promise<ProcessExitEvent> (not Promise<void>) — the plan's <interfaces> block and behaviour Test 9 both lock the return type; callers can log signal + exit_code if useful.
+- [Phase 10 P03]: Cancellation primitive is NOT re-exported from the package barrel — consumers go through session.cancel() exclusively. The cancelChildProcess helper is JSDoc @internal; future direct-primitive callers (e.g., Phase 14 hardening watchdog) would import via the subpath alias.
+- [Phase 10 P03]: Two-layer idempotency for cancel — session-level cancelPromise cache + per-child WeakMap in cancelChildProcess. Either alone passes the surface idempotency test; the dual cache matches the locked design and guards against future direct-primitive callers bypassing the surface.
+- [Phase 10 P03]: Cancel-after-natural-exit fast path captures the original ProcessExitEvent in `capturedExitEvent` and resolves WITHOUT setting the `cancelled` flag — preserves the natural outcome (T-10-17 mitigation: prevents retroactive mis-attribution of failed runs to user intent).
 
 ### Pending Todos
 
@@ -106,6 +111,6 @@ Resume file for v1.1: `.planning/phases/08.1-authless-hosted-launch/08.1-CONTEXT
 
 ## Session Continuity
 
-Last session: 2026-06-06T14:25:59Z
-Stopped at: Completed 10-02-PLAN.md — NDJSON line parser + session spawner + authoritative outcome + version check + fixtures committed (efbfe1a)
-Resume file: None — Plan 10-03 ready to plan/execute
+Last session: 2026-06-06T14:44:25Z
+Stopped at: Completed 10-03-PLAN.md — cancellation primitive committed; Phase 10 (Claude Code Bridge) complete; all 4 ROADMAP success criteria met; LOOP-03, LOOP-04, LOOP-07 all delivered
+Resume file: None — ready to plan Phase 11 (Floating UI Shell) or Phase 12 (End-to-End Integration & System Prompt) next

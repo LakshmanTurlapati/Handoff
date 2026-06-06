@@ -53,6 +53,7 @@ import type { ParseErrorPayload } from "./line-parser.js";
 import { mapWireEvent } from "./wire-mapper.js";
 import { runVersionCheck } from "./version-check.js";
 import { deriveOutcome } from "./outcome.js";
+import { cancelChildProcess } from "./cancellation.js";
 import type {
   ClaudeBridgeEvent,
   ClaudeOutcome,
@@ -93,6 +94,19 @@ export interface ClaudeSession {
   send(text: string): void;
   /** Graceful shutdown. SIGTERM if still running. Resolves on exit. */
   close(): Promise<void>;
+  /**
+   * Forceful cancellation (Plan 10-03). Sends SIGINT to the child
+   * SYNCHRONOUSLY (Phase 10 success criterion 3: within 50 ms of the
+   * call), escalates to SIGTERM after 1 s and SIGKILL after a further
+   * 2 s if the child does not exit. Idempotent: a second call returns
+   * the same Promise. Drain-aware: stdout chunks that arrive between
+   * the cancel call and the actual exit are still parsed and emitted on
+   * events$. After resolution, session.outcome === failure / cancelled
+   * (Pitfall #10 attribution).
+   *
+   * @returns the {@link ProcessExitEvent} the child emitted on exit.
+   */
+  cancel(): Promise<ProcessExitEvent>;
   /**
    * Internal hook surface for tests and Plan 10-03's cancel() primitive.
    * Not part of the public API; may change without a version bump.
@@ -165,6 +179,9 @@ export function createClaudeSession(
     close(): Promise<void> {
       return state.close();
     },
+    cancel(): Promise<ProcessExitEvent> {
+      return state.cancel();
+    },
     _internal: {
       get childPid(): number | null {
         return state.childPid;
@@ -227,6 +244,7 @@ function createSessionState(
   readonly events$: AsyncIterable<ClaudeBridgeEvent>;
   send(text: string): void;
   close(): Promise<void>;
+  cancel(): Promise<ProcessExitEvent>;
 } {
   // ─── lifecycle state ───────────────────────────────────────────────
   let sessionId: string | null = null;
@@ -237,6 +255,20 @@ function createSessionState(
   let exitCode: number | null = null;
   let exitSignal: NodeJS.Signals | null = null;
   let sendCalled = false;
+  // ─── Plan 10-03 cancel() plumbing ──────────────────────────────────
+  // `cancelled` biases the outcome derivation: when cancel() initiates
+  // the exit, the outcome MUST be { failure, cancelled } overriding both
+  // exit_code and tool_error. The flag is only set when cancel() runs
+  // BEFORE the natural exit — calling cancel() after a natural exit is
+  // a no-op (Test 9) so we do not retroactively flip the outcome.
+  let cancelled = false;
+  // Session-level idempotency cache: two concurrent cancel() callers
+  // share this Promise. Composes with cancelChildProcess's per-child
+  // WeakMap (which gives the same guarantee at the primitive layer).
+  let cancelPromise: Promise<ProcessExitEvent> | null = null;
+  // Captured exit shape — once exited, future cancel() calls resolve
+  // with this synthesised event without invoking child.kill.
+  let capturedExitEvent: ProcessExitEvent | null = null;
 
   // ─── events$ FIFO + waiter queue ───────────────────────────────────
   const fifo: ClaudeBridgeEvent[] = [];
@@ -328,11 +360,14 @@ function createSessionState(
       exit_code: code,
       signal,
     };
+    capturedExitEvent = exitEvent;
     pushEvent(exitEvent);
     // Compute outcome from authoritative signals (exit code + tool
-    // errors). Phase 12 reads session.outcome to choose between the
-    // standard and the honest spoken completion.
-    outcome = deriveOutcome({ exitCode, toolErrors });
+    // errors + cancellation). Phase 12 reads session.outcome to choose
+    // between the standard and the honest spoken completion. The
+    // `cancelled` flag overrides exit_code and tool_error (Plan 10-03,
+    // CONTEXT.md "Cancellation" attribution).
+    outcome = deriveOutcome({ exitCode, toolErrors, cancelled });
     endStream();
     // Resolve any close() waiters.
     while (exitWaiters.length > 0) {
@@ -404,6 +439,41 @@ function createSessionState(
     });
   }
 
+  // ─── cancel() — Plan 10-03 ─────────────────────────────────────────
+  // Forceful interruption with SIGINT-then-SIGTERM-then-SIGKILL
+  // escalation. Delegates to cancelChildProcess for the timing state
+  // machine and the per-child idempotency cache; sets the `cancelled`
+  // flag so the outcome derivation (above) attributes the failure to
+  // user intent rather than to exit_code or tool_error.
+  function cancel(): Promise<ProcessExitEvent> {
+    // Session-level idempotency: a second call returns the same Promise
+    // the first one returned. (cancelChildProcess also dedupes at the
+    // per-child layer; this guard is the surface-level dedupe that
+    // matches the plan's Test 6 spec.)
+    if (cancelPromise !== null) {
+      return cancelPromise;
+    }
+    // Test 9 boundary: cancel AFTER a natural exit must NOT flip the
+    // outcome to cancelled. The fast path resolves with the captured
+    // exit event WITHOUT touching the `cancelled` flag.
+    if (exited) {
+      const fastEvent: ProcessExitEvent =
+        capturedExitEvent !== null
+          ? capturedExitEvent
+          : { type: "process_exit", exit_code: exitCode, signal: exitSignal };
+      cancelPromise = Promise.resolve(fastEvent);
+      return cancelPromise;
+    }
+    // Normal cancel: set the `cancelled` flag so the exit listener
+    // attributes the outcome to user intent. The flag MUST be set
+    // before we await cancelChildProcess so the exit listener (which
+    // may fire synchronously in the test scaffold) sees `cancelled =
+    // true` when it computes outcome.
+    cancelled = true;
+    cancelPromise = cancelChildProcess({ child });
+    return cancelPromise;
+  }
+
   return {
     get sessionId() {
       return sessionId;
@@ -421,5 +491,6 @@ function createSessionState(
     events$,
     send,
     close,
+    cancel,
   };
 }

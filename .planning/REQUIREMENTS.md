@@ -43,7 +43,7 @@ Six categories, mapped to phases by the roadmapper.
 - [x] **LOOP-04**: Claude's streamed assistant output is parsed line-by-line (NDJSON); the spoken acknowledgement and `<spoken-summary>` block are extracted and routed to ElevenLabs Flash v2.5 streaming TTS in the main process.
 - [ ] **LOOP-05**: TTS audio chunks play back in arrival order via the renderer's AudioContext; the mic is gated during playback (half-duplex) and re-enabled ~300 ms after the last audio chunk drains.
 - [ ] **LOOP-06**: P50 latency from speech-end to first audible TTS byte is under 1 s under normal network conditions; P95 is under 1.5 s. A latency probe surfaces in `--debug` mode.
-- [ ] **LOOP-07**: The user can cancel an in-flight Claude Code job (press the hotkey again, or click a cancel control); SIGINT is sent to the child, TTS playback stops, and the UI returns to idle.
+- [x] **LOOP-07**: The user can cancel an in-flight Claude Code job (press the hotkey again, or click a cancel control); SIGINT is sent to the child, TTS playback stops, and the UI returns to idle.
 
 ### Embedded System Prompt & Spoken Behaviour (PROMPT)
 
@@ -141,7 +141,7 @@ Which phases cover which requirements. Populated by roadmapper on 2026-06-06.
 | LOOP-04 | Phase 10 — Claude Code Bridge | Complete |
 | LOOP-05 | Phase 12 — End-to-End Integration & System Prompt | Pending |
 | LOOP-06 | Phase 14 — Hardening, Privacy, Resilience | Pending |
-| LOOP-07 | Phase 10 — Claude Code Bridge | Pending |
+| LOOP-07 | Phase 10 — Claude Code Bridge | Complete |
 | PROMPT-01 | Phase 12 — End-to-End Integration & System Prompt | Pending |
 | PROMPT-02 | Phase 12 — End-to-End Integration & System Prompt | Pending |
 | PROMPT-03 | Phase 12 — End-to-End Integration & System Prompt | Pending |

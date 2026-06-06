@@ -17,7 +17,7 @@
 Phase numbering continues from v1.1 last phase (08.1). v1.2 starts at Phase 09.
 
 - [ ] **Phase 09: Voice Vendor Wrappers** - ElevenLabs STT + TTS clients with renderer-side mic capture, single-use token auth, and locked outbound network policy
-- [ ] **Phase 10: Claude Code Bridge** - Subprocess wrapper around `claude -p --output-format stream-json` with NDJSON parsing, completion extraction, and cancellation
+- [x] **Phase 10: Claude Code Bridge** - Subprocess wrapper around `claude -p --output-format stream-json` with NDJSON parsing, completion extraction, and cancellation (COMPLETE 2026-06-06)
 - [ ] **Phase 11: Floating UI Shell** - Electron panel window, five visible states, reactive circle + waveform, configurable PTT modes, macOS mic permission flow
 - [ ] **Phase 12: End-to-End Integration & System Prompt** - Embedded companion prompt, half-duplex turn-taking, sandwich-defence prompt wrapping, ack + spoken-summary routing
 - [ ] **Phase 13: Distribution — npm CLI + Skill + Installers** - Single-source-of-truth packaging, `achilles install-skill`, first-run wizard, signed cross-platform installers
@@ -106,7 +106,7 @@ Archived under `.planning/milestones/v1.0-ROADMAP.md`. Phase directories preserv
 **Plans**: 3 plans
 - [x] 10-01-PLAN.md — Scaffold `@achilles/claude-code-bridge` package (constants, Zod event union, ClaudeVersionError, ack + spoken-summary pure-function extractors) + workspace plumbing (tsconfig.base.json path aliases + vitest.workspace.ts phase-10-unit project)
 - [x] 10-02-PLAN.md — LDJSON line parser with MAX_LINE_BYTES watchdog, golden NDJSON fixtures + MockClaudeProcess test helper, wire-format to ClaudeStreamEvent mapper, `claude --version` probe with MIN_CLAUDE_VERSION gate, authoritative outcome derivation, createClaudeSession spawner (locked argv + stdin prompt injection + --resume sid flow)
-- [ ] 10-03-PLAN.md — Cancellation primitive (SIGINT to SIGTERM to SIGKILL escalation with 1s + 2s deadlines, idempotent, drain-aware) + session.cancel() wiring + resume-after-cancel integration test (LOOP-07)
+- [x] 10-03-PLAN.md — Cancellation primitive (SIGINT to SIGTERM to SIGKILL escalation with 1s + 2s deadlines, idempotent, drain-aware) + session.cancel() wiring + resume-after-cancel integration test (LOOP-07)
 **UI hint**: no
 
 #### Phase 11: Floating UI Shell
