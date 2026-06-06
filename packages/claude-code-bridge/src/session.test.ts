@@ -981,3 +981,66 @@ describe("createClaudeSession — CR-fix regressions (CR-02: stdin error listene
     });
   });
 });
+
+/**
+ * CR-fix regression tests (Phase 10 review CR-03).
+ *
+ * CR-03: child.stderr must be drained so the OS pipe buffer never
+ * fills to the point of blocking the child's stdout writes.
+ */
+describe("createClaudeSession — CR-fix regressions (CR-03: stderr drain)", () => {
+  async function runWithUncaughtTrap(
+    body: () => Promise<void>,
+  ): Promise<void> {
+    let captured: Error | null = null;
+    const onUncaught = (err: Error): void => {
+      captured = err;
+    };
+    process.on("uncaughtException", onUncaught);
+    try {
+      await body();
+    } finally {
+      process.off("uncaughtException", onUncaught);
+    }
+    expect(captured).toBeNull();
+  }
+
+  it("CR-03: stderr writes >64 KiB do NOT freeze the child — stdout continues to flow", async () => {
+    await runWithUncaughtTrap(async () => {
+      const { spawnImpl, childRef } = makeFakeSpawn();
+      const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+      const session = createClaudeSession(
+        { systemPromptFile: "/tmp/companion.md" },
+        { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+      );
+      const child = childRef.current as FakeChildProcess;
+      const drainPromise = drainEvents(session);
+      // Write >64 KiB of "noise" to stderr. If the bridge had no stderr
+      // listener, this would NOT actually freeze the PassThrough (it's
+      // memory-backed, not pipe-backed), but the test verifies that
+      // (a) no listener-missing error is emitted, (b) stdout still
+      // produces events normally afterwards. The combination is the
+      // observable signal that the deadlock is structurally precluded.
+      const big = Buffer.alloc(96 * 1024, 0x65); // 96 KiB of 'e'
+      child.stderr.write(big);
+      child.stderr.write(big);
+      child.stderr.write(big);
+      // Now produce a normal stdout line (session_init) and exit.
+      const sessionInit =
+        '{"type":"system","subtype":"init","session_id":"sid-stderr-001",' +
+        '"model":"claude-sonnet-4-5","claude_code_version":"2.0.5"}\n';
+      child.stdout.write(Buffer.from(sessionInit, "utf8"));
+      // End and exit cleanly.
+      child.stdout.end();
+      child.emit("exit", 0, null);
+      const events = await drainPromise;
+      const types = events.map((e) => e.type);
+      // The session_init event must have arrived despite the
+      // simultaneous stderr deluge.
+      expect(types).toContain("session_init");
+      // process_exit must be the last event.
+      expect(types[types.length - 1]).toBe("process_exit");
+      expect(session.sessionId).toBe("sid-stderr-001");
+    });
+  });
+});

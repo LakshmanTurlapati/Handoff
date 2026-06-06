@@ -346,6 +346,27 @@ function createSessionState(
     });
   }
 
+  // ─── child.stderr plumbing (CR-fix CR-03) ──────────────────────────
+  // Drain stderr silently. With stdio[2] === "pipe" but no listener,
+  // the OS pipe buffer eventually fills (~64 KiB on macOS/Linux) and
+  // the child's stderr write blocks — which correlates with stdout
+  // writev() blocking on some platforms, producing an apparent
+  // pipe-deadlock that defeats the cancellation/outcome story. We
+  // attach a no-op listener so Node continuously reads and discards
+  // the bytes. Per CONTEXT.md "Logging": do NOT log content — stderr
+  // can contain prompt fragments or path names, which we MUST NOT
+  // surface to the host's stderr unconditionally.
+  if (child.stderr !== null) {
+    child.stderr.on("data", () => {
+      // Drain only. Content is intentionally discarded.
+    });
+    child.stderr.on("error", () => {
+      // Defensive: swallow EPIPE on stderr too. We never write to
+      // stderr so this is purely a safety net for unusual platform
+      // behaviour.
+    });
+  }
+
   // ─── child.stdin error guard (CR-fix CR-02) ────────────────────────
   // Attach a stdin error listener at construction (NOT inside send()):
   // EPIPE can fire if the child exits between spawn and send(), and
