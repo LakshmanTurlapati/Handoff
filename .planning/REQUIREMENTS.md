@@ -119,46 +119,56 @@ Explicitly excluded in v1.2. Documented to prevent scope creep.
 
 ## Traceability
 
-Which phases cover which requirements. Updated during roadmap creation.
+Which phases cover which requirements. Populated by roadmapper on 2026-06-06.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DIST-01 | TBD | Pending |
-| DIST-02 | TBD | Pending |
-| DIST-03 | TBD | Pending |
-| DIST-04 | TBD | Pending |
-| DIST-05 | TBD | Pending |
-| UI-01 | TBD | Pending |
-| UI-02 | TBD | Pending |
-| UI-03 | TBD | Pending |
-| UI-04 | TBD | Pending |
-| UI-05 | TBD | Pending |
-| UI-06 | TBD | Pending |
-| UI-07 | TBD | Pending |
-| LOOP-01 | TBD | Pending |
-| LOOP-02 | TBD | Pending |
-| LOOP-03 | TBD | Pending |
-| LOOP-04 | TBD | Pending |
-| LOOP-05 | TBD | Pending |
-| LOOP-06 | TBD | Pending |
-| LOOP-07 | TBD | Pending |
-| PROMPT-01 | TBD | Pending |
-| PROMPT-02 | TBD | Pending |
-| PROMPT-03 | TBD | Pending |
-| PROMPT-04 | TBD | Pending |
-| PROMPT-05 | TBD | Pending |
-| SAFE-01 | TBD | Pending |
-| SAFE-02 | TBD | Pending |
-| SAFE-03 | TBD | Pending |
-| SAFE-04 | TBD | Pending |
-| SAFE-05 | TBD | Pending |
-| SAFE-06 | TBD | Pending |
+| DIST-01 | Phase 13 — Distribution | Pending |
+| DIST-02 | Phase 13 — Distribution | Pending |
+| DIST-03 | Phase 13 — Distribution | Pending |
+| DIST-04 | Phase 13 — Distribution | Pending |
+| DIST-05 | Phase 13 — Distribution | Pending |
+| UI-01 | Phase 11 — Floating UI Shell | Pending |
+| UI-02 | Phase 11 — Floating UI Shell | Pending |
+| UI-03 | Phase 11 — Floating UI Shell | Pending |
+| UI-04 | Phase 11 — Floating UI Shell | Pending |
+| UI-05 | Phase 11 — Floating UI Shell | Pending |
+| UI-06 | Phase 11 — Floating UI Shell | Pending |
+| UI-07 | Phase 11 — Floating UI Shell | Pending |
+| LOOP-01 | Phase 09 — Voice Vendor Wrappers | Pending |
+| LOOP-02 | Phase 11 — Floating UI Shell | Pending |
+| LOOP-03 | Phase 10 — Claude Code Bridge | Pending |
+| LOOP-04 | Phase 10 — Claude Code Bridge | Pending |
+| LOOP-05 | Phase 12 — End-to-End Integration & System Prompt | Pending |
+| LOOP-06 | Phase 14 — Hardening, Privacy, Resilience | Pending |
+| LOOP-07 | Phase 10 — Claude Code Bridge | Pending |
+| PROMPT-01 | Phase 12 — End-to-End Integration & System Prompt | Pending |
+| PROMPT-02 | Phase 12 — End-to-End Integration & System Prompt | Pending |
+| PROMPT-03 | Phase 12 — End-to-End Integration & System Prompt | Pending |
+| PROMPT-04 | Phase 12 — End-to-End Integration & System Prompt | Pending |
+| PROMPT-05 | Phase 12 — End-to-End Integration & System Prompt | Pending |
+| SAFE-01 | Phase 09 — Voice Vendor Wrappers | Pending |
+| SAFE-02 | Phase 14 — Hardening, Privacy, Resilience | Pending |
+| SAFE-03 | Phase 09 — Voice Vendor Wrappers | Pending |
+| SAFE-04 | Phase 12 — End-to-End Integration & System Prompt | Pending |
+| SAFE-05 | Phase 14 — Hardening, Privacy, Resilience | Pending |
+| SAFE-06 | Phase 14 — Hardening, Privacy, Resilience | Pending |
 
 **Coverage:**
 - v1.2 requirements: 30 total (5 DIST, 7 UI, 7 LOOP, 5 PROMPT, 6 SAFE)
-- Mapped to phases: 0 (roadmapper will populate)
-- Unmapped: 30 (will be 0 after roadmap)
+- Mapped to phases: 30 (100%)
+- Unmapped: 0
+
+**Per-phase requirement counts:**
+- Phase 09 — Voice Vendor Wrappers: 3 (LOOP-01, SAFE-01, SAFE-03)
+- Phase 10 — Claude Code Bridge: 3 (LOOP-03, LOOP-04, LOOP-07)
+- Phase 11 — Floating UI Shell: 8 (UI-01, UI-02, UI-03, UI-04, UI-05, UI-06, UI-07, LOOP-02)
+- Phase 12 — End-to-End Integration & System Prompt: 7 (PROMPT-01, PROMPT-02, PROMPT-03, PROMPT-04, PROMPT-05, LOOP-05, SAFE-04)
+- Phase 13 — Distribution: 5 (DIST-01, DIST-02, DIST-03, DIST-04, DIST-05)
+- Phase 14 — Hardening, Privacy, Resilience: 4 (LOOP-06, SAFE-02, SAFE-05, SAFE-06)
+
+Total: 3 + 3 + 8 + 7 + 5 + 4 = 30 ✓
 
 ---
 *Requirements defined: 2026-06-06*
-*Last updated: 2026-06-06 after v1.2 Achilles requirements scoping*
+*Last updated: 2026-06-06 — roadmapper populated traceability table; 30/30 requirements mapped to Phases 09-14*

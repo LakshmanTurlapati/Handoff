@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Achilles
-status: planning
-last_updated: "2026-06-06T10:17:15.204Z"
+status: ready_to_plan
+last_updated: "2026-06-06T11:00:00.000Z"
 last_activity: 2026-06-06
 progress:
-  total_phases: 0
+  total_phases: 6
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,64 +20,80 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-06)
 
 **Core value:** A developer can hand off intent to their terminal coding agent through the most natural surface available — phone screen (Handoff) or voice (Achilles) — without leaving their local environment behind.
-**Current focus:** v1.2 Achilles — defining requirements
+**Current focus:** v1.2 Achilles — Phase 09 (Voice Vendor Wrappers) ready to plan
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-06-06 — Milestone v1.2 Achilles started (pivot from v1.1)
+Phase: 09 of 14 (Voice Vendor Wrappers) — first v1.2 phase
+Plan: — (no plans defined yet)
+Status: Roadmap approved, ready to plan Phase 09
+Last activity: 2026-06-06 — v1.2 roadmap created mapping 30 requirements to 6 phases (09-14)
+
+Progress: [░░░░░░░░░░] 0%
+
+## Performance Metrics
+
+**Velocity:**
+- Total plans completed: 0 (v1.2)
+- Average duration: — min
+- Total execution time: — hours
+
+**By Phase:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 09. Voice Vendor Wrappers | 0 | 0 | — |
+| 10. Claude Code Bridge | 0 | 0 | — |
+| 11. Floating UI Shell | 0 | 0 | — |
+| 12. End-to-End Integration & System Prompt | 0 | 0 | — |
+| 13. Distribution — npm CLI + Skill + Installers | 0 | 0 | — |
+| 14. Hardening, Privacy, Resilience | 0 | 0 | — |
+
+**Recent Trend:**
+- Last 5 plans: —
+- Trend: — (first v1.2 phase not yet planned)
+
+*Updated after each plan completion*
 
 ## Accumulated Context
 
-### Pivot Notes (v1.1 -> v1.2)
+### Decisions
 
-- v1.1 Handoff Install & Launch is paused at Phase 08.1 (authless hosted launch). Phases 06, 07 complete; 08.1 was inserted and partially scoped. No v1.1 phase is being abandoned — work is preserved for resumption after v1.2 ships.
-- v1.2 Achilles is a new product vertical inside this monorepo. It does not depend on Handoff's bridge/relay. Phase numbering continues from 08.1 -> 09.
+Decisions are logged in PROJECT.md Key Decisions table and REQUIREMENTS.md Locked Decisions table.
 
-### Roadmap Evolution
+Locked at v1.2 scoping (do not reopen during planning):
+- Cloud-vs-local Claude Code target: Local Claude Code only in v1.2 (cloud routing deferred to v1.3)
+- Mic trigger model: Both press-to-toggle AND push-to-talk (configurable via setting)
+- Voice selection scope: One fixed default voice; `ELEVENLABS_VOICE_ID` env override honoured; no picker UI in v1.2
+- Claude Code integration default: Subprocess `claude -p --output-format stream-json` is the bridge spine
 
-- v1.0 (Codex Mobile MVP) shipped with accepted verification debt. v1.0 audit and roadmap archived under `.planning/milestones/`.
-- v1.1 (Handoff Install & Launch) paused mid-flight after Phase 08.1 was inserted. Phase dirs preserved under `.planning/phases/` for later resumption.
-- v1.2 (Achilles) introduces a voice companion skill for Claude Code (ElevenLabs STT/TTS + small reactive UI + skill/npm dual install).
+### Pending Todos
 
-## Prior Milestone Archive
+- (v1.2) Plan Phase 09 — Voice Vendor Wrappers (entry point for v1.2 implementation)
+- (v1.2) Sequence Phases 09 / 10 / 11 — parallel-safe; engineer choice on serial vs fan-out
+- (v1.2) Acquire macOS code-signing identity before Phase 13 ships (known release blocker)
+- (v1.2) Empirical iteration on the embedded system prompt during Phase 12 against representative tasks (refactor / bug fix / test run)
 
-- Milestone summary: `.planning/MILESTONES.md`
-- Roadmap archive (v1.0): `.planning/milestones/v1.0-ROADMAP.md`
-- Requirements archive (v1.0): `.planning/milestones/v1.0-REQUIREMENTS.md`
-- Audit archive (v1.0): `.planning/milestones/v1.0-MILESTONE-AUDIT.md`
+### Blockers/Concerns
 
-## Pending Todos
+- macOS code-signing identity (Apple Developer cert) must be acquired before Phase 13 publishes notarised builds — flagged in research as a known release blocker
+- ElevenLabs rate-limit semantics on the production account's actual plan need a verification pass in Phase 14 against the real account (PITFALLS #4)
 
-- (v1.2) Define REQUIREMENTS.md once research synthesis completes
-- (v1.2) Approve roadmap before first phase plan-phase invocation
+## Deferred Items
 
-## Paused — v1.1 Handoff Install & Launch
+Items acknowledged and carried forward from v1.1 pause:
 
-### Pending Todos (v1.1)
+| Category | Item | Status | Deferred At |
+|----------|------|--------|-------------|
+| v1.1 Handoff | Phase 07 (Codex-Native `/handoff` Command) — 2/3 plans complete | Paused | 2026-04-20 |
+| v1.1 Handoff | Phase 08 (Hosted Launch & Active-Session Handoff) | Paused | 2026-04-20 |
+| v1.1 Handoff | Phase 08.1 (Authless Hosted Launch, INSERTED) | Paused, scoped | 2026-04-20 |
+| v1.1 Carry-over | HOFF-01..04 requirements tracked in REQUIREMENTS.md "v2 / Future" | Deferred to post-v1.2 resumption | 2026-06-06 |
 
-- Implement `/launch/[publicId]` so opening a handoff URL can establish or reuse a trusted device session without GitHub OAuth
-- Replace hosted browser `auth()` checks with durable device-session principals across session/device routes
-- Keep the archived v1.0 audit debt deferred unless it directly blocks the authless handoff launch path
-
-### Blockers/Concerns (v1.1)
-
-- Existing hosted runtime still imports Auth.js/NextAuth in middleware, pairing pages, and the browser principal path
-- The Fly deployment already mints `/launch/[publicId]` URLs from `/api/handoffs`, but there is no corresponding launch page yet
-- Manual real-device launch verification is still deferred
-
-### Session Continuity (v1.1)
-
-- Last v1.1 session: 2026-04-20T13:30:00.000Z
-- v1.1 stopped at: Phase 08.1 insertion approved
-- v1.1 resume file: `.planning/phases/08.1-authless-hosted-launch/08.1-CONTEXT.md`
-
-## Blockers/Concerns
-
-(None yet for v1.2 — populated as planning proceeds)
+Resume file for v1.1: `.planning/phases/08.1-authless-hosted-launch/08.1-CONTEXT.md`
 
 ## Session Continuity
 
-Last session: 2026-06-06 — v1.2 Achilles milestone started, requirements gathering in progress
+Last session: 2026-06-06 — v1.2 roadmap created and approved
+Stopped at: ROADMAP.md written; STATE.md updated; REQUIREMENTS.md traceability filled; ready to plan Phase 09
+Resume file: None — next action is `/gsd:plan-phase 09`
