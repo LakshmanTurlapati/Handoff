@@ -106,7 +106,14 @@ describe("registerAchillesHotkey (H2) — pushToTalk mode wires key-up", () => {
       "pushToTalk",
       onPress,
       onRelease,
-      { globalShortcutRef, webContentsKeySource },
+      {
+        globalShortcutRef,
+        webContentsKeySource,
+        // Disable the heuristic timer so we exercise the real key-up
+        // path deterministically.
+        setTimeoutImpl: () => null,
+        clearTimeoutImpl: () => undefined,
+      },
     );
 
     // The down edge still flows through globalShortcut.
@@ -121,6 +128,130 @@ describe("registerAchillesHotkey (H2) — pushToTalk mode wires key-up", () => {
     // A key-up for an unrelated key does NOT fire onRelease.
     triggerUp("B");
     expect(onRelease).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("registerAchillesHotkey (CR-04) — PTT hold-duration heuristic", () => {
+  it("schedules a synthetic onRelease via the heuristic timer when no real keyUp arrives", () => {
+    const { globalShortcutRef, webContentsKeySource, triggerDown } = makeFakes();
+    const onPress = vi.fn();
+    const onRelease = vi.fn();
+    // Capture the scheduled callback so we can fire it manually.
+    let pendingCb: (() => void) | null = null;
+    const setTimeoutImpl = vi.fn(
+      (cb: () => void, _ms: number) => {
+        pendingCb = cb;
+        return "tok" as unknown;
+      },
+    );
+    const clearTimeoutImpl = vi.fn();
+
+    registerAchillesHotkey(
+      "CommandOrControl+Shift+A",
+      "pushToTalk",
+      onPress,
+      onRelease,
+      {
+        globalShortcutRef,
+        webContentsKeySource,
+        setTimeoutImpl,
+        clearTimeoutImpl,
+        pttReleaseTimeoutMs: 500,
+      },
+    );
+
+    triggerDown();
+    expect(onPress).toHaveBeenCalledTimes(1);
+    expect(setTimeoutImpl).toHaveBeenCalledTimes(1);
+    expect(setTimeoutImpl).toHaveBeenCalledWith(expect.any(Function), 500);
+    // No release yet — the timer has not fired.
+    expect(onRelease).not.toHaveBeenCalled();
+
+    // Fire the heuristic timer.
+    pendingCb!();
+    expect(onRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the heuristic timer when a real keyUp arrives first", () => {
+    const { globalShortcutRef, webContentsKeySource, triggerDown, triggerUp } =
+      makeFakes();
+    const onPress = vi.fn();
+    const onRelease = vi.fn();
+    const setTimeoutImpl = vi.fn(() => "tok" as unknown);
+    const clearTimeoutImpl = vi.fn();
+
+    registerAchillesHotkey(
+      "CommandOrControl+Shift+A",
+      "pushToTalk",
+      onPress,
+      onRelease,
+      {
+        globalShortcutRef,
+        webContentsKeySource,
+        setTimeoutImpl,
+        clearTimeoutImpl,
+        pttReleaseTimeoutMs: 500,
+      },
+    );
+
+    triggerDown();
+    expect(setTimeoutImpl).toHaveBeenCalledTimes(1);
+
+    // Real keyUp arrives first — heuristic timer is cleared.
+    triggerUp("A");
+    expect(clearTimeoutImpl).toHaveBeenCalled();
+    expect(onRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it("WR-03: case-insensitive key comparison matches lowercase 'a' against accelerator 'A'", () => {
+    const { globalShortcutRef, webContentsKeySource, triggerUp } = makeFakes();
+    const onPress = vi.fn();
+    const onRelease = vi.fn();
+
+    registerAchillesHotkey(
+      "CommandOrControl+B",
+      "pushToTalk",
+      onPress,
+      onRelease,
+      {
+        globalShortcutRef,
+        webContentsKeySource,
+        setTimeoutImpl: () => null,
+        clearTimeoutImpl: () => undefined,
+      },
+    );
+
+    // The renderer's before-input-event emits 'b' for un-shifted alphabetic
+    // keys; pre-fix the comparison was 'b' !== 'B' so no release fired.
+    triggerUp("b");
+    expect(onRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it("WR-02: changing the accelerator unregisters the previous binding", () => {
+    const { globalShortcutRef } = makeFakes();
+    const onPress = vi.fn();
+    const onRelease = vi.fn();
+
+    registerAchillesHotkey(
+      "CommandOrControl+Shift+A",
+      "toggle",
+      onPress,
+      onRelease,
+      { globalShortcutRef },
+    );
+    registerAchillesHotkey(
+      "CommandOrControl+Shift+B",
+      "toggle",
+      onPress,
+      onRelease,
+      { globalShortcutRef },
+    );
+
+    // The previous accelerator should have been unregistered before
+    // the new one was registered.
+    expect(globalShortcutRef.unregister).toHaveBeenCalledWith(
+      "CommandOrControl+Shift+A",
+    );
   });
 });
 

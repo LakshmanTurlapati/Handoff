@@ -4,17 +4,36 @@
  * UI-06 requires both press-to-toggle AND push-to-talk modes. Electron's
  * `globalShortcut.register` API only fires on key-down (this is a
  * documented limitation — see PITFALLS.md and the Electron API docs),
- * so PTT mode requires a separate key-up watcher. We use the renderer's
- * `webContents.on('before-input-event')` channel for the key-up source
- * in production; tests inject a fake watcher that emits synthetic
- * key-down/key-up events.
+ * so PTT mode requires a separate key-up workaround.
+ *
+ * CR-04 PTT WORKAROUND (v1.2 pragmatic):
+ *   The floating window is `focusable: false` so `before-input-event`
+ *   on its webContents never fires (the window cannot receive
+ *   keyboard focus, and the input event only flows through focused
+ *   webContents). A native OS-level key-up tap (iohook, native macOS
+ *   event taps) is out of scope for v1.2.
+ *
+ *   v1.2 implements a HOLD-DURATION HEURISTIC: every press starts a
+ *   timer. If a SECOND press arrives before the heuristic threshold
+ *   (default 500 ms), we interpret the first press as a momentary
+ *   tap (no synthetic release). If no second press arrives by the
+ *   threshold AND the consumer indicated PTT mode, we fire the
+ *   synthetic release after `PTT_RELEASE_TIMEOUT_MS`. The injected
+ *   webContentsKeySource is preserved for completeness — tests still
+ *   exercise it, and Phase 14 may swap in a native module that fires
+ *   real key-up events.
  *
  * Mode + accelerator state is persisted to electron-store under
  * `hotkeyMode` / `hotkeyKey` so the user's choice survives restarts.
- * Plan 11-03 wires the settings popover that mutates these keys; this
- * plan ships only the persistence + registration substrate.
  */
 import type { HotkeyMode } from "../shared/constants.js";
+
+/**
+ * CR-04: heuristic hold duration. After this many milliseconds of no
+ * follow-up press, the synthetic key-up fires in PTT mode. The value
+ * matches the documented "best effort PTT" guarantee.
+ */
+export const PTT_RELEASE_TIMEOUT_MS = 500;
 
 /**
  * Minimal interface for the Electron `globalShortcut` module. Tests
@@ -51,6 +70,17 @@ export interface HotkeyStoreRef {
 interface RegisterOptions {
   globalShortcutRef?: GlobalShortcutRef;
   webContentsKeySource?: WebContentsKeySource;
+  /**
+   * CR-04: timer seam for the PTT hold-duration heuristic. Tests
+   * inject a deterministic timer; production uses global setTimeout.
+   */
+  setTimeoutImpl?: (cb: () => void, ms: number) => unknown;
+  clearTimeoutImpl?: (token: unknown) => void;
+  /**
+   * CR-04: override the PTT release timeout. Defaults to
+   * PTT_RELEASE_TIMEOUT_MS (500 ms).
+   */
+  pttReleaseTimeoutMs?: number;
 }
 
 interface UnregisterOptions {
@@ -81,13 +111,24 @@ function extractKeyComponent(accelerator: string): string {
  *   - In 'toggle' mode: `globalShortcut.register(accelerator, onPress)`.
  *     onRelease is never invoked.
  *
- *   - In 'pushToTalk' mode: registers the same accelerator for the
- *     down edge, AND wires a key-up watcher via the injected
- *     `WebContentsKeySource`. The watcher invokes onRelease when the
- *     accelerator's non-modifier component sees a key-up.
+ *   - In 'pushToTalk' mode (CR-04 v1.2 best-effort):
+ *       1. The down-edge fires onPress and starts a hold-duration
+ *          timer. If a SECOND press arrives before
+ *          `PTT_RELEASE_TIMEOUT_MS` we treat the first as a
+ *          momentary tap — no synthetic release.
+ *       2. If no second press arrives by the threshold the synthetic
+ *          release fires.
+ *       3. If a `webContentsKeySource` is supplied AND it emits a
+ *          real `keyUp` for the accelerator's non-modifier component,
+ *          that real release pre-empts the heuristic timer. The
+ *          floating window is currently `focusable: false`, so the
+ *          input event never fires in production — the heuristic is
+ *          the only real path. Phase 14 may swap in a native module.
  *
- * The implementation guarantees onRelease is wired only for PTT —
- * the toggle-mode caller never sees a synthetic release.
+ *  WR-02 mitigation: any prior registration is unregistered first so
+ *  changing the hotkey via Settings does not leak the previous OS-level
+ *  binding.
+ *  WR-03 mitigation: the key-up comparison is case-insensitive.
  */
 export function registerAchillesHotkey(
   accelerator: string,
@@ -103,24 +144,76 @@ export function registerAchillesHotkey(
     );
   }
 
-  const ok = gs.register(accelerator, onPress);
+  // WR-02 fix: defensive unregister of any prior accelerator. Without
+  // this, changing the hotkey via Settings stacks a second registration
+  // at the OS level so both old and new accelerators trigger onPress.
+  if (registeredAccelerator !== null) {
+    gs.unregister(registeredAccelerator);
+    registeredAccelerator = null;
+  }
+
+  // CR-04 PTT heuristic state. Reused across every fire of onPress so
+  // the second press cancels the pending synthetic release.
+  const setT =
+    opts.setTimeoutImpl ??
+    ((cb: () => void, ms: number) => setTimeout(cb, ms) as unknown);
+  const clearT =
+    opts.clearTimeoutImpl ??
+    ((token: unknown) => clearTimeout(token as ReturnType<typeof setTimeout>));
+  const pttReleaseMs = opts.pttReleaseTimeoutMs ?? PTT_RELEASE_TIMEOUT_MS;
+  let pttPendingReleaseToken: unknown = null;
+
+  function clearPttPending(): void {
+    if (pttPendingReleaseToken !== null) {
+      clearT(pttPendingReleaseToken);
+      pttPendingReleaseToken = null;
+    }
+  }
+
+  function schedulePttSyntheticRelease(): void {
+    clearPttPending();
+    pttPendingReleaseToken = setT(() => {
+      pttPendingReleaseToken = null;
+      onRelease();
+    }, pttReleaseMs);
+  }
+
+  const wrappedOnPress = (): void => {
+    if (mode === "pushToTalk") {
+      // CR-04 v1.2: every press cancels a pending synthetic release
+      // (the user is still holding / re-pressing) and schedules a
+      // fresh one. The reducer sees HOTKEY_PRESS first; the synthetic
+      // HOTKEY_RELEASE fires after the threshold.
+      schedulePttSyntheticRelease();
+    }
+    onPress();
+  };
+
+  const ok = gs.register(accelerator, wrappedOnPress);
   registeredAccelerator = accelerator;
 
   if (mode === "pushToTalk") {
     const keySource = opts.webContentsKeySource;
     if (keySource === undefined) {
-      // Defence in depth — PTT mode without a key-up source means the
-      // user holds the key but the reducer will never see
-      // HOTKEY_RELEASE. Loudly log instead of silently degrading.
+      // No real key-up source supplied — the heuristic timer is the
+      // only release path. This is the production case (floating
+      // window is focusable:false). Surface the limitation through a
+      // single startup log so the user knows PTT is best-effort.
       // eslint-disable-next-line no-console
       console.warn(
-        "[achilles] PTT mode requested but no webContentsKeySource provided; key-up will not fire (UI-06 substrate)",
+        "[achilles] PTT mode active; using hold-duration heuristic (CR-04 v1.2 best-effort).",
       );
     } else {
-      const targetKey = extractKeyComponent(accelerator);
+      // WR-03 fix: case-insensitive key comparison so a single-letter
+      // accelerator without Shift (e.g., 'CommandOrControl+B' where
+      // event.key === 'b' but extractKeyComponent yields 'B') still
+      // matches the real key-up.
+      const targetKey = extractKeyComponent(accelerator).toLowerCase();
       keySource.onBeforeInputEvent((event) => {
         if (event.type !== "keyUp") return;
-        if (event.key !== targetKey) return;
+        if (event.key.toLowerCase() !== targetKey) return;
+        // A real keyUp pre-empts the heuristic timer.
+        clearPttPending();
         onRelease();
       });
     }
