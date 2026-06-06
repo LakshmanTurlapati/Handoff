@@ -44,6 +44,13 @@ export interface MockChunk {
  *   - `chunkIntervalMs`: artificial inter-chunk delay (default 0).
  *   - `urlSink`: optional callback that receives the URL the wrapper
  *     constructs the mock with (used for SAFE-03 audit assertions).
+ *   - `optionsSink` (WR-07): optional callback that receives the third
+ *     constructor argument the wrapper passes (options bag with
+ *     `headers`). Tests assert the `xi-api-key` header is forwarded
+ *     via this sink. Without it, the wrapper's three-arg constructor
+ *     path was never exercised by functional tests — the only check
+ *     was the dist grep guard, which does not run against runtime
+ *     behavior.
  */
 export interface MockTtsWsOptions {
   chunks: MockChunk[];
@@ -51,6 +58,7 @@ export interface MockTtsWsOptions {
   totalDurationMs?: number;
   chunkIntervalMs?: number;
   urlSink?: (url: string) => void;
+  optionsSink?: (options: { headers?: Record<string, string> } | undefined) => void;
 }
 
 /**
@@ -98,7 +106,11 @@ interface MockWsListeners {
  */
 export function createMockTtsWsCtor(
   opts: MockTtsWsOptions,
-): new (url: string | URL, protocols?: string | string[]) => MockWebSocketLike {
+): new (
+  url: string | URL,
+  protocols?: string | string[],
+  options?: { headers?: Record<string, string> } | undefined,
+) => MockWebSocketLike {
   const chunks = opts.chunks;
   const arrivalOrder =
     opts.arrivalOrder ?? Array.from({ length: chunks.length }, (_, i) => i);
@@ -117,10 +129,21 @@ export function createMockTtsWsCtor(
     sentFrames: string[] = [];
     private streamStarted = false;
 
-    constructor(url: string | URL, _protocols?: string | string[]) {
+    constructor(
+      url: string | URL,
+      _protocols?: string | string[],
+      options?: { headers?: Record<string, string> } | undefined,
+    ) {
       this.url = typeof url === "string" ? url : url.toString();
       if (opts.urlSink !== undefined) {
         opts.urlSink(this.url);
+      }
+      // WR-07: forward the third-arg options bag (headers) so tests can
+      // assert the wrapper is actually setting xi-api-key. Without this
+      // the three-arg constructor path was silently discarded by the
+      // previous two-arg signature.
+      if (opts.optionsSink !== undefined) {
+        opts.optionsSink(options);
       }
       // Fire open on next microtask so the wrapper's handler binding
       // (which usually happens immediately after `new WebSocket()`)
@@ -199,6 +222,7 @@ export function createMockTtsWsCtor(
   return MockWebSocket as new (
     url: string | URL,
     protocols?: string | string[],
+    options?: { headers?: Record<string, string> } | undefined,
   ) => MockWebSocketLike;
 }
 

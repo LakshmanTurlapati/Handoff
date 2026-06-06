@@ -251,4 +251,32 @@ describe("voice-tts/stream-client — Flash v2.5 stream-input surface", () => {
     const _checkSubset: AcceptableKeys = "" as OptKeys;
     expect(typeof _checkSubset).toBe("string");
   });
+
+  it("WR-07: forwards the resolved key via xi-api-key header on the third constructor arg", async () => {
+    const chunks = makeStubChunks(1);
+    let observedOptions:
+      | { headers?: Record<string, string> }
+      | undefined
+      | null = null;
+    const ctor = createMockTtsWsCtor({
+      chunks,
+      optionsSink: (options) => {
+        observedOptions = options ?? null;
+      },
+    });
+    const client = createTtsStreamClient({
+      keySource: async () => TEST_KEY,
+      voiceId: VOICE_ID,
+      webSocketCtor: ctor as unknown as typeof WebSocket,
+    });
+    client.appendText("hello");
+    await waitFor(() => observedOptions !== null);
+    expect(observedOptions).not.toBeNull();
+    expect(observedOptions).toBeDefined();
+    const headers = (observedOptions as { headers?: Record<string, string> })
+      .headers;
+    expect(headers).toBeDefined();
+    expect(headers?.["xi-api-key"]).toBe(TEST_KEY);
+    await client.close();
+  });
 });
