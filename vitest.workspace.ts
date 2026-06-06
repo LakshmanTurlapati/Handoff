@@ -28,6 +28,30 @@ const workspaceAlias = [
     find: /^@codex-mobile\/db\/(.+)$/,
     replacement: resolve(ROOT_DIR, "packages/db/src/$1.ts"),
   },
+  {
+    find: "@achilles/voice-protocol",
+    replacement: resolve(ROOT_DIR, "packages/voice-protocol/src/index.ts"),
+  },
+  {
+    find: /^@achilles\/voice-protocol\/(.+)$/,
+    replacement: resolve(ROOT_DIR, "packages/voice-protocol/src/$1.ts"),
+  },
+  {
+    find: "@achilles/voice-stt",
+    replacement: resolve(ROOT_DIR, "packages/voice-stt/src/index.ts"),
+  },
+  {
+    find: /^@achilles\/voice-stt\/(.+)$/,
+    replacement: resolve(ROOT_DIR, "packages/voice-stt/src/$1.ts"),
+  },
+  {
+    find: "@achilles/voice-tts",
+    replacement: resolve(ROOT_DIR, "packages/voice-tts/src/index.ts"),
+  },
+  {
+    find: /^@achilles\/voice-tts\/(.+)$/,
+    replacement: resolve(ROOT_DIR, "packages/voice-tts/src/$1.ts"),
+  },
 ];
 
 /**
@@ -74,4 +98,21 @@ export default defineWorkspace([
       passWithNoTests: true,
     },
   },
+  {
+    resolve: {
+      alias: workspaceAlias,
+    },
+    test: {
+      name: "phase-09-unit",
+      include: [
+        "packages/voice-protocol/src/**/*.test.ts",
+        "packages/voice-stt/src/**/*.test.ts",
+        "packages/voice-tts/src/**/*.test.ts",
+      ],
+      environment: "node",
+      passWithNoTests: true,
+    },
+  },
 ]);
+// v1.2 phase-09 addition: workspace aliases + phase-09-unit project for the
+// "@achilles/voice-protocol", "@achilles/voice-stt", and "@achilles/voice-tts" packages.

@@ -1,0 +1,35 @@
+{
+  "name": "@achilles/voice-protocol",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Shared Zod-validated TypeScript types for Achilles voice STT/TTS events, renderer<->main IPC envelope (single-use token mint included), and outbound ElevenLabs host allowlist",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist .tsbuildinfo && tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(lint placeholder for packages/voice-protocol)\"",
+    "prepack": "npm run build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3",
+    "vitest": "2.1.8"
+  }
+}

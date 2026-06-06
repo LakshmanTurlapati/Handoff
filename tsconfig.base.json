@@ -29,7 +29,13 @@
       "@codex-mobile/auth": ["packages/auth/src/index.ts"],
       "@codex-mobile/auth/*": ["packages/auth/src/*"],
       "@codex-mobile/db": ["packages/db/src/index.ts"],
-      "@codex-mobile/db/*": ["packages/db/src/*"]
+      "@codex-mobile/db/*": ["packages/db/src/*"],
+      "@achilles/voice-protocol": ["packages/voice-protocol/src/index.ts"],
+      "@achilles/voice-protocol/*": ["packages/voice-protocol/src/*"],
+      "@achilles/voice-stt": ["packages/voice-stt/src/index.ts"],
+      "@achilles/voice-stt/*": ["packages/voice-stt/src/*"],
+      "@achilles/voice-tts": ["packages/voice-tts/src/index.ts"],
+      "@achilles/voice-tts/*": ["packages/voice-tts/src/*"]
     }
   },
   "exclude": ["**/node_modules", "**/dist", "**/.next", "**/build"]
