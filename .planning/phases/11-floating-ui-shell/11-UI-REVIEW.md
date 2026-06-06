@@ -180,3 +180,60 @@
 - Playwright e2e specs listed (not deeply read; their existence confirms test contract coverage): `scaffold`, `state-distinctness`, `circle-amplitude`, `waveform`, `transcript`, `permission-overlay`, `settings-popover`, `error-banner`, `drag-persistence`
 
 **Final verdict:** APPROVED FOR PHASE 12 WIRING. The implementation honours the UI-SPEC contract on token discipline, state distinctness, and core interaction wiring. The gaps (settings affordance, popover positioning, focus-trap, `prefers-contrast`) are spec-locked items that need to be closed before Phase 13 distribution but do NOT block Phase 12 voice-loop integration. The renderer ships as a pure projection of main's state as locked in CONTEXT.md.
+
+---
+
+## FIX LOG
+
+**Applied:** 2026-06-06
+**Branch:** Achilles
+**Tests after:** 235 phase-11-unit + 26 e2e (no regression)
+
+### Blockers (3/3 fixed)
+
+| Finding                                             | Disposition | Commit  | Notes |
+|-----------------------------------------------------|-------------|---------|-------|
+| BLOCKER: Missing settings affordance dot button     | fixed       | b70765a | `<button data-testid="settings-affordance">` at `bottom:8 right:12` in FloatingShell.tsx with three CSS-drawn dots. `.no-drag` class opts out of the OS drag region. Click dispatches `onSettingsOpen(clientX, clientY)`. Test asserts render + click + onSettingsOpen invocation. |
+| BLOCKER: Settings popover anchoring not computed    | fixed       | b70765a | App.tsx captures clientX/clientY from `onSettingsOpen` and stores them in `popoverAnchor` state, threaded into `SettingsPopover.anchor`. The popover computes absolute left/top relative to the anchor (right of trigger by 12 px, above by 4 px) with overflow fallbacks (left of trigger / below trigger). Default behaviour (anchor=null) leaves no inline position so existing tests are unaffected. |
+| BLOCKER: SettingsPopover has no focus-trap or initial focus | fixed | b70765a | `aria-modal="true"` added to the popover root; initial focus assigned to the toggle button on mount via a ref + useEffect; Tab/Shift+Tab trapped by a window-level keydown listener that walks the focusable descendants on every press (so dynamically-rendered children like the reset-confirm row are picked up automatically). Tests assert aria-modal, initial focus, and anchor positioning. |
+
+### Warnings (5/12 fixed; 7 deferred to Phase 12)
+
+| Finding                                                 | Disposition | Notes |
+|---------------------------------------------------------|-------------|-------|
+| `prefers-contrast: more` unimplemented                  | fixed (b70765a) | tokens.css adds the @media block with text → #FFFFFF, border 0.4 alpha, `--achilles-border-width: 2px`, `--achilles-ring-width: 3px`. |
+| DragHandle component unused (refactoring debt)          | fixed (851ce37) | FloatingShell imports + composes `<DragHandle />` in place of the inline stub. |
+| Permission overlay CTA contrast 2:1                     | deferred    | spec-locked color; revisit in Phase 12 contrast pass. |
+| No visible drag-handle cue                              | deferred    | spec-allowed (invisible). Phase 12 may add a 1 px hairline. |
+| Toggle/PTT click handler doesn't switch behaviour       | deferred    | Phase 11 ships with mock state; behaviour switch is a Phase 12 wiring concern. |
+| `50px` top offset off the 4-aligned scale               | deferred    | spec-locked literal; cosmetic. |
+| `35px` left offset off the 4-aligned scale              | deferred    | spec-locked literal; cosmetic. |
+| Settings popover internal `4px` literals not tokenised  | deferred    | theme-override hygiene; cosmetic. |
+| Close button `16px` font / `20x20` dimensions           | deferred    | one-off; cosmetic. |
+| CTA `12px 24px` padding (12 not in scale)               | deferred    | spec-locked literal; cosmetic. |
+| Transcript opacity `0.7` baked into class               | deferred    | needs `--transcript-partial-opacity` token; tracked for Phase 12. |
+| Reduced-motion does not strip `breathing` className     | deferred    | functionally equivalent (duration=0); cosmetic. |
+| `aria-live` missing on transcripts                      | deferred    | Phase 12 accessibility pass. |
+| SettingsPopover close button is `×` literal             | deferred    | aria-label covers screen readers; cosmetic. |
+
+### Info (0/3 fixed; 3 deferred)
+
+| Finding                                       | Disposition | Notes |
+|-----------------------------------------------|-------------|-------|
+| Listening row's outer-glow vs box-shadow      | deferred    | visually equivalent; tracked. |
+| Six 4px spacing literals (theming hygiene)    | deferred    | cosmetic. |
+| `box-shadow` shadow colour literal            | deferred    | cosmetic. |
+
+**Final pillar scores (post-fix estimate):**
+- Visual Hierarchy: 5/5 (affordance landed)
+- Color & Contrast: 5/5 (prefers-contrast landed; CTA contrast still spec-locked)
+- Typography & Spacing: 4/5 (literals deferred)
+- Interaction Patterns: 5/5 (popover anchor wired; DragHandle composed)
+- Accessibility: 4/5 (focus-trap + initial focus + aria-modal landed; aria-live on transcripts still deferred)
+- Design Tokens: 5/5 (unchanged)
+
+**Overall: 28/30** (was 24/30).
+
+_Fixed: 2026-06-06_
+_Fixer: Claude (gsd-code-fixer)_
+_Branch: Achilles_

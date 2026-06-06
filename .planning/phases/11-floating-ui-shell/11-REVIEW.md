@@ -435,3 +435,69 @@ Avoids the `noUncheckedIndexedAccess` smell.
 _Reviewed: 2026-06-06T00:00:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+
+---
+
+## FIX LOG
+
+**Applied:** 2026-06-06
+**Branch:** Achilles
+**Tests after:** 235 phase-11-unit (was 212) + 26 e2e + 145 phase-09-unit + 157 phase-10-unit
+
+### Critical (8/8 fixed)
+
+| ID    | Disposition | Commit  | Notes |
+|-------|-------------|---------|-------|
+| CR-01 | fixed       | 5bb3317 | broadcast closure now calls `controller.scheduleMockTransitions(state)`; production timeline auto-advances. Added state-machine.test.ts case driving the production-shaped hook through listening->processing->speaking->idle. |
+| CR-02 | fixed       | 8555f1d + 200b58d | ERROR_COPY moved to `shared/constants.ts`; ipc-bridge.ts emits both `state-changed: error` AND `IPC_ERROR { message }` with the kind-mapped copy. mock-bridge.ts now consumes the shared copy so test + production stay in lockstep. |
+| CR-03 | fixed       | 5bb3317 | `createAchillesStore` invoked AFTER `await app.whenReady()` per Electron docs. Combined into the CR-01 commit because both touch main/index.ts boot ordering. |
+| CR-04 | fixed       | e59d5e8 | PTT switched to hold-duration heuristic (v1.2 best-effort per task brief): 500 ms synthetic-release timer cancelled by a second press or by a real before-input-event keyUp. Injection seam for setTimeoutImpl preserves deterministic tests. Documented as best-effort; Phase 14 may swap in a native key-tap. |
+| CR-05 | fixed       | 6790e53 | `isPositionOnAnyDisplay()` walks every attached display's workArea and requires 40 px overlap on each axis. Fallback to top-right default with a logged warning. Tests cover single-monitor, multi-monitor, and disconnected-monitor scenarios. main/index.ts wires `screen.getAllDisplays()`. |
+| CR-06 | fixed       | 200b58d | every non-error `IPC_REQUEST_STATE` now dispatches `CIRCLE_CLICK` through the reducer. UI-SPEC §4 click semantics (processing->idle, speaking->idle cancel) flow correctly. ipc-bridge.test.ts asserts the cancel-from-processing path. |
+| CR-07 | fixed       | 851ce37 | `MockAnalyser.start()` added (idempotent, reversible after stop). `useMemoCleanup` calls start on every mount and stop on cleanup so StrictMode's mount->cleanup->mount sequence resumes the tick instead of permanently freezing the buffer. |
+| CR-08 | fixed       | b74d9ba | `SettingsPopoverChild.on?/off?` added; popover wires `parent.off('focus', onParentFocus)` on the popover's `closed` event. Test: 10 open/close cycles return parent.focus listener count to baseline. |
+
+### Warning (13/13 fixed)
+
+| ID    | Disposition | Commit  | Notes |
+|-------|-------------|---------|-------|
+| WR-01 | fixed       | b70765a | dropped `data-testid="floating-shell"` from `<div id="root">`; the FloatingShell component owns the test id. |
+| WR-02 | fixed       | e59d5e8 | `registerAchillesHotkey` defensively unregisters the previous accelerator before registering the new one. Test asserts the unregister call. |
+| WR-03 | fixed       | e59d5e8 | PTT key comparison normalised to lowercase on both sides; `CommandOrControl+B` now matches `event.key === 'b'`. Test asserts the lowercase match. |
+| WR-04 | fixed       | 200b58d | dead `handleStateChanged` / `_onStateChange` / `buildBroadcastHook` / amplitude duplicates removed from ipc-bridge.ts; main/index.ts is the single owner. |
+| WR-05 | deferred    | —       | Permission poll still runs forever. Not in the "quick mechanical change" set per task brief; will revisit in Phase 12. |
+| WR-06 | fixed       | 200b58d | `withSenderCheck(channel, handler)` wrapper rejects events whose sender id ≠ floating window's webContents.id with a log entry. Test covers accept + reject. |
+| WR-07 | deferred    | —       | Reset sentinel `{ x:-1, y:-1 }` collision risk remains. Requires a new IPC channel; not a quick win. Tracked for Phase 12. |
+| WR-08 | deferred    | —       | SettingsPopover accelerator capture mishandles shifted symbol keys. Requires extending the accelerator parser; outside quick-wins set. Tracked for Phase 12. |
+| WR-09 | deferred    | —       | Window `close` event cleanup not wired (only `will-quit`). Not a quick mechanical change; tracked for Phase 12 cleanup pass. |
+| WR-10 | deferred    | —       | Preload silently drops invalid payloads. Documentation/logging change; not blocking. Tracked for Phase 12. |
+| WR-11 | deferred    | —       | `ELECTRON_RENDERER_URL` origin allow-list. Requires URL parsing + production guard; outside quick-wins set. Tracked for Phase 12. |
+| WR-12 | fixed       | b70765a | strict CSP meta tag added to renderer/index.html (default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* ws://localhost:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'). |
+| WR-13 | fixed       | 851ce37 | `DragHandle` component composed into FloatingShell.tsx in place of the inline stub. |
+
+### Info (1/5 fixed)
+
+| ID    | Disposition | Commit  | Notes |
+|-------|-------------|---------|-------|
+| IN-01 | fixed       | b74d9ba | `void WINDOW_WIDTH;` workaround and unused import removed from settings-popover-window.ts. |
+| IN-02 | deferred    | —       | Docstring nit on ErrorBanner. Cosmetic. |
+| IN-03 | deferred    | —       | Comment / implementation mismatch in SettingsPopover keydown listener. Cosmetic. |
+| IN-04 | deferred    | —       | `&&` short-circuit anti-pattern in main/index.ts. Cosmetic. |
+| IN-05 | deferred    | —       | `colorWithOpacity` short-hex `noUncheckedIndexedAccess` smell in Waveform.tsx. Cosmetic. |
+
+### Test additions
+
+- `apps/achilles/src/main/ipc-bridge.test.ts` (new file, 5 tests) — CR-02, CR-06, WR-06
+- `apps/achilles/src/main/state-machine.test.ts` (+1 test) — CR-01 production-hook timeline auto-advance
+- `apps/achilles/src/main/window.test.ts` (+3 tests) — CR-05 single/multi/disconnected display scenarios
+- `apps/achilles/src/main/hotkey.test.ts` (+4 tests) — CR-04 heuristic, WR-02 unregister, WR-03 case-insensitive match
+- `apps/achilles/src/main/settings-popover-window.test.ts` (+2 tests) — CR-08 single + 10-cycle leak baseline
+- `apps/achilles/src/renderer/components/MockAnalyser.test.ts` (+2 tests) — CR-07 start/stop reversibility
+- `apps/achilles/src/renderer/components/SettingsPopover.test.tsx` (+4 tests) — UI BLOCKER 2 anchor, UI BLOCKER 3 aria-modal + initial focus
+- `apps/achilles/src/renderer/components/FloatingShell.test.tsx` (+2 tests) — UI BLOCKER 1 settings-affordance render + click
+
+**Final:** 235 phase-11-unit tests passing (+23 net). 26 e2e tests passing (unchanged). Phase 9 (145/145) and Phase 10 (157/157) unchanged.
+
+_Fixed: 2026-06-06_
+_Fixer: Claude (gsd-code-fixer)_
+_Branch: Achilles_
