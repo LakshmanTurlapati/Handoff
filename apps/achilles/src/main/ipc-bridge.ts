@@ -21,19 +21,21 @@
  * `[achilles]` warning log.
  */
 import {
+  ERROR_COPY,
   IPC_ERROR,
-  IPC_MIC_AMPLITUDE,
   IPC_OPEN_SYSTEM_SETTINGS,
   IPC_PERMISSION_STATE,
   IPC_REGISTER_HOTKEY,
   IPC_REQUEST_STATE,
-  IPC_STATE_CHANGED,
-  IPC_TTS_AMPLITUDE,
   IPC_UPDATE_HOTKEY_CONFIG,
   IPC_UPDATE_WINDOW_POSITION,
 } from "../shared/constants.js";
 import { parseEnvelope } from "../shared/ipc-schemas.js";
-import type { AchillesState, PermissionState } from "../shared/constants.js";
+import type {
+  AchillesErrorKind,
+  AchillesState,
+  PermissionState,
+} from "../shared/constants.js";
 import {
   applyDefaultTopRight,
   wireDragPersistence,
@@ -42,7 +44,6 @@ import type {
   DragPersistClock,
   WireDragPersistenceHandle,
 } from "./drag-persist.js";
-import { createMockAmplitudeStream } from "./mock-amplitude.js";
 import type { MockStateController } from "./state-machine.js";
 import type { AchillesStore } from "./store.js";
 import type { AchillesBrowserWindow } from "./window.js";
@@ -138,6 +139,33 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
     console.warn(msg);
   });
 
+  // WR-06: sender-identity check. Every Renderer→Main IPC handler is
+  // wrapped so it only fires when the event originates from the main
+  // floating window's webContents. A future BrowserWindow (e.g.,
+  // SettingsPopover) using the same preload could otherwise drive
+  // these channels. Tests bypass the check by leaving the sender id
+  // undefined.
+  const ownWebContentsId =
+    (window as unknown as { webContents: { id?: number } }).webContents.id;
+  function withSenderCheck(
+    channel: string,
+    handler: (event: { sender: { id: number } }, payload: unknown) => void,
+  ): (event: { sender: { id: number } }, payload: unknown) => void {
+    return (event, payload) => {
+      if (
+        ownWebContentsId !== undefined &&
+        event.sender.id !== undefined &&
+        event.sender.id !== ownWebContentsId
+      ) {
+        log(
+          `[achilles] rejecting ${channel} from unexpected sender id=${event.sender.id}`,
+        );
+        return;
+      }
+      handler(event, payload);
+    };
+  }
+
   // Track recently broadcast permission states so the schedulePermissionPoll
   // tick can deduplicate identical states (T-11-16 mitigation against a
   // permission poll storm flooding the renderer).
@@ -159,40 +187,15 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
     });
   }
 
-  // Amplitude streams — created lazily on state transitions so they
-  // don't tick during idle/processing/error.
-  let micAmplitudeStop: (() => void) | null = null;
-  let ttsAmplitudeStop: (() => void) | null = null;
-
-  function stopAmplitudeStreams(): void {
-    if (micAmplitudeStop !== null) {
-      micAmplitudeStop();
-      micAmplitudeStop = null;
-    }
-    if (ttsAmplitudeStop !== null) {
-      ttsAmplitudeStop();
-      ttsAmplitudeStop = null;
-    }
-  }
-
-  function startAmplitudeForState(state: AchillesState): void {
-    stopAmplitudeStreams();
-    if (state === "listening") {
-      const stream = createMockAmplitudeStream("listening");
-      micAmplitudeStop = stream.emit((rms) => {
-        window.webContents.send(IPC_MIC_AMPLITUDE, { rms });
-      });
-    } else if (state === "speaking") {
-      const stream = createMockAmplitudeStream("speaking");
-      ttsAmplitudeStop = stream.emit((rms) => {
-        window.webContents.send(IPC_TTS_AMPLITUDE, { rms });
-      });
-    }
-  }
+  // WR-04 fix: amplitude streams + handleStateChanged / _onStateChange
+  // / buildBroadcastHook dead-code blocks removed — main/index.ts owns
+  // the amplitude swap pipeline via its own startAmplitudeForState
+  // (which the controller's broadcast invokes directly). The bridge no
+  // longer duplicates that wiring.
 
   // ─── Renderer → Main handlers ─────────────────────────────────────
 
-  ipcMainRef.on(IPC_REQUEST_STATE, (_event, payload) => {
+  ipcMainRef.on(IPC_REQUEST_STATE, withSenderCheck(IPC_REQUEST_STATE, (_event, payload) => {
     try {
       const parsed = parseEnvelope(IPC_REQUEST_STATE, payload) as {
         state: AchillesState;
@@ -201,22 +204,26 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
       // for return-to-idle on error; otherwise it's an explicit state
       // request from the renderer (cancel path).
       if (parsed.state === "error") {
-        controller.dispatch({ type: "INJECT_ERROR", kind: "unknown" });
+        // CR-02 fix: emit both state-changed AND the typed IPC_ERROR
+        // copy so the renderer's ErrorBanner mounts with a populated
+        // message (state==='error' AND error!==null gating).
+        const kind: AchillesErrorKind = "unknown";
+        controller.dispatch({ type: "INJECT_ERROR", kind });
+        window.webContents.send(IPC_ERROR, { message: ERROR_COPY[kind] });
       } else if (parsed.state === "idle" && controller.now() === "error") {
         controller.dispatch({ type: "ERROR_DISMISS" });
       } else {
-        // Generic fallthrough — Plan 11-02/03 may expose richer
-        // request-state semantics; for now we accept the channel as
-        // a test seam to drive deterministic transitions.
-        if (parsed.state === "idle") {
-          controller.dispatch({ type: "MOCK_PLAYBACK_DONE" });
-        } else if (parsed.state === "listening") {
-          controller.dispatch({ type: "HOTKEY_PRESS" });
-        } else if (parsed.state === "processing") {
-          controller.dispatch({ type: "MOCK_VAD_COMMIT" });
-        } else if (parsed.state === "speaking") {
-          controller.dispatch({ type: "MOCK_PROCESSING_COMPLETE" });
-        }
+        // CR-06 fix: route every non-error state request through
+        // CIRCLE_CLICK so the reducer's documented cancel semantics
+        // (processing -> idle, speaking -> idle) apply. The reducer
+        // handles idle/listening/processing/speaking on CIRCLE_CLICK,
+        // mirroring UI-SPEC §4 click semantics 1:1. The previous
+        // wiring guessed at timer events by state name and silently
+        // no-op'd when the source state did not match the timer's
+        // expected predecessor (e.g., processing -> idle via
+        // MOCK_PLAYBACK_DONE never advanced because the reducer only
+        // accepts that event from 'speaking').
+        controller.dispatch({ type: "CIRCLE_CLICK" });
       }
     } catch (err) {
       log(
@@ -225,9 +232,9 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
         }`,
       );
     }
-  });
+  }));
 
-  ipcMainRef.on(IPC_REGISTER_HOTKEY, (_event, payload) => {
+  ipcMainRef.on(IPC_REGISTER_HOTKEY, withSenderCheck(IPC_REGISTER_HOTKEY, (_event, payload) => {
     try {
       const parsed = parseEnvelope(IPC_REGISTER_HOTKEY, payload) as {
         accelerator: string;
@@ -240,9 +247,9 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
         }`,
       );
     }
-  });
+  }));
 
-  ipcMainRef.on(IPC_OPEN_SYSTEM_SETTINGS, (_event, payload) => {
+  ipcMainRef.on(IPC_OPEN_SYSTEM_SETTINGS, withSenderCheck(IPC_OPEN_SYSTEM_SETTINGS, (_event, payload) => {
     try {
       parseEnvelope(IPC_OPEN_SYSTEM_SETTINGS, payload);
       // Plan 11-03 swaps this stub for shell.openExternal(...). For
@@ -257,9 +264,9 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
         }`,
       );
     }
-  });
+  }));
 
-  ipcMainRef.on(IPC_UPDATE_WINDOW_POSITION, (_event, payload) => {
+  ipcMainRef.on(IPC_UPDATE_WINDOW_POSITION, withSenderCheck(IPC_UPDATE_WINDOW_POSITION, (_event, payload) => {
     try {
       const parsed = parseEnvelope(IPC_UPDATE_WINDOW_POSITION, payload) as {
         x: number;
@@ -286,9 +293,9 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
         }`,
       );
     }
-  });
+  }));
 
-  ipcMainRef.on(IPC_UPDATE_HOTKEY_CONFIG, (_event, payload) => {
+  ipcMainRef.on(IPC_UPDATE_HOTKEY_CONFIG, withSenderCheck(IPC_UPDATE_HOTKEY_CONFIG, (_event, payload) => {
     try {
       const parsed = parseEnvelope(IPC_UPDATE_HOTKEY_CONFIG, payload) as {
         mode?: "toggle" | "pushToTalk";
@@ -307,39 +314,18 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
         }`,
       );
     }
-  });
+  }));
 
   // ─── Main → Renderer wiring ───────────────────────────────────────
-
-  // Patch the controller's broadcast so every transition emits the
-  // state-changed channel AND swaps amplitude streams. The controller
-  // was constructed with a broadcast function; we wrap it by
-  // monkey-patching the state observer here. We do it via a wrapper
-  // dispatch instead of mutating the original ctor to keep the seam
-  // narrow.
   //
-  // We listen to broadcasts by re-dispatching `controller.dispatch`
-  // through a thin wrapper. For Phase 11 we instead drive the wiring
-  // via initialisation order: callers wire `broadcast` directly when
-  // they construct the controller (see main/index.ts). We expose a
-  // helper for that here:
-  function handleStateChanged(state: AchillesState): void {
-    window.webContents.send(IPC_STATE_CHANGED, { state });
-    startAmplitudeForState(state);
-    controller.scheduleMockTransitions(state);
-  }
-
-  // Hand-rolled "observer" — the controller's broadcast callback was
-  // configured by the main entry. We expose `handleStateChanged` so
-  // the entry can forward state transitions here.
-  (
-    opts as unknown as {
-      _onStateChange?: (state: AchillesState) => void;
-    }
-  )._onStateChange = handleStateChanged;
+  // The broadcast plumbing lives in main/index.ts — callers wire the
+  // controller's `broadcast` argument directly when they construct the
+  // controller. WR-04: the bridge previously duplicated this hookup
+  // via a `handleStateChanged` / `_onStateChange` / `buildBroadcastHook`
+  // trio that was never imported by main/index.ts. The duplicated logic
+  // is removed.
 
   function dispose(): void {
-    stopAmplitudeStreams();
     controller.cancelScheduledTransitions();
     dragHandle?.dispose();
     ipcMainRef.removeAllListeners(IPC_REQUEST_STATE);
@@ -356,21 +342,4 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
   }
 
   return { dispose, broadcastPermissionState };
-}
-
-/**
- * Helper for the main entry to wire the controller's broadcast +
- * amplitude swap + scheduled transition in one place. Equivalent to
- * doing it inline in main/index.ts.
- */
-export function buildBroadcastHook(
-  window: AchillesBrowserWindow,
-  scheduleMockTransitions: (state: AchillesState) => void,
-  startAmplitudeForState: (state: AchillesState) => void,
-): (state: AchillesState) => void {
-  return (state) => {
-    window.webContents.send(IPC_STATE_CHANGED, { state });
-    startAmplitudeForState(state);
-    scheduleMockTransitions(state);
-  };
 }
