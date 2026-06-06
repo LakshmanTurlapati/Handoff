@@ -43,6 +43,14 @@ export interface SettingsPopoverProps {
    * 'Shift'.
    */
   platform: "darwin" | "win32" | "linux";
+  /**
+   * UI BLOCKER 2: anchor coordinates (window-relative clientX/clientY)
+   * passed through `onSettingsOpen` from FloatingShell. The popover
+   * positions itself at `anchor.x + RIGHT_OFFSET`, `anchor.y +
+   * TOP_OFFSET`. When `null` the popover falls back to its default
+   * CSS position (used in tests that do not exercise positioning).
+   */
+  anchor?: { x: number; y: number } | null;
   onHotkeyModeChange: (mode: HotkeyMode) => void;
   onHotkeyKeyChange: (accelerator: string) => void;
   onResetWindowPosition: () => void;
@@ -147,10 +155,42 @@ function acceleratorFromEvent(event: ReactKeyboardEvent): string | null {
   return [...modifiers, suffix].join("+");
 }
 
+/**
+ * UI BLOCKER 2: anchor offsets per UI-SPEC §7. Right-anchor places the
+ * popover at (anchor.x + 12, anchor.y - POPOVER_HEIGHT_PX - 4) so the
+ * popover sits above-and-right of the trigger point. Overflow falls
+ * back to anchoring above the trigger.
+ */
+const POPOVER_WIDTH_PX = 220;
+const POPOVER_HEIGHT_PX = 180;
+const POPOVER_RIGHT_OFFSET_PX = 12;
+const POPOVER_ABOVE_GAP_PX = 4;
+
+function computeAnchorStyle(
+  anchor: { x: number; y: number } | null | undefined,
+): React.CSSProperties | undefined {
+  if (anchor === null || anchor === undefined) return undefined;
+  // Position the popover absolutely so it overlaps neither the drag
+  // handle nor the reactive circle.
+  const winWidth = typeof window !== "undefined" ? window.innerWidth : 260;
+  let left = anchor.x + POPOVER_RIGHT_OFFSET_PX;
+  if (left + POPOVER_WIDTH_PX > winWidth) {
+    // Mirror to the left of the anchor so the popover stays inside the
+    // window's pixel grid.
+    left = Math.max(0, anchor.x - POPOVER_WIDTH_PX - POPOVER_RIGHT_OFFSET_PX);
+  }
+  let top = anchor.y - POPOVER_HEIGHT_PX - POPOVER_ABOVE_GAP_PX;
+  if (top < 0) {
+    top = anchor.y + POPOVER_ABOVE_GAP_PX;
+  }
+  return { position: "absolute", left, top };
+}
+
 export function SettingsPopover({
   hotkeyMode,
   hotkeyKey,
   platform,
+  anchor,
   onHotkeyModeChange,
   onHotkeyKeyChange,
   onResetWindowPosition,
@@ -159,6 +199,50 @@ export function SettingsPopover({
   const [capturing, setCapturing] = useState<boolean>(false);
   const [confirmingReset, setConfirmingReset] = useState<boolean>(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const firstFocusableRef = useRef<HTMLButtonElement | null>(null);
+
+  // UI BLOCKER 3 fix: focus the first focusable element on mount so
+  // screen-reader and keyboard users land inside the popover when it
+  // opens. The first focusable is the Toggle segmented control button.
+  useEffect(() => {
+    if (firstFocusableRef.current !== null) {
+      firstFocusableRef.current.focus();
+    }
+  }, []);
+
+  // UI BLOCKER 3 fix: focus trap. Tab cycles within the popover; Shift+Tab
+  // cycles backwards. The trap walks the focusable descendants on each
+  // Tab press so dynamic children (the confirm row that appears after
+  // clicking Reset) are picked up without re-wiring the listener.
+  useEffect(() => {
+    function onKeydownTrap(event: KeyboardEvent): void {
+      if (event.key !== "Tab") return;
+      const root = rootRef.current;
+      if (root === null) return;
+      const focusables = Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0]!;
+      const last = focusables[focusables.length - 1]!;
+      const active = document.activeElement as HTMLElement | null;
+      if (event.shiftKey) {
+        if (active === first || !root.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !root.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    window.addEventListener("keydown", onKeydownTrap);
+    return () => {
+      window.removeEventListener("keydown", onKeydownTrap);
+    };
+  }, []);
 
   // Capture-mode key listener. Attached to the popover root so the
   // captured key does not bubble to the host page.
@@ -223,13 +307,18 @@ export function SettingsPopover({
     setConfirmingReset(false);
   }, []);
 
+  // UI BLOCKER 2: compute the anchored position style from props.
+  const anchorStyle = computeAnchorStyle(anchor);
+
   return (
     <div
       ref={rootRef}
       role="dialog"
+      aria-modal="true"
       aria-label={SETTINGS_HEADING}
       data-testid="settings-popover"
       className="settings-popover"
+      style={anchorStyle}
     >
       <div className="settings-popover-header">
         <h2 className="settings-popover-heading">{SETTINGS_HEADING}</h2>
@@ -254,6 +343,7 @@ export function SettingsPopover({
         >
           <button
             type="button"
+            ref={firstFocusableRef}
             data-testid="hotkey-mode-toggle-toggle"
             aria-pressed={hotkeyMode === "toggle"}
             className={

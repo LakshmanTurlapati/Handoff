@@ -215,3 +215,76 @@ describe("SettingsPopover — SP5 Escape closes the popover", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("SettingsPopover — UI BLOCKER 3 focus trap + initial focus + aria-modal", () => {
+  it("declares aria-modal='true' on the popover root", () => {
+    render(
+      <SettingsPopover
+        hotkeyMode="toggle"
+        hotkeyKey="CommandOrControl+Shift+A"
+        platform="darwin"
+        onHotkeyModeChange={() => {}}
+        onHotkeyKeyChange={() => {}}
+        onResetWindowPosition={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    const popover = screen.getByTestId("settings-popover");
+    expect(popover.getAttribute("aria-modal")).toBe("true");
+  });
+
+  it("focuses the toggle button on mount", () => {
+    render(
+      <SettingsPopover
+        hotkeyMode="toggle"
+        hotkeyKey="CommandOrControl+Shift+A"
+        platform="darwin"
+        onHotkeyModeChange={() => {}}
+        onHotkeyKeyChange={() => {}}
+        onResetWindowPosition={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    const firstFocusable = screen.getByTestId("hotkey-mode-toggle-toggle");
+    expect(document.activeElement).toBe(firstFocusable);
+  });
+});
+
+describe("SettingsPopover — UI BLOCKER 2 anchor positioning", () => {
+  it("applies absolute positioning from the anchor prop", () => {
+    render(
+      <SettingsPopover
+        hotkeyMode="toggle"
+        hotkeyKey="CommandOrControl+Shift+A"
+        platform="darwin"
+        anchor={{ x: 50, y: 200 }}
+        onHotkeyModeChange={() => {}}
+        onHotkeyKeyChange={() => {}}
+        onResetWindowPosition={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    const popover = screen.getByTestId("settings-popover");
+    expect(popover.style.position).toBe("absolute");
+    // Above-and-right of anchor.
+    expect(popover.style.left).not.toBe("");
+    expect(popover.style.top).not.toBe("");
+  });
+
+  it("falls back to no positioning style when anchor is null", () => {
+    render(
+      <SettingsPopover
+        hotkeyMode="toggle"
+        hotkeyKey="CommandOrControl+Shift+A"
+        platform="darwin"
+        anchor={null}
+        onHotkeyModeChange={() => {}}
+        onHotkeyKeyChange={() => {}}
+        onResetWindowPosition={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    const popover = screen.getByTestId("settings-popover");
+    expect(popover.style.position).toBe("");
+  });
+});

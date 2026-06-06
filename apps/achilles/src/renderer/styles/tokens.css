@@ -95,3 +95,27 @@
     --breathing-period: 0ms;
   }
 }
+
+/*
+ * UI BLOCKER 3 fix: prefers-contrast: more media query per UI-SPEC §5.
+ * Borders thicken from 1px to 2px (via --achilles-border-width), the
+ * circle's outer ring widens from 1px to 3px (--achilles-ring-width),
+ * and text contrast bumps the primary --achilles-text token to pure
+ * white for assistive-technology readers using Windows high-contrast
+ * or macOS Increase Contrast. Components consume these tokens via
+ * var(); the token-only override path keeps the theme contract intact.
+ */
+:root {
+  --achilles-border-width: 1px;
+  --achilles-ring-width: 1px;
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --achilles-text: #ffffff;
+    --achilles-text-dim: rgba(255, 255, 255, 0.85);
+    --achilles-border: rgba(255, 255, 255, 0.4);
+    --achilles-border-width: 2px;
+    --achilles-ring-width: 3px;
+  }
+}

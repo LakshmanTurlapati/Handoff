@@ -11,7 +11,7 @@
  * way. Each test installs a fresh mock, then drives setState /
  * emitPartialTranscript / setPermission before asserting.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 
 import type {
@@ -282,5 +282,31 @@ describe("FloatingShell — drag handle stub for Plan 11-03 wiring", () => {
     expect((handle as HTMLElement).getAttribute("data-app-region")).toBe(
       "drag",
     );
+  });
+});
+
+describe("FloatingShell — UI BLOCKER 1 visible settings affordance", () => {
+  it("renders the settings-affordance button at bottom-right with the locked test id", () => {
+    const r = renderShell();
+    const affordance = r.queryByTestId("settings-affordance");
+    expect(affordance).not.toBeNull();
+    expect((affordance as HTMLElement).className).toContain("settings-affordance");
+    expect((affordance as HTMLElement).className).toContain("no-drag");
+  });
+
+  it("clicking the affordance dispatches onSettingsOpen with the click's screen coords", async () => {
+    const onSettingsOpen = vi.fn();
+    const r = render(
+      <AchillesStateProvider>
+        <FloatingShell onSettingsOpen={onSettingsOpen} />
+      </AchillesStateProvider>,
+    );
+    const affordance = r.getByTestId("settings-affordance");
+    act(() => {
+      affordance.click();
+    });
+    expect(onSettingsOpen).toHaveBeenCalledTimes(1);
+    // jsdom click() yields clientX=0/clientY=0; verify the call shape.
+    expect(onSettingsOpen.mock.calls[0]!.length).toBe(2);
   });
 });

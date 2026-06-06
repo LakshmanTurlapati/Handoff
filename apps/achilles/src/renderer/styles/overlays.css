@@ -49,6 +49,49 @@
 }
 
 /* ─────────────────────────────────────────────────────────────────── */
+/* Settings affordance — UI-SPEC §2 three-dot dot-dot-dot button       */
+/* (UI BLOCKER 1 fix; visible fallback for the right-click trigger)    */
+/* ─────────────────────────────────────────────────────────────────── */
+
+.settings-affordance {
+  position: absolute;
+  bottom: 8px;
+  right: 12px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  z-index: 20;
+  opacity: 0.7;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.settings-affordance:hover,
+.settings-affordance:focus-visible {
+  opacity: 1;
+  outline: none;
+}
+
+.settings-affordance:focus-visible {
+  outline: 2px solid var(--achilles-text);
+  outline-offset: 2px;
+}
+
+.settings-affordance-dot {
+  width: 3px;
+  height: 3px;
+  background: var(--achilles-text-dim);
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* ─────────────────────────────────────────────────────────────────── */
 /* PermissionOverlay — UI-07 full-window remediation surface          */
 /* ─────────────────────────────────────────────────────────────────── */
 

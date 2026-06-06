@@ -78,6 +78,14 @@ export function App(): ReactElement {
     dispatch,
   } = useAchillesState();
   const [popoverOpen, setPopoverOpen] = useState<boolean>(false);
+  // UI BLOCKER 2 fix: anchor coordinates captured from
+  // onSettingsOpen(clientX, clientY). When the user triggers the
+  // popover via right-click on the circle or via the settings
+  // affordance, the anchor flows to SettingsPopover so the surface
+  // renders near the trigger point.
+  const [popoverAnchor, setPopoverAnchor] = useState<
+    { x: number; y: number } | null
+  >(null);
 
   // The persisted hotkey config is owned by main (electron-store) and
   // currently not surfaced via IPC. Plan 11-03 wires the change path
@@ -124,7 +132,11 @@ export function App(): ReactElement {
   }, []);
 
   const handleSettingsOpen = useCallback(
-    (_clientX: number, _clientY: number) => {
+    (clientX: number, clientY: number) => {
+      // UI BLOCKER 2 fix: persist the trigger coordinates so
+      // SettingsPopover renders anchored to the affordance / circle.
+      // The popover applies the UI-SPEC §7 offset internally.
+      setPopoverAnchor({ x: clientX, y: clientY });
       setPopoverOpen(true);
     },
     [],
@@ -151,6 +163,7 @@ export function App(): ReactElement {
       hotkeyMode={hotkeyMode}
       hotkeyKey={hotkeyKey}
       platform={platform}
+      anchor={popoverAnchor}
       onHotkeyModeChange={handleHotkeyModeChange}
       onHotkeyKeyChange={handleHotkeyKeyChange}
       onResetWindowPosition={handleResetWindowPosition}

@@ -3,6 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=260, height=260" />
+    <!--
+      WR-12 fix: strict Content-Security-Policy. The renderer is the
+      only piece of the floating shell that runs renderer-shaped code;
+      defence in depth blocks remote scripts, inline scripts, remote
+      images, and arbitrary connect targets. localhost / ws://localhost
+      are allowed for the dev server. Plan 12 may need to widen this
+      for the voice loop's WebSocket connections.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none';"
+    />
     <title>Achilles</title>
     <style>
       html,
@@ -31,7 +43,12 @@
     </style>
   </head>
   <body>
-    <div id="root" data-testid="floating-shell"></div>
+    <!--
+      WR-01 fix: do NOT attach data-testid="floating-shell" to the root
+      div. The FloatingShell component owns that test id; duplicating it
+      on the root made Playwright's strict-mode locators ambiguous.
+    -->
+    <div id="root"></div>
     <script type="module" src="./main.tsx"></script>
   </body>
 </html>
