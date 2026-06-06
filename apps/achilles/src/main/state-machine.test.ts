@@ -8,10 +8,10 @@
  * Tests are pure — no Electron, no timers, no IPC. They only feed
  * (state, event, mode) tuples and assert the next state.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ACHILLES_STATES } from "../shared/constants.js";
 import type { AchillesEvent } from "./state-machine.js";
-import { transition } from "./state-machine.js";
+import { createMockStateController, transition } from "./state-machine.js";
 
 describe("transition() — UI-06 entry transitions", () => {
   it("S1: toggle mode — HOTKEY_PRESS in idle → listening", () => {
@@ -111,5 +111,68 @@ describe("transition() — defensive coverage", () => {
         "toggle",
       ),
     ).toBe("idle");
+  });
+});
+
+describe("createMockStateController — CR-01 production broadcast hook auto-advances the timeline", () => {
+  it("when the broadcast wires scheduleMockTransitions, listening -> processing -> speaking -> idle auto-fires (mirrors main/index.ts wiring)", () => {
+    type TimerCb = () => void;
+    const timers: Array<{ id: number; cb: TimerCb }> = [];
+    let nextTokenId = 1;
+    const setTimeoutImpl = vi.fn((cb: TimerCb, _ms: number) => {
+      const id = nextTokenId++;
+      timers.push({ id, cb });
+      return id as unknown;
+    });
+    const clearTimeoutImpl = vi.fn((token: unknown) => {
+      const idx = timers.findIndex((t) => t.id === token);
+      if (idx >= 0) timers.splice(idx, 1);
+    });
+
+    // Replicate main/index.ts production wiring: the broadcast closure
+    // forwards every transition to scheduleMockTransitions. This is
+    // the wiring CR-01 added — pre-fix the wiring was missing and the
+    // timeline froze in listening forever.
+    let controller: ReturnType<typeof createMockStateController>;
+    const broadcastSpy = vi.fn();
+    controller = createMockStateController({
+      broadcast: (state) => {
+        broadcastSpy(state);
+        controller.scheduleMockTransitions(state);
+      },
+      getMode: () => "toggle",
+      setTimeoutImpl,
+      clearTimeoutImpl,
+    });
+
+    // Press the hotkey: idle -> listening AND timer scheduled.
+    controller.dispatch({ type: "HOTKEY_PRESS" });
+    expect(controller.now()).toBe("listening");
+    expect(timers.length).toBe(1);
+
+    // Fire the listening timer: -> processing AND timer scheduled.
+    const fire = (): void => {
+      const t = timers.shift();
+      t!.cb();
+    };
+    fire();
+    expect(controller.now()).toBe("processing");
+    expect(timers.length).toBe(1);
+
+    // Fire processing timer: -> speaking AND timer scheduled.
+    fire();
+    expect(controller.now()).toBe("speaking");
+    expect(timers.length).toBe(1);
+
+    // Fire speaking timer: -> idle. No further timer for idle.
+    fire();
+    expect(controller.now()).toBe("idle");
+    expect(timers.length).toBe(0);
+
+    // Broadcast was called for each transition.
+    expect(broadcastSpy).toHaveBeenCalledWith("listening");
+    expect(broadcastSpy).toHaveBeenCalledWith("processing");
+    expect(broadcastSpy).toHaveBeenCalledWith("speaking");
+    expect(broadcastSpy).toHaveBeenCalledWith("idle");
   });
 });

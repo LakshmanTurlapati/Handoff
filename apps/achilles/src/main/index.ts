@@ -55,6 +55,12 @@ async function bootstrap(): Promise<void> {
   const { app, BrowserWindow, ipcMain, globalShortcut, screen, safeStorage } =
     electron;
 
+  // CR-03 fix: safeStorage.isEncryptionAvailable() may only be called
+  // after app.whenReady() per Electron docs. Constructing the store
+  // before whenReady previously froze the encryption verdict at false
+  // for the process lifetime (and could throw on linux without a keyring).
+  await app.whenReady();
+
   const store = createAchillesStore({
     storeCtor: Store as never,
     safeStorage: {
@@ -64,12 +70,19 @@ async function bootstrap(): Promise<void> {
     },
   });
 
-  await app.whenReady();
-
   const initialPosition = store.readWindowPosition();
   const initialMode = store.readHotkeyMode();
   const initialKey = store.readHotkeyKey();
   const workArea = screen.getPrimaryDisplay().workArea;
+  // CR-05: enumerate every attached display so the off-screen guard
+  // accepts positions on the secondary monitor when one is attached.
+  const allDisplays = (
+    screen as unknown as {
+      getAllDisplays(): Array<{
+        workArea: { x: number; y: number; width: number; height: number };
+      }>;
+    }
+  ).getAllDisplays();
 
   const window = createAchillesWindow({
     BrowserWindowCtor: BrowserWindow as never,
@@ -77,6 +90,7 @@ async function bootstrap(): Promise<void> {
     initialPosition,
     platform: process.platform,
     workArea,
+    allDisplays,
   });
 
   // Load the renderer bundle. electron-vite writes the renderer to
@@ -120,10 +134,18 @@ async function bootstrap(): Promise<void> {
     }
   }
 
-  const controller = createMockStateController({
+  // Declare the controller binding first so the broadcast closure
+  // can reference it; assigned below via createMockStateController.
+  // CR-01 fix: every committed transition schedules the next mock
+  // timer so listening -> processing -> speaking -> idle auto-advances
+  // in production (the unit tests drove this explicitly; the real
+  // composition root missed it).
+  let controller: ReturnType<typeof createMockStateController>;
+  controller = createMockStateController({
     broadcast: (state) => {
       window.webContents.send(IPC_STATE_CHANGED, { state });
       startAmplitudeForState(state);
+      controller.scheduleMockTransitions(state);
     },
     getMode: () => store.readHotkeyMode(),
   });
