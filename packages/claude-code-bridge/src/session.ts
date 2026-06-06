@@ -342,13 +342,29 @@ function createSessionState(
   //     can both resolve close() callers) ──────────────────────────────
   const exitWaiters: Array<() => void> = [];
 
+  // ─── flush guard (CR-fix WR-02) ────────────────────────────────────
+  // Track flush state explicitly so the parser's trailing-partial
+  // handling does not double-emit in the unlikely case both stdout
+  // "end" and child "exit" run flush(). The accumulator-reset trick
+  // happened to make the duplicate safe, but a future LineParser
+  // refactor could regress that. With this guard parser.flush() runs
+  // at most once across both stdout "end" and child "exit" — the
+  // child-exit handler remains the authoritative path; stdout "end"
+  // only flushes when exit has not yet landed.
+  let flushed = false;
+  function flushOnce(): void {
+    if (flushed) return;
+    flushed = true;
+    parser.flush();
+  }
+
   // ─── child.stdout plumbing ─────────────────────────────────────────
   if (child.stdout !== null) {
     child.stdout.on("data", (chunk: Buffer) => {
       parser.write(chunk);
     });
     child.stdout.on("end", () => {
-      parser.flush();
+      flushOnce();
     });
   }
 
@@ -417,8 +433,9 @@ function createSessionState(
       error: `spawn_error: ${err.message}`,
     });
     // Best-effort flush of any trailing partial (no-op if the child
-    // never produced stdout).
-    parser.flush();
+    // never produced stdout). Guarded via flushOnce() (CR-fix WR-02) so
+    // a follow-up stdout "end" cannot double-flush.
+    flushOnce();
     const exitEvent: ProcessExitEvent = {
       type: "process_exit",
       exit_code: null,
@@ -440,11 +457,12 @@ function createSessionState(
     exited = true;
     exitCode = code;
     exitSignal = signal;
-    // Best-effort final parse of any trailing partial line. Defensive:
-    // child.stdout may have already emitted "end" but we run flush()
-    // again to make sure the trailing-partial parse_error path is hit
-    // in scenarios where stdout never ended (e.g. signal kills).
-    parser.flush();
+    // Best-effort final parse of any trailing partial line. The
+    // flushOnce() guard (above) ensures the LineParser only sees one
+    // flush() call across the stdout-end + exit pair (CR-fix WR-02),
+    // which removes the brittle dependency on the parser's
+    // accumulator-reset side effect making a double-flush safe.
+    flushOnce();
     // Synthesise the ProcessExit event and emit it as the FINAL event.
     const exitEvent: ProcessExitEvent = {
       type: "process_exit",
