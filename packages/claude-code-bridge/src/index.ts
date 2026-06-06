@@ -44,3 +44,9 @@ export * from "./errors.js";
 export * from "./event-schemas.js";
 export * from "./extractor.js";
 export * from "./types.js";
+// Wave 2 runtime spine (Plan 10-02):
+export * from "./line-parser.js";
+export * from "./wire-mapper.js";
+export * from "./version-check.js";
+export * from "./outcome.js";
+export * from "./session.js";

@@ -1,0 +1,5 @@
+# oversized-line.ndjson is generated at test time by
+# MockClaudeProcess.writeOversizedFixture() (Plan 10-02, Task 1). It is
+# > 1 MiB, so checking it in is wasteful — the helper recreates it on
+# demand inside the line-parser.test.ts `beforeAll` block.
+oversized-line.ndjson

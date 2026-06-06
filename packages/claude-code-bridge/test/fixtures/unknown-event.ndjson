@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"sid-unknown-001","model":"claude-sonnet-4-5","claude_code_version":"2.0.5"}
+{"type":"future_event_2030","payload":{"new_field":"unknown"}}
+{"type":"result","subtype":"success"}

@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"sid-tool-err-001","model":"claude-sonnet-4-5","claude_code_version":"2.0.5"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu-1","name":"Read","input":{"file_path":"/etc/missing.conf"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu-1","content":"ENOENT: no such file","is_error":true}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"I successfully read the file."}]},"partial":true}
+{"type":"assistant","message":{"content":[{"type":"text","text":"I successfully read the file."}]}}
+{"type":"result","subtype":"success"}
