@@ -60,6 +60,19 @@ const workspaceAlias = [
     find: /^@achilles\/claude-code-bridge\/(.+)$/,
     replacement: resolve(ROOT_DIR, "packages/claude-code-bridge/src/$1.ts"),
   },
+  // v1.2 phase-12 addition: @achilles/achilles-skill aliases. The
+  // literal points at the barrel that exports the resolved
+  // companionPromptPath + SKILL_PROMPTS_DIR strings; the regex glob
+  // covers any future submodule import (Phase 13 install-skill helpers
+  // may live under @achilles/achilles-skill/<submodule>).
+  {
+    find: "@achilles/achilles-skill",
+    replacement: resolve(ROOT_DIR, "packages/achilles-skill/src/index.ts"),
+  },
+  {
+    find: /^@achilles\/achilles-skill\/(.+)$/,
+    replacement: resolve(ROOT_DIR, "packages/achilles-skill/src/$1.ts"),
+  },
   // v1.2 phase-11 addition: apps/achilles aliases. The literal points at
   // the constants barrel; the four subpath regexes rewrite to the
   // matching src/* tree so the renderer + main + preload + shared
@@ -184,6 +197,29 @@ export default defineWorkspace([
       include: [
         "apps/achilles/src/**/*.test.ts",
         "apps/achilles/src/**/*.test.tsx",
+      ],
+      environment: "node",
+      passWithNoTests: true,
+    },
+  },
+  {
+    // v1.2 phase-12 project. Includes (a) Plan 12-01 deliverables — the
+    // @achilles/achilles-skill package tests (path resolution +
+    // companion.md content contract) — and (b) Plan 12-02 deliverables
+    // (sandwich-defence + normalisation main-process modules). Plans
+    // 12-03 and 12-04 extend this list with session.test.ts and the
+    // renderer audio test tree.
+    resolve: {
+      alias: workspaceAlias,
+    },
+    test: {
+      name: "phase-12-unit",
+      include: [
+        "packages/achilles-skill/src/**/*.test.ts",
+        "apps/achilles/src/main/sandwich-defence.test.ts",
+        "apps/achilles/src/main/normalisation.test.ts",
+        "apps/achilles/src/main/session.test.ts",
+        "apps/achilles/src/renderer/audio/**/*.test.ts",
       ],
       environment: "node",
       passWithNoTests: true,

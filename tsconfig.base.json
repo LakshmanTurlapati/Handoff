@@ -35,6 +35,8 @@
       "@achilles/app/preload/*": ["apps/achilles/src/preload/*"],
       "@achilles/app/renderer/*": ["apps/achilles/src/renderer/*"],
       "@achilles/app/shared/*": ["apps/achilles/src/shared/*"],
+      "@achilles/achilles-skill": ["packages/achilles-skill/src/index.ts"],
+      "@achilles/achilles-skill/*": ["packages/achilles-skill/src/*"],
       "@achilles/claude-code-bridge": ["packages/claude-code-bridge/src/index.ts"],
       "@achilles/claude-code-bridge/*": ["packages/claude-code-bridge/src/*"],
       "@achilles/voice-protocol": ["packages/voice-protocol/src/index.ts"],
