@@ -287,4 +287,65 @@ describe("createRealtimeSttClient — stop", () => {
     await client.stop();
     expect(closeSpy).toHaveBeenCalled();
   });
+
+  it("WR-08: after stop(), the iterable resolves done=true and no further messages are emitted", async () => {
+    // The previous test only proved stop() invokes socket.close — it
+    // did not drive the wrapper through its real close-handling path.
+    // This extension also fires a close event from the mock side and
+    // then attempts to deliver a message to verify the wrapper truly
+    // ignores post-stop traffic.
+    vi.useRealTimers(); // this test uses real microtask scheduling
+    const stub = createStubWebSocket();
+    const onEventSpy = vi.fn();
+    const client = createRealtimeSttClient({
+      getToken: async () => ({
+        token: "tok_stop_strong",
+        expiresAt: "2099-01-01T00:00:00Z",
+      }),
+      webSocketCtor: stub.ctor,
+      onEvent: onEventSpy,
+    });
+    await client.start();
+    const inst = stub.current();
+    expect(inst).not.toBeNull();
+    inst?.__fire({ type: "open" });
+    // Receive one legitimate event so onEventSpy fires at least once
+    // pre-stop — this lets us verify post-stop traffic is silenced
+    // even when the wrapper was actively emitting.
+    inst?.__fire({
+      type: "message",
+      data: JSON.stringify({
+        type: "partial_transcript",
+        text: "before-stop",
+        confidence: 0.5,
+      }),
+    });
+    // Drain a single iteration so the awaiter consumes the buffered event.
+    const iter = client.events$[Symbol.asyncIterator]();
+    const first = await iter.next();
+    expect(first.done).toBe(false);
+
+    // Now stop and fire a real close (mirroring what a runtime WS does).
+    await client.stop();
+    inst?.__fire({ type: "close", code: 1000 });
+
+    // Iterable must now resolve done=true rather than block.
+    const after = await iter.next();
+    expect(after.done).toBe(true);
+
+    // Attempt to deliver more traffic from the mock side. The wrapper
+    // must ignore it — neither emit a new event on events$ nor invoke
+    // the onEvent callback again.
+    const callsBeforeFire = onEventSpy.mock.calls.length;
+    inst?.__fire({
+      type: "message",
+      data: JSON.stringify({
+        type: "partial_transcript",
+        text: "after-stop",
+        confidence: 0.9,
+      }),
+    });
+    // No new events should have been pushed via the onEvent callback.
+    expect(onEventSpy.mock.calls.length).toBe(callsBeforeFire);
+  });
 });
