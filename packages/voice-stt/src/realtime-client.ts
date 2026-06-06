@@ -209,6 +209,24 @@ export function createRealtimeSttClient(
   let socket: SttWebSocketLike | null = null;
   let reconnectAttempt = 0;
   let utteranceStartMs: number | null = null;
+  // CR-01: handle for the in-flight reconnect timer. We retain a reference
+  // so stop() can clear it; without this, a reconnect scheduled inside the
+  // backoff window fires unconditionally and opens a new WebSocket AFTER
+  // the consumer asked to stop — a real resource and quota leak.
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // WR-04: per-socket listener handles. We retain explicit references so
+  // detachAll() can unbind them before the socket is replaced. Without
+  // this, late events fired on a stale socket (notably a delayed
+  // `close` after the reconnect path has already taken over) would
+  // re-enter scheduleReconnect on the old listener and provoke an
+  // unintended reconnect.
+  type ListenerBag = {
+    open: (ev: SttSocketEvent) => void;
+    close: (ev: SttSocketEvent) => void;
+    message: (ev: SttSocketEvent) => void;
+    error: (ev: SttSocketEvent) => void;
+  } | null;
+  let listeners: ListenerBag = null;
 
   // Async-iterable backing buffer. We hold a list of pending events
   // and an awaiter promise; this is the standard pattern for turning
@@ -262,6 +280,32 @@ export function createRealtimeSttClient(
     }
   }
 
+  /**
+   * WR-04: unbind all listeners from `socket` before replacing it. Safe
+   * to call when listeners or socket is null (no-op). The wrapper holds
+   * named references so removeEventListener can identify the exact
+   * handlers — anonymous functions cannot be removed.
+   */
+  function detachAll(): void {
+    if (socket && listeners && typeof socket.removeEventListener === "function") {
+      try {
+        socket.removeEventListener("open", listeners.open);
+        socket.removeEventListener("close", listeners.close);
+        socket.removeEventListener("message", listeners.message);
+        socket.removeEventListener("error", listeners.error);
+      } catch (detachErr) {
+        // Removal is best-effort — if the runtime refuses, we still
+        // null out the references below so the wrapper itself does not
+        // re-enter via the listeners.
+        console.error(
+          `${LOG_PREFIX} listener detach failed`,
+          asError(detachErr).message,
+        );
+      }
+    }
+    listeners = null;
+  }
+
   async function connect(): Promise<void> {
     lifecycle = "connecting";
     let token: string;
@@ -274,6 +318,14 @@ export function createRealtimeSttClient(
       emitErrorEvent("auth", false, "getToken rejected");
       lifecycle = "closed";
       closeIterable();
+      return;
+    }
+    // CR-02: re-check lifecycle after `await getToken()`. A consumer
+    // that called stop() during the token fetch already wants the
+    // wrapper torn down — we MUST NOT construct a fresh WebSocket
+    // afterwards. Silent return is correct: stop() already set
+    // lifecycle = "closed" and closed the iterable.
+    if (lifecycle === "closing" || lifecycle === "closed") {
       return;
     }
 
@@ -294,46 +346,60 @@ export function createRealtimeSttClient(
     }
     socket = ws;
 
-    ws.addEventListener("open", () => {
-      lifecycle = "open";
-      reconnectAttempt = 0;
-      utteranceStartMs = Date.now();
-    });
-
-    ws.addEventListener("message", (ev) => {
-      if (ev.type !== "message") {
-        return;
-      }
-      handleServerMessage(ev.data);
-    });
-
-    ws.addEventListener("close", (ev) => {
-      if (ev.type !== "close") {
-        return;
-      }
-      socket = null;
-      if (lifecycle === "closing") {
-        lifecycle = "closed";
-        closeIterable();
-        return;
-      }
-      if (ev.code === WS_NORMAL_CLOSE) {
-        lifecycle = "closed";
-        closeIterable();
-        return;
-      }
-      scheduleReconnect("network");
-    });
-
-    ws.addEventListener("error", (ev) => {
-      if (ev.type !== "error") {
-        return;
-      }
-      console.error(
-        `${LOG_PREFIX} websocket error`,
-        ev.message ?? "(no message)",
-      );
-    });
+    // WR-04: define named handlers in a bag so detachAll() can unbind
+    // the exact same references later.
+    const bag: NonNullable<ListenerBag> = {
+      open: () => {
+        lifecycle = "open";
+        reconnectAttempt = 0;
+        utteranceStartMs = Date.now();
+      },
+      message: (ev) => {
+        if (ev.type !== "message") {
+          return;
+        }
+        handleServerMessage(ev.data);
+      },
+      close: (ev) => {
+        if (ev.type !== "close") {
+          return;
+        }
+        // WR-04: defensive — if this fires on a stale socket after the
+        // wrapper has already swapped to a new one, the bag reference
+        // mismatch means we are not the active listener bag and must
+        // do nothing.
+        if (bag !== listeners) {
+          return;
+        }
+        socket = null;
+        listeners = null;
+        if (lifecycle === "closing") {
+          lifecycle = "closed";
+          closeIterable();
+          return;
+        }
+        if (ev.code === WS_NORMAL_CLOSE) {
+          lifecycle = "closed";
+          closeIterable();
+          return;
+        }
+        scheduleReconnect("network");
+      },
+      error: (ev) => {
+        if (ev.type !== "error") {
+          return;
+        }
+        console.error(
+          `${LOG_PREFIX} websocket error`,
+          ev.message ?? "(no message)",
+        );
+      },
+    };
+    listeners = bag;
+    ws.addEventListener("open", bag.open);
+    ws.addEventListener("message", bag.message);
+    ws.addEventListener("close", bag.close);
+    ws.addEventListener("error", bag.error);
   }
 
   function handleServerMessage(raw: string): void {
@@ -440,7 +506,16 @@ export function createRealtimeSttClient(
     }
     reconnectAttempt += 1;
     lifecycle = "connecting";
-    setTimeout(() => {
+    // CR-01: retain the timer handle and re-check lifecycle inside the
+    // timer body. If stop() ran during the backoff window, both the
+    // clearTimeout in stop() AND this guard prevent a stray connect().
+    // (The clearTimeout is the primary defence; the guard is belt and
+    // braces in case the timer fires before clearTimeout takes effect.)
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (lifecycle === "closing" || lifecycle === "closed") {
+        return;
+      }
       void connect();
     }, delay);
   }
@@ -478,6 +553,19 @@ export function createRealtimeSttClient(
 
   async function stop(): Promise<void> {
     lifecycle = "closing";
+    // CR-01: cancel any pending reconnect BEFORE we tear the socket
+    // down. If the timer has already fired but the connect() callback
+    // is queued on the microtask queue, the lifecycle re-check inside
+    // connect() (CR-02) catches that case.
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    // WR-04: unbind listeners BEFORE close() so a synchronous close
+    // event fired by the runtime cannot re-enter scheduleReconnect on
+    // the old socket. detachAll() is safe to call when listeners are
+    // already null.
+    detachAll();
     if (socket) {
       try {
         socket.close(WS_NORMAL_CLOSE, "client requested stop");
@@ -487,6 +575,7 @@ export function createRealtimeSttClient(
           asError(closeErr).message,
         );
       }
+      socket = null;
     }
     lifecycle = "closed";
     closeIterable();
