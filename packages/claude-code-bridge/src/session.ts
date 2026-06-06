@@ -537,13 +537,36 @@ function createSessionState(
   }
 
   // ─── close() ───────────────────────────────────────────────────────
+  // CR-fix WR-03: graceful close that ends stdin (so a child waiting
+  // on its prompt input exits cleanly) AND escalates SIGTERM to
+  // SIGKILL after a longer grace than cancel() uses. This is the
+  // graceful counterpart to cancel(); cancel() owns the aggressive
+  // SIGINT-first 1s/2s escalation, close() uses a slower 5s grace so
+  // a well-behaved child has time to flush its own buffers.
+  const CLOSE_SIGTERM_GRACE_MS = 5000;
   function close(): Promise<void> {
     if (exited) {
       return Promise.resolve();
     }
+    // Step 1: end stdin if it has not been ended. A child waiting on
+    // its non-interactive prompt stream needs the EOF to know we are
+    // done sending; without it SIGTERM may arrive before the child has
+    // installed its signal handler, leaving an orphan. The try/catch
+    // covers the (caught by the stdin 'error' listener anyway) case
+    // where stdin has already been destroyed by an EPIPE from the
+    // child closing first.
+    if (child.stdin !== null && !child.stdin.writableEnded && !child.stdin.destroyed) {
+      try {
+        child.stdin.end();
+      } catch {
+        // ignore — see stdin 'error' listener above; the exit path
+        // resolves outcome regardless of the stdin disposition.
+      }
+    }
+    // Step 2: SIGTERM the child. Plan 10-03 owns SIGINT-driven cancel,
+    // which is the aggressive path; close() is the graceful path and
+    // starts with SIGTERM.
     if (typeof child.kill === "function") {
-      // SIGTERM only — Plan 10-03 owns the SIGINT-then-SIGTERM-then-
-      // SIGKILL escalation as the cancel() primitive.
       try {
         child.kill("SIGTERM");
       } catch {
@@ -558,6 +581,29 @@ function createSessionState(
         return;
       }
       exitWaiters.push(resolve);
+      // Step 3: SIGKILL escalation timer. If the child still has not
+      // exited after CLOSE_SIGTERM_GRACE_MS, SIGKILL guarantees
+      // termination. The timer is cleared implicitly when the exit
+      // listener runs (it resolves exitWaiters, after which this
+      // timer's body sees exited === true and bails out).
+      const t = setTimeout(() => {
+        if (exited) return;
+        if (typeof child.kill === "function") {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // ignore — SIGKILL on already-exited children is harmless.
+          }
+        }
+      }, CLOSE_SIGTERM_GRACE_MS);
+      // Allow the host process to exit without waiting on this timer.
+      // unref() is a no-op on the Browser/Electron renderer side; on
+      // the relay-worker / Node side it prevents the timer from
+      // pinning the event loop alive after the host has chosen to
+      // shut down.
+      if (typeof t.unref === "function") {
+        t.unref();
+      }
     });
   }
 

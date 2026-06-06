@@ -1046,6 +1046,39 @@ describe("createClaudeSession — CR-fix regressions (CR-03: stderr drain)", () 
 });
 
 /**
+ * WR-03 regression: close() must end stdin and escalate to SIGKILL.
+ *
+ * Before WR-03, close() sent SIGTERM but left stdin open — a child
+ * still waiting on its prompt input would hang until the OS forcibly
+ * killed it (which doesn't happen automatically). After WR-03, close()
+ * ends stdin first, then SIGTERMs, then SIGKILLs after a 5s grace.
+ */
+describe("createClaudeSession — WR-03 regression (close() ends stdin + escalates)", () => {
+  it("close() calls stdin.end() and resolves once exit lands", async () => {
+    const { spawnImpl, childRef } = makeFakeSpawn();
+    const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+    const session = createClaudeSession(
+      { systemPromptFile: "/tmp/companion.md" },
+      { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+    );
+    const child = childRef.current as FakeChildProcess;
+    const drainPromise = drainEvents(session);
+    // Spy on stdin.end so we can assert close() ends it.
+    const stdinEndSpy = vi.spyOn(child.stdin, "end");
+    const closePromise = session.close();
+    // Give close() a tick to run its synchronous body.
+    await new Promise((r) => setImmediate(r));
+    expect(stdinEndSpy).toHaveBeenCalled();
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    // Emit exit so close() resolves before the SIGKILL escalation.
+    child.stdout.end();
+    child.emit("exit", 0, null);
+    await closePromise;
+    await drainPromise;
+  });
+});
+
+/**
  * WR-01 regression: wire-mapper drops content blocks beyond content[0].
  * The session-level test below exercises the same code path via a
  * synthetic stdout fixture that puts a text block AND a tool_use block
