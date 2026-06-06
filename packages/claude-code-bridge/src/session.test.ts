@@ -910,3 +910,74 @@ describe("createClaudeSession — CR-fix regressions (CR-01: child error listene
     });
   });
 });
+
+/**
+ * CR-fix regression tests (Phase 10 review CR-02).
+ *
+ * CR-02: child.stdin.on("error") must keep EPIPE non-fatal; the
+ * send() path must not crash the host when stdin is already closed.
+ *
+ * As with CR-01 above, an uncaughtException trap fails the test if
+ * any unhandled error escapes.
+ */
+describe("createClaudeSession — CR-fix regressions (CR-02: stdin error listener)", () => {
+  async function runWithUncaughtTrap(
+    body: () => Promise<void>,
+  ): Promise<void> {
+    let captured: Error | null = null;
+    const onUncaught = (err: Error): void => {
+      captured = err;
+    };
+    process.on("uncaughtException", onUncaught);
+    try {
+      await body();
+    } finally {
+      process.off("uncaughtException", onUncaught);
+    }
+    expect(captured).toBeNull();
+  }
+
+  it("CR-02: send() on a stdin already closed by the child does NOT crash the host (EPIPE swallowed)", async () => {
+    await runWithUncaughtTrap(async () => {
+      const { spawnImpl, childRef } = makeFakeSpawn();
+      const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+      const session = createClaudeSession(
+        { systemPromptFile: "/tmp/companion.md" },
+        { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+      );
+      const child = childRef.current as FakeChildProcess;
+      // Close stdin BEFORE send() — simulates the child exiting between
+      // spawn and the first send().
+      child.stdin.end();
+      // The send() call must not throw and must not crash the host.
+      expect(() => session.send("hello")).not.toThrow();
+      // Also fire an asynchronous EPIPE-style error on the stdin
+      // stream: the session's stdin error listener absorbs EPIPE
+      // silently; non-EPIPE errors surface as parse_error.
+      const drainPromise = drainEvents(session);
+      const epipeErr: NodeJS.ErrnoException = Object.assign(
+        new Error("write EPIPE"),
+        { code: "EPIPE", errno: -32, syscall: "write" },
+      );
+      child.stdin.emit("error", epipeErr);
+      // Non-EPIPE error: should appear as a parse_error event.
+      const otherErr: NodeJS.ErrnoException = Object.assign(
+        new Error("write EAGAIN"),
+        { code: "EAGAIN" },
+      );
+      child.stdin.emit("error", otherErr);
+      // Drain by emitting exit.
+      child.stdout.end();
+      child.emit("exit", 0, null);
+      const events = await drainPromise;
+      // EPIPE produced no parse_error (silently absorbed). EAGAIN did.
+      const stdinErrors = events.filter(
+        (e) => e.type === "parse_error" && e.error.startsWith("stdin_error:"),
+      );
+      expect(stdinErrors.length).toBe(1);
+      if (stdinErrors[0]?.type === "parse_error") {
+        expect(stdinErrors[0].error).toContain("EAGAIN");
+      }
+    });
+  });
+});

@@ -346,6 +346,28 @@ function createSessionState(
     });
   }
 
+  // ─── child.stdin error guard (CR-fix CR-02) ────────────────────────
+  // Attach a stdin error listener at construction (NOT inside send()):
+  // EPIPE can fire if the child exits between spawn and send(), and
+  // the asynchronous 'error' emission has no listener by default,
+  // which Node escalates to 'uncaughtException' and crashes the host.
+  // Treat EPIPE as a normal close of the input channel — the exit
+  // listener below resolves outcome correctly; we surface other
+  // errors as parse_error for observability without crashing.
+  if (child.stdin !== null) {
+    child.stdin.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EPIPE") {
+        // Expected when the child closes stdin before we finish
+        // writing. The exit listener will resolve outcome cleanly.
+        return;
+      }
+      pushEvent({
+        type: "parse_error",
+        error: `stdin_error: ${err.message}`,
+      });
+    });
+  }
+
   // ─── child error handling (CR-fix CR-01) ───────────────────────────
   // Node emits 'error' on the ChildProcess for ENOENT (binary not on
   // PATH), EACCES, EAGAIN/ulimit nproc, and other post-construction
@@ -447,13 +469,26 @@ function createSessionState(
   };
 
   // ─── send(text) ────────────────────────────────────────────────────
+  // CR-fix CR-02: guard against writing to a stdin that has already
+  // been destroyed or ended (the stdin "error" listener above keeps
+  // EPIPE non-fatal, but checking writableEnded / destroyed first
+  // avoids a noisy parse_error in the common "child already exited"
+  // case). The try/catch is belt-and-braces around the synchronous
+  // throw path that some Writable implementations exercise.
   function send(text: string): void {
     if (sendCalled) return;
     sendCalled = true;
     const stdin = child.stdin;
-    if (stdin === null) return;
-    stdin.write(`${text}\n`);
-    stdin.end();
+    if (stdin === null || stdin.destroyed || stdin.writableEnded) return;
+    try {
+      stdin.write(`${text}\n`);
+      stdin.end();
+    } catch {
+      // Synchronous throw path — the stdin 'error' listener above
+      // handles asynchronous EPIPE; this catch covers the rare
+      // synchronous-throw shape from a writable that has gone bad
+      // between the destroyed/writableEnded check and the write.
+    }
   }
 
   // ─── close() ───────────────────────────────────────────────────────
