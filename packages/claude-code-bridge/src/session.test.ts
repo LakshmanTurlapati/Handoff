@@ -708,30 +708,33 @@ describe("createClaudeSession.cancel()", () => {
   });
 
   it("behaviour 8: cancel BEFORE the streaming spawn (synthetic exit) resolves with {null, null}", () => {
-    // The plan's Test 8 boundary: cancel during the synchronous window
-    // before child.spawn lands. Our implementation guards on whether the
-    // spawn yielded a usable child handle — but in this scaffold the
-    // spawn IS synchronous (the fake spawnImpl returns the child
-    // immediately). To exercise the "child not yet alive" branch we
-    // simulate the same condition by injecting a spawnImpl that returns
-    // a child whose stdout/stdin are null AND whose pid is null (the
-    // shape Node uses while the child is mid-spawn).
+    // CR-fixer note (WR-06): The plan's Test 8 boundary — "cancel during
+    // the synchronous window before child.spawn lands" — cannot be
+    // exercised in this test scaffold. In production, Node's
+    // `child_process.spawn` returns a ChildProcess handle synchronously
+    // (the kernel `fork(2)` has already happened by the time `spawn`
+    // returns; only the exec(2) + actual run-time errors are deferred to
+    // the asynchronous `'error'` event). Likewise the fake `spawnImpl`
+    // here returns the child synchronously. There is no observable
+    // "pre-spawn" window from inside `createClaudeSession`: by the time
+    // cancel() can be called, the child handle exists.
     //
-    // The exit listener is registered eagerly in createSessionState, so
-    // a child whose `on("exit")` is reachable but who has not produced
-    // any stdout still hits the "cancel never sees a real running
-    // child" boundary. We assert the synthetic exit shape directly.
+    // The plan's "synthetic exit" boundary therefore folds into two
+    // distinct behaviours:
     //
-    // Note: per the plan's Test 8 spec, cancel() must resolve
-    // immediately with { exit_code: null, signal: null }. We use a
-    // child whose .kill is wired but whose exit never fires; the
-    // pre-spawn branch is the ONE that returns the synthetic event
-    // without waiting for the child.
+    //   1. Cancel against a child handle that has not yet emitted
+    //      anything from stdout (this test). cancel() goes through the
+    //      normal SIGINT path; the synthetic exit is just an
+    //      `emit("exit", null, null)` from the test (modelling the
+    //      shape Node would emit on a signal kill with no exit code).
+    //   2. Cancel against a child that hits the `'error'` event before
+    //      exit (the CR-fix CR-01 regression tests below). The session
+    //      synthesises `{ exit_code: null, signal: null }` from inside
+    //      the child error listener.
     //
-    // This boundary is exercised by setting a flag on createSessionState
-    // that disables the spawn entirely. We approximate by spawning the
-    // child and then immediately tearing it down — same observable
-    // behaviour from the cancel() caller's perspective.
+    // The boundary value `{ exit_code: null, signal: null }` is
+    // separately asserted in the "synthetic process_exit shape" test
+    // below (behaviour 8b).
     const { spawnImpl, childRef } = makeFakeSpawn();
     const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
     const session = createClaudeSession(
@@ -739,14 +742,9 @@ describe("createClaudeSession.cancel()", () => {
       { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
     );
     const child = childRef.current as FakeChildProcess;
-    // Simulate "child mid-spawn": pid is set but exitCode is null and
-    // the child has not yet produced an exit. cancel() should still
-    // resolve, and in this scaffold it resolves via the SIGINT
-    // escalation path (the production seam for "child never spawned"
-    // would require additional plumbing that the v1.2 scaffold does
-    // not need — the version check throws before the streaming spawn,
-    // so the only window where the child handle is missing is
-    // construction failure, which would have thrown).
+    // Approximate behaviour 8 by cancelling immediately after
+    // construction: SIGINT is sent synchronously (Phase 10 success
+    // criterion 3) and resolves when the test emits the synthetic exit.
     const cancelPromise = session.cancel();
     expect(child.kill).toHaveBeenCalledWith("SIGINT");
     // Synthetic exit: model the boundary case (signal null).
@@ -758,6 +756,40 @@ describe("createClaudeSession.cancel()", () => {
       // signal: null is the boundary case the plan documents.
       expect(ev.signal).toBeNull();
     });
+  });
+
+  it("behaviour 8b (CR-fix WR-06): synthetic process_exit from a child 'error' event is { exit_code: null, signal: null }", async () => {
+    // This is the boundary the plan's Test 8 actually describes: a
+    // child that NEVER produces an exit code (because spawn-time
+    // failed before exec, e.g. ENOENT). The bridge's child.on("error")
+    // listener (CR-fix CR-01) synthesises the ProcessExit event with
+    // both fields null, matching the documented shape.
+    const { spawnImpl, childRef } = makeFakeSpawn();
+    const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+    const session = createClaudeSession(
+      { systemPromptFile: "/tmp/companion.md" },
+      { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+    );
+    const child = childRef.current as FakeChildProcess;
+    // Drive a synchronous spawn-time error. The session's child.on("error")
+    // handler should synthesise the ProcessExit event.
+    const drainPromise = drainEvents(session);
+    const enoentError: NodeJS.ErrnoException = Object.assign(
+      new Error("spawn claude ENOENT"),
+      { code: "ENOENT", errno: -2, syscall: "spawn claude", path: "claude" },
+    );
+    child.emit("error", enoentError);
+    const events = await drainPromise;
+    const last = events[events.length - 1];
+    expect(last?.type).toBe("process_exit");
+    if (last?.type === "process_exit") {
+      // BOTH fields null: this is the documented synthetic shape from
+      // the plan's Test 8 spec, NOT a real exit-code response.
+      expect(last.exit_code).toBeNull();
+      expect(last.signal).toBeNull();
+    }
+    // Outcome must be derived from the synthetic exit code.
+    expect(session.outcome?.kind).toBe("failure");
   });
 
   it("behaviour 9: cancel AFTER a natural exit returns the captured ProcessExitEvent and does NOT flip outcome.reason to 'cancelled'", async () => {
