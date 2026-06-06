@@ -452,3 +452,23 @@ Recommended order of fixes for the fixer agent: CR-03 (stderr drain — single-l
 _Reviewed: 2026-06-06T14:56:59Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+
+## FIX LOG
+
+Applied 2026-06-06T10:28Z by gsd-code-fixer. Each fix committed atomically; cumulative test count rose from 138 to 157 (19 new regression tests cover CR-01/02/03 and WR-01/03/04). Final `npx vitest run --project phase-10-unit` PASSED. Final `npm run typecheck --workspace @achilles/claude-code-bridge` PASSED.
+
+| ID | Disposition | Commit | Notes |
+|----|-------------|--------|-------|
+| CR-01 | fixed | `aa980ac` | Added `child.on("error")` listener that synthesises `process_exit { null, null }` and emits a typed `parse_error` with `spawn_error: <msg>` prefix. Extended `MockClaudeProcess` with static `simulateSpawnError(child, err)` helper. Two regression tests assert no uncaughtException on ENOENT and on mid-cancel spawn error. |
+| CR-02 | fixed | `e0baa68` | Added `child.stdin.on("error")` listener at construction time. EPIPE is treated as a normal close (silently absorbed); other codes surface as `parse_error` with `stdin_error: <msg>`. `send()` hardened with `destroyed/writableEnded` check + try/catch around write. Regression test closes stdin before `send()`, then emits EPIPE + EAGAIN errors and asserts host stays alive. |
+| CR-03 | fixed | `aa1a811` | Drained child stderr via `on("data", noop)` + defensive `on("error", noop)` per Option-A (no logging — stderr can carry prompt fragments). Regression test writes 3 × 96 KiB to stderr and asserts stdout `session_init` still flows. |
+| WR-01 | fixed | `b3fa9f1` | Added `mapWireEvents(wire): ClaudeStreamEvent[]` that iterates `content[]`. Legacy `mapWireEvent()` is preserved (backward-compat: returns first block only) but `session.ts` now routes through `mapWireEvents`. Per-block schema guard so a malformed block becomes UnknownEvent for that block only. 6 new wire-mapper unit tests + 1 session-level integration test. |
+| WR-02 | fixed | `8fdacaa` | Replaced both `parser.flush()` call sites with a `flushOnce()` helper guarded by a `flushed` boolean. `child.on("error")`, `child.on("exit")`, and `child.stdout.on("end")` all route through `flushOnce()`. Removes the brittle dependency on the parser's accumulator-reset side effect. |
+| WR-03 | fixed | `a9807d5` | `close()` now: (1) ends stdin via `child.stdin.end()` when not already ended, (2) sends SIGTERM, (3) schedules a SIGKILL escalation at 5s. The escalation timer is `.unref()`-ed so it does not pin the event loop. Regression test verifies `stdin.end()` is called and `close()` resolves on exit. |
+| WR-04 | fixed | `94c0d36` | `buildArgv` now rejects empty `systemPromptFile`, NUL bytes in `systemPromptFile`, empty `resumeSessionId`, leading-dash `resumeSessionId` (e.g. `--inject-flag`), and any non-matching character class. Error messages use fixed templates (no caller value interpolation) so they cannot leak prompt fragments into logs. 6 new validation tests + 1 happy-path test. |
+| WR-05 | fixed | `49e27ca` | `line-parser.ts` now wraps both the per-line `subarray` slice and the post-newline accumulator slice in `Buffer.from(...)` to release the parent ArrayBuffer for GC immediately. Existing line-parser tests all pass; the change is observationally equivalent and bounded-memory only. |
+| WR-06 | fixed | `1db275b` | Strengthened behaviour-8 test with a CR-fixer note explaining why the pre-spawn boundary cannot be exercised in this scaffold (Node's `spawn` is synchronous from the caller's perspective). Added behaviour-8b that drives the synthetic `process_exit { null, null }` shape via the new `child.on("error")` listener — the boundary value is now asserted directly. |
+| IN-01..IN-04 | deferred | — | Out of scope per `--fix` directive (Info-level). Filed for follow-up via existing review channels. |
+
+Cumulative state: **9 of 9 in-scope findings fixed; 0 deferred; 0 blocked.** 138 baseline tests + 19 new regression tests = 157 tests passing on `phase-10-unit`. Typecheck clean. Branch: `Achilles`.
+
