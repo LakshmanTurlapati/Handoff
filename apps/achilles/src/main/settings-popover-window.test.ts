@@ -27,14 +27,30 @@ interface CapturedPopover {
   };
 }
 
+interface CapturedPopoverWithClose extends CapturedPopover {
+  closedHandlers: Array<() => void>;
+  on: ReturnType<typeof vi.fn>;
+  off: ReturnType<typeof vi.fn>;
+  triggerClosed: () => void;
+}
+
 function makePopoverCtor(): {
-  ctor: new (opts: Record<string, unknown>) => CapturedPopover;
-  instances: CapturedPopover[];
+  ctor: new (opts: Record<string, unknown>) => CapturedPopoverWithClose;
+  instances: CapturedPopoverWithClose[];
 } {
-  const instances: CapturedPopover[] = [];
-  const ctor = function (opts: Record<string, unknown>): CapturedPopover {
+  const instances: CapturedPopoverWithClose[] = [];
+  const ctor = function (opts: Record<string, unknown>): CapturedPopoverWithClose {
     const handlers: Record<string, Array<(...args: unknown[]) => void>> = {};
-    const instance: CapturedPopover = {
+    const closedHandlers: Array<() => void> = [];
+    const onFn = vi.fn((channel: string, cb: () => void) => {
+      if (channel === "closed") closedHandlers.push(cb);
+    });
+    const offFn = vi.fn((channel: string, cb: () => void) => {
+      if (channel !== "closed") return;
+      const idx = closedHandlers.indexOf(cb);
+      if (idx >= 0) closedHandlers.splice(idx, 1);
+    });
+    const instance: CapturedPopoverWithClose = {
       options: opts,
       setPosition: vi.fn(),
       close: vi.fn(),
@@ -50,10 +66,16 @@ function makePopoverCtor(): {
           },
         ),
       },
+      closedHandlers,
+      on: onFn,
+      off: offFn,
+      triggerClosed(): void {
+        for (const cb of [...closedHandlers]) cb();
+      },
     };
     instances.push(instance);
     return instance;
-  } as unknown as new (opts: Record<string, unknown>) => CapturedPopover;
+  } as unknown as new (opts: Record<string, unknown>) => CapturedPopoverWithClose;
   return { ctor, instances };
 }
 
@@ -221,5 +243,56 @@ describe("createSettingsPopoverWindow — SP3 Escape + outside-click close", () 
     expect(parent.handlers.focus).toBeDefined();
     parent.handlers.focus!.forEach((h) => h());
     expect(popover.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createSettingsPopoverWindow — CR-08 parent focus listener cleanup", () => {
+  it("detaches the parent's 'focus' listener when the popover emits 'closed'", () => {
+    const { ctor, instances } = makePopoverCtor();
+    const parent = makeFakeParent([0, 0]);
+    const screenRef = {
+      getPrimaryDisplay: () => ({
+        workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+      }),
+    };
+
+    const baselineCount =
+      (parent.handlers.focus?.length ?? 0);
+
+    createSettingsPopoverWindow(parent as never, {
+      BrowserWindowCtor: ctor as never,
+      screenRef,
+    });
+
+    // After construction, exactly ONE focus listener attached.
+    expect(parent.handlers.focus?.length).toBe(baselineCount + 1);
+
+    // Fire the popover's 'closed' event.
+    instances[0]!.triggerClosed();
+
+    // The parent's focus listener was detached.
+    expect(parent.handlers.focus?.length ?? 0).toBe(baselineCount);
+  });
+
+  it("returns to baseline parent.focus listener count after 10 open/close cycles", () => {
+    const { ctor, instances } = makePopoverCtor();
+    const parent = makeFakeParent([0, 0]);
+    const screenRef = {
+      getPrimaryDisplay: () => ({
+        workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+      }),
+    };
+    const baseline = parent.handlers.focus?.length ?? 0;
+
+    for (let i = 0; i < 10; i++) {
+      createSettingsPopoverWindow(parent as never, {
+        BrowserWindowCtor: ctor as never,
+        screenRef,
+      });
+      instances[i]!.triggerClosed();
+    }
+
+    // Pre-fix: 10 listeners stacked. With CR-08: back to baseline.
+    expect(parent.handlers.focus?.length ?? 0).toBe(baseline);
   });
 });

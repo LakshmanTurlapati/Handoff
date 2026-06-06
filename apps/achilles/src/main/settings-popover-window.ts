@@ -24,8 +24,6 @@
  * The constructor is dependency-injected so unit tests verify the
  * locked contract without launching Electron.
  */
-import { WINDOW_WIDTH } from "../shared/constants.js";
-
 /** Default anchor offsets from the circle center per UI-SPEC §7. */
 const DEFAULT_RIGHT_OFFSET_PX = 60;
 const DEFAULT_TOP_OFFSET_PX = -50;
@@ -50,6 +48,15 @@ export interface SettingsPopoverChild {
   loadFile(path: string): Promise<void> | void;
   loadURL(url: string): Promise<void> | void;
   isDestroyed(): boolean;
+  /**
+   * CR-08: the popover must expose a `closed` event so the parent's
+   * focus listener can be detached when the popover tears down. The
+   * helper subscribes `on('closed', ...)` so each open/close cycle
+   * releases its listener and the parent's listener count stays at
+   * baseline.
+   */
+  on?(channel: "closed", cb: () => void): void;
+  off?(channel: "closed", cb: () => void): void;
   webContents: {
     on(
       channel: "before-input-event",
@@ -174,12 +181,28 @@ export function createSettingsPopoverWindow(
   );
 
   // Parent regaining focus (an outside click) closes the popover. The
-  // listener stays attached for the popover's lifetime; the OS handles
-  // teardown of the parent window itself.
+  // listener is detached on the popover's `closed` event (CR-08 fix) so
+  // every open/close cycle returns the parent's listener count to
+  // baseline. Without this, stacked open/close cycles produced an
+  // unbounded leak culminating in a MaxListenersExceededWarning.
   const onParentFocus = (): void => {
     if (!popover.isDestroyed()) popover.close();
   };
   parent.on("focus", onParentFocus);
+
+  const onPopoverClosed = (): void => {
+    parent.off("focus", onParentFocus);
+    // Defence in depth: also detach the listener that observes the
+    // popover's own close so the popover ref does not retain the
+    // closure across GC sweeps. Optional `off` on SettingsPopoverChild
+    // — only called when the binding exists.
+    if (typeof popover.off === "function") {
+      popover.off("closed", onPopoverClosed);
+    }
+  };
+  if (typeof popover.on === "function") {
+    popover.on("closed", onPopoverClosed);
+  }
 
   // Optional initial load. Production wires this; the unit suite
   // leaves it unset because the locked contract is about the
@@ -187,10 +210,6 @@ export function createSettingsPopoverWindow(
   if (opts.loadUrl !== undefined) {
     void popover.loadURL(opts.loadUrl);
   }
-
-  // Surface the unused parameter so linters don't flag WINDOW_WIDTH;
-  // the import exists because callers may want it for anchor math.
-  void WINDOW_WIDTH;
 
   return popover;
 }
