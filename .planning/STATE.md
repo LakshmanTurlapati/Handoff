@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Achilles
 status: planning
-stopped_at: Completed 10-01-PLAN.md — @achilles/claude-code-bridge scaffold + extractors + workspace plumbing committed
-last_updated: "2026-06-06T14:10:54.107Z"
-last_activity: 2026-06-06 — v1.2 roadmap created mapping 30 requirements to 6 phases (09-14)
+stopped_at: Completed 10-02-PLAN.md — NDJSON line parser + session spawner + authoritative outcome + version check + fixtures committed
+last_updated: "2026-06-06T14:25:59Z"
+last_activity: 2026-06-06 — Plan 10-02 delivered LOOP-03 (createClaudeSession runtime spine)
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 13
-  completed_plans: 9
-  percent: 20
+  completed_plans: 10
+  percent: 23
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-06)
 
 ## Current Position
 
-Phase: 09 of 14 (Voice Vendor Wrappers) — first v1.2 phase
-Plan: — (no plans defined yet)
-Status: Roadmap approved, ready to plan Phase 09
-Last activity: 2026-06-06 — v1.2 roadmap created mapping 30 requirements to 6 phases (09-14)
+Phase: 10 of 14 (Claude Code Bridge) — Wave 2 underway
+Plan: 02 complete; 03 (cancellation primitive) next
+Status: Runtime spine shipped — createClaudeSession + LDJSON parser + wire-mapper + version gate + outcome derivation all green
+Last activity: 2026-06-06 — Plan 10-02 delivered LOOP-03 (createClaudeSession + LDJSON line parser + wire-mapper + version-check + outcome derivation; 63 new tests; commit efbfe1a)
 
 Progress: [███████░░░] 69%
 
@@ -58,6 +58,7 @@ Progress: [███████░░░] 69%
 
 *Updated after each plan completion*
 | Phase 10 P01 | 10 | 3 tasks | 14 files |
+| Phase 10 P02 | 11 | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,9 @@ Locked at v1.2 scoping (do not reopen during planning):
 - [Phase ?]: Mirror packages/voice-protocol shape verbatim for the @achilles/claude-code-bridge scaffold (package.json, tsconfig.json, src/.gitignore) — inherits Phase 09 CR-06 + CR-07 hardening for free.
 - [Phase ?]: ClaudeStreamEventSchema validates only the 9 NDJSON wire-format variants; process_exit is synthesised at the runtime layer by Plan 10-02 and joins ClaudeBridgeEvent at the TypeScript layer only.
 - [Phase ?]: extractSpokenSummary distinguishes 'markers absent' (returns null) from 'markers present but empty' (returns empty string ''). Phase 12 callers can use the distinction to drive different fallback behaviour.
+- [Phase 10 P02]: send(text) routes the prompt via child.stdin (writes "text\n", calls stdin.end()) rather than as a positional argv argument — the spawn-then-send lifecycle conflicts with the positional-arg path. send(text) is idempotent in v1.2; multi-prompt-per-session is Phase 12's responsibility (likely via --resume on each utterance).
+- [Phase 10 P02]: LDJSON watchdog has TWO trip conditions: (a) accumulator-without-newline exceeds MAX_LINE_BYTES (write-time) and (b) a completed line itself exceeds MAX_LINE_BYTES (split-time). The plan only specified (a); (b) was required by the oversized-line.ndjson fixture acceptance criterion.
+- [Phase 10 P02]: events$ AsyncIterable is single-consumer with explicit terminal event — process_exit is yielded last, then the iterator terminates (subsequent .next() returns done:true immediately rather than throwing).
 
 ### Pending Todos
 
@@ -102,6 +106,6 @@ Resume file for v1.1: `.planning/phases/08.1-authless-hosted-launch/08.1-CONTEXT
 
 ## Session Continuity
 
-Last session: 2026-06-06T14:10:54.103Z
-Stopped at: Completed 10-01-PLAN.md — @achilles/claude-code-bridge scaffold + extractors + workspace plumbing committed
-Resume file: None — Plan 10-02 ready to plan/execute
+Last session: 2026-06-06T14:25:59Z
+Stopped at: Completed 10-02-PLAN.md — NDJSON line parser + session spawner + authoritative outcome + version check + fixtures committed (efbfe1a)
+Resume file: None — Plan 10-03 ready to plan/execute
