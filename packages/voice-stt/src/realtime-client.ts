@@ -432,6 +432,22 @@ export function createRealtimeSttClient(
         const result = PartialTranscriptSchema.safeParse(candidate);
         if (result.success) {
           emit(result.data);
+        } else {
+          // WR-01: do NOT silently drop. Surface to console.error so
+          // ops can see the dropped event, and emit a synthetic
+          // SttErrorEvent so downstream consumers can observe the
+          // failure on the same events$ surface. The most common
+          // trigger is the server emitting an empty `text` for a
+          // very short utterance (Zod's z.string().min(1) rejects it).
+          console.error(
+            `${LOG_PREFIX} schema parse failed for partial_transcript`,
+            result.error,
+          );
+          emitErrorEvent(
+            "unknown",
+            true,
+            "partial_transcript dropped: schema validation failed",
+          );
         }
         return;
       }
@@ -449,6 +465,18 @@ export function createRealtimeSttClient(
         const result = CommittedTranscriptSchema.safeParse(candidate);
         if (result.success) {
           emit(result.data);
+        } else {
+          // WR-01: surface the parse failure (see partial_transcript
+          // comment for the rationale).
+          console.error(
+            `${LOG_PREFIX} schema parse failed for committed_transcript`,
+            result.error,
+          );
+          emitErrorEvent(
+            "unknown",
+            true,
+            "committed_transcript dropped: schema validation failed",
+          );
         }
         utteranceStartMs = Date.now();
         return;
