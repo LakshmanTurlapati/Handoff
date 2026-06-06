@@ -60,6 +60,30 @@ const workspaceAlias = [
     find: /^@achilles\/claude-code-bridge\/(.+)$/,
     replacement: resolve(ROOT_DIR, "packages/claude-code-bridge/src/$1.ts"),
   },
+  // v1.2 phase-11 addition: apps/achilles aliases. The literal points at
+  // the constants barrel; the four subpath regexes rewrite to the
+  // matching src/* tree so the renderer + main + preload + shared
+  // modules can be imported by the test runner without bundling.
+  {
+    find: "@achilles/app",
+    replacement: resolve(ROOT_DIR, "apps/achilles/src/shared/constants.ts"),
+  },
+  {
+    find: /^@achilles\/app\/main\/(.+)$/,
+    replacement: resolve(ROOT_DIR, "apps/achilles/src/main/$1.ts"),
+  },
+  {
+    find: /^@achilles\/app\/preload\/(.+)$/,
+    replacement: resolve(ROOT_DIR, "apps/achilles/src/preload/$1.ts"),
+  },
+  {
+    find: /^@achilles\/app\/renderer\/(.+)$/,
+    replacement: resolve(ROOT_DIR, "apps/achilles/src/renderer/$1.ts"),
+  },
+  {
+    find: /^@achilles\/app\/shared\/(.+)$/,
+    replacement: resolve(ROOT_DIR, "apps/achilles/src/shared/$1.ts"),
+  },
 ];
 
 /**
@@ -142,7 +166,26 @@ export default defineWorkspace([
       passWithNoTests: true,
     },
   },
+  {
+    resolve: {
+      alias: workspaceAlias,
+    },
+    test: {
+      name: "phase-11-unit",
+      include: [
+        "apps/achilles/src/**/*.test.ts",
+        "apps/achilles/src/**/*.test.tsx",
+      ],
+      environment: "node",
+      passWithNoTests: true,
+    },
+  },
 ]);
 // v1.2 phase-09 addition: workspace aliases + phase-09-unit project for the
 // "@achilles/voice-protocol", "@achilles/voice-stt", and "@achilles/voice-tts" packages.
 // v1.2 phase-10 addition: workspace aliases + phase-10-unit project for @achilles/claude-code-bridge.
+// v1.2 phase-11 addition: workspace aliases + phase-11-unit project for the
+// "@achilles/app" Electron app (apps/achilles/src/**/*.test.ts(x)). The
+// project runs in the node environment because the Phase 11 vitest tests
+// are pure helpers + injected-stub seams; the Playwright suite drives
+// the rendered DOM separately.

@@ -1,0 +1,36 @@
+{
+  "name": "@achilles/app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Achilles Electron app — frameless transparent always-on-top floating UI shell for the voice loop (private; not published)",
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build:main": "electron-vite build",
+    "build:renderer": "electron-vite build",
+    "build:renderer:headless": "vite build --config vite.headless.config.ts",
+    "preview:renderer:headless": "vite preview --config vite.headless.config.ts",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "lint": "echo \"(lint placeholder for apps/achilles)\"",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@achilles/voice-protocol": "0.1.0",
+    "electron-store": "10.1.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "@types/react": "19.0.8",
+    "@types/react-dom": "19.0.3",
+    "@vitejs/plugin-react": "4.3.4",
+    "electron": "42.3.3",
+    "electron-vite": "3.1.0",
+    "typescript": "5.7.3",
+    "vite": "5.4.11",
+    "vitest": "2.1.8"
+  }
+}

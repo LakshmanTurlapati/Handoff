@@ -1,0 +1,8 @@
+out/
+node_modules/
+.tsbuildinfo*
+*.tsbuildinfo
+dist/
+playwright-report/
+.cache/
+test-results/

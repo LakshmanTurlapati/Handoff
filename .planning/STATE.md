@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Achilles
-status: planning
-stopped_at: Completed 10-03-PLAN.md — cancellation primitive (SIGINT/SIGTERM/SIGKILL escalation + --resume after cancel) committed; Phase 10 complete
-last_updated: "2026-06-06T14:44:25Z"
-last_activity: 2026-06-06 — Plan 10-03 delivered LOOP-07 (cancellation primitive + resume-after-cancel)
+status: executing
+stopped_at: Completed 11-01-PLAN.md — apps/achilles scaffold (window + state machine + hotkey + electron-store + IPC schemas); Wave 1 of Phase 11 complete
+last_updated: "2026-06-06T20:58:57Z"
+last_activity: 2026-06-06 — Plan 11-01 delivered the Wave-1 substrate for Phase 11 (UI-01 + UI-06 + IPC schemas + workspace plumbing)
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 13
-  completed_plans: 11
-  percent: 25
+  completed_plans: 12
+  percent: 27
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-06)
 
 ## Current Position
 
-Phase: 10 of 14 (Claude Code Bridge) — COMPLETE
-Plan: 03 complete; Phase 10 wrap-up done; ready to plan Phase 11 (Floating UI Shell) or Phase 12 (End-to-End Integration)
-Status: Cancellation primitive shipped — session.cancel() SIGINT/SIGTERM/SIGKILL escalation + per-child WeakMap idempotency + drain-aware semantics + outcome.reason="cancelled" attribution + sessionId preservation for --resume continuation. All 4 Phase 10 success criteria met; all 6 Phase-10-owned pitfalls mitigated.
-Last activity: 2026-06-06 — Plan 10-03 delivered LOOP-07 (cancellation primitive with 3 s upper-bound escalation + resume-after-cancel argv shape; 22 new tests bringing phase-10-unit to 138/138)
+Phase: 11 of 14 (Floating UI Shell) — Wave 1 of 2 complete
+Plan: 01 complete (Wave 1); Plans 11-02 + 11-03 are Wave 2 and can run in parallel
+Status: apps/achilles scaffold shipped — locked BrowserWindow contract (UI-01) + pure state machine reducer + .strict() Zod IPC schemas + electron-store with safeStorage fallback + global hotkey honouring toggle + PTT (UI-06) + preload contextBridge surface + MockAchillesBridge test seam + workspace plumbing. 89/89 unit tests + 3/3 Playwright scaffold specs pass. NO Electron launch in CI (per CLAUDE.md global + CONTEXT.md test strategy).
+Last activity: 2026-06-06 — Plan 11-01 delivered the Wave-1 substrate for Phase 11 (UI-01 BrowserWindow contract, AchillesState reducer, 12 IPC channel schemas, electron-store wrapper, hotkey + PTT key-up substrate, MockAchillesBridge seam, tsconfig + vitest + playwright project plumbing)
 
-Progress: [████████░░] 77%
+Progress: [████████░░] 78%
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Progress: [████████░░] 77%
 | Phase 10 P01 | 10 | 3 tasks | 14 files |
 | Phase 10 P02 | 11 | 3 tasks | 18 files |
 | Phase 10 P03 | 10 | 2 tasks | 5 files |
+| Phase 11 P01 | ~75 | 2 tasks | 30 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,10 @@ Locked at v1.2 scoping (do not reopen during planning):
 - [Phase 10 P03]: Cancellation primitive is NOT re-exported from the package barrel — consumers go through session.cancel() exclusively. The cancelChildProcess helper is JSDoc @internal; future direct-primitive callers (e.g., Phase 14 hardening watchdog) would import via the subpath alias.
 - [Phase 10 P03]: Two-layer idempotency for cancel — session-level cancelPromise cache + per-child WeakMap in cancelChildProcess. Either alone passes the surface idempotency test; the dual cache matches the locked design and guards against future direct-primitive callers bypassing the surface.
 - [Phase 10 P03]: Cancel-after-natural-exit fast path captures the original ProcessExitEvent in `capturedExitEvent` and resolves WITHOUT setting the `cancelled` flag — preserves the natural outcome (T-10-17 mitigation: prevents retroactive mis-attribution of failed runs to user intent).
+- [Phase 11 P01]: Renamed src/preload/global.d.ts → src/preload/global.ts (Rule 1 fix). The plan's files list named global.d.ts while the CR-07 verification check required zero .d.ts in src/. TypeScript allows `declare global { ... }` inside a regular .ts module (with at least one top-level export); the .ts rename preserves the typed window augmentation and clears CR-07 unambiguously.
+- [Phase 11 P01]: Added apps/achilles/vite.headless.config.ts as a separate plain-vite config (Rule 3 fix). electron-vite lacks a clean "skip main+preload, build only the renderer against an alternate HTML root" mode; the plain-vite config is ~30 lines and runs against test/mocks/index.html which pre-injects mock-bridge.ts so window.__mockBridge populates before main.tsx hydrates.
+- [Phase 11 P01]: Locked timer durations live in shared/constants.ts (LISTENING_VAD_DELAY_MS=1200, PROCESSING_DELAY_MS=800, SPEAKING_DELAY_MS=2000, ERROR_AUTO_DISMISS_MS=8000) so Phase 12's real voice loop has a single source of truth to swap into.
+- [Phase 11 P01]: getBridge() adapter pattern — the renderer never branches on bridge identity; bridge.ts returns a unified AchillesBridge surface backed by window.__mockBridge in headless tests or window.achilles in production. Plans 11-02 + 11-03 import only getBridge.
 
 ### Pending Todos
 
@@ -111,6 +116,6 @@ Resume file for v1.1: `.planning/phases/08.1-authless-hosted-launch/08.1-CONTEXT
 
 ## Session Continuity
 
-Last session: 2026-06-06T14:44:25Z
-Stopped at: Completed 10-03-PLAN.md — cancellation primitive committed; Phase 10 (Claude Code Bridge) complete; all 4 ROADMAP success criteria met; LOOP-03, LOOP-04, LOOP-07 all delivered
-Resume file: None — ready to plan Phase 11 (Floating UI Shell) or Phase 12 (End-to-End Integration & System Prompt) next
+Last session: 2026-06-06T20:58:57Z
+Stopped at: Completed 11-01-PLAN.md — Wave 1 of Phase 11 (Floating UI Shell) substrate shipped; ready to execute Plans 11-02 (visual components) and 11-03 (drag/permission/settings/error) in parallel
+Resume file: None — Wave 2 of Phase 11 ready to dispatch

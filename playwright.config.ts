@@ -12,6 +12,13 @@ import { defineConfig, devices } from "@playwright/test";
  * pairing flow is the primary end-to-end path Phase 1 must validate.
  *
  * Do not rename `phase-01-e2e-mobile` without updating every caller.
+ *
+ * v1.2 phase-11 addition: the `achilles-renderer` project drives the
+ * apps/achilles headless Vite renderer bundle (NOT real Electron — per
+ * CONTEXT.md test strategy and the CLAUDE.md global "never run
+ * applications automatically" rule). The webServer command builds the
+ * headless bundle and serves it via `vite preview` on port 5174; the
+ * viewport is locked to 260x260 to match the BrowserWindow contract.
  */
 export default defineConfig({
   testDir: "./",
@@ -19,6 +26,7 @@ export default defineConfig({
     "apps/web/tests/e2e/**/*.spec.ts",
     "apps/web/tests/*.spec.ts",
     "apps/relay/tests/e2e/**/*.spec.ts",
+    "apps/achilles/test/e2e/**/*.spec.ts",
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
@@ -30,11 +38,40 @@ export default defineConfig({
     trace: "retain-on-failure",
     video: "retain-on-failure",
   },
+  webServer: [
+    {
+      // Phase 11 — headless renderer bundle for the achilles-renderer
+      // project. The webServer block is a Playwright array so it does
+      // not collide with the other projects' server expectations; if
+      // those projects are not being run, this server still gets
+      // spun up before achilles-renderer specs execute.
+      command:
+        "npm --workspace @achilles/app run build:renderer:headless && npm --workspace @achilles/app run preview:renderer:headless",
+      port: 5174,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+  ],
   projects: [
     {
       name: "phase-01-e2e-mobile",
       use: {
         ...devices["iPhone 14"],
+      },
+      testMatch: [
+        "apps/web/tests/e2e/**/*.spec.ts",
+        "apps/web/tests/*.spec.ts",
+        "apps/relay/tests/e2e/**/*.spec.ts",
+      ],
+    },
+    {
+      name: "achilles-renderer",
+      testDir: "./apps/achilles/test/e2e",
+      testMatch: "**/*.spec.ts",
+      use: {
+        baseURL: "http://localhost:5174",
+        viewport: { width: 260, height: 260 },
+        trace: "retain-on-failure",
       },
     },
   ],

@@ -27,12 +27,12 @@ Six categories, mapped to phases by the roadmapper.
 
 ### Floating UI & Voice Capture (UI)
 
-- [ ] **UI-01**: Achilles opens a frameless, transparent, always-on-top window (~220–300 px square) configured as a panel on macOS so it survives Spaces and full-screen apps without stealing focus.
+- [x] **UI-01**: Achilles opens a frameless, transparent, always-on-top window (~220–300 px square) configured as a panel on macOS so it survives Spaces and full-screen apps without stealing focus. (Plan 11-01 — locked BrowserWindow contract asserted by window.test.ts W1/W2/W3.)
 - [ ] **UI-02**: The UI renders five visible states — idle, listening, processing, speaking, error — each with a distinct visual treatment.
 - [ ] **UI-03**: A central reactive circle pulses with live mic amplitude during listening and with TTS amplitude during speaking; idle state shows a slow breathing animation.
 - [ ] **UI-04**: A live waveform driven off `AnalyserNode` renders next to the circle; its audio source switches between the mic (during listening) and the TTS playback (during speaking).
 - [ ] **UI-05**: The user can drag the window to reposition it; window position persists across launches in encrypted local storage.
-- [ ] **UI-06**: User can trigger listening via a configurable global hotkey or an on-screen click; both press-to-toggle and push-to-talk modes are supported and switchable via a setting.
+- [x] **UI-06**: User can trigger listening via a configurable global hotkey or an on-screen click; both press-to-toggle and push-to-talk modes are supported and switchable via a setting. (Plan 11-01 — registerAchillesHotkey honours toggle + PTT; setHotkeyMode persists via electron-store; settings popover UI lands in Plan 11-03.)
 - [ ] **UI-07**: macOS microphone permission is requested by the Electron host (not the launching terminal), with explicit remediation copy that deep-links to System Settings → Privacy → Microphone when denied.
 
 ### STT → Claude Code → TTS Loop (LOOP)
@@ -128,13 +128,13 @@ Which phases cover which requirements. Populated by roadmapper on 2026-06-06.
 | DIST-03 | Phase 13 — Distribution | Pending |
 | DIST-04 | Phase 13 — Distribution | Pending |
 | DIST-05 | Phase 13 — Distribution | Pending |
-| UI-01 | Phase 11 — Floating UI Shell | Pending |
-| UI-02 | Phase 11 — Floating UI Shell | Pending |
-| UI-03 | Phase 11 — Floating UI Shell | Pending |
-| UI-04 | Phase 11 — Floating UI Shell | Pending |
-| UI-05 | Phase 11 — Floating UI Shell | Pending |
-| UI-06 | Phase 11 — Floating UI Shell | Pending |
-| UI-07 | Phase 11 — Floating UI Shell | Pending |
+| UI-01 | Phase 11 — Floating UI Shell | Complete (Plan 11-01) |
+| UI-02 | Phase 11 — Floating UI Shell | Pending (Plan 11-02) |
+| UI-03 | Phase 11 — Floating UI Shell | Pending (Plan 11-02) |
+| UI-04 | Phase 11 — Floating UI Shell | Pending (Plan 11-02) |
+| UI-05 | Phase 11 — Floating UI Shell | Pending (Plan 11-03) |
+| UI-06 | Phase 11 — Floating UI Shell | Complete (Plan 11-01) |
+| UI-07 | Phase 11 — Floating UI Shell | Pending (Plan 11-03) |
 | LOOP-01 | Phase 09 — Voice Vendor Wrappers | Pending |
 | LOOP-02 | Phase 11 — Floating UI Shell | Pending |
 | LOOP-03 | Phase 10 — Claude Code Bridge | Complete |

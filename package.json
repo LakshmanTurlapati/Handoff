@@ -25,6 +25,8 @@
     "validate:handoff-publish-install": "node scripts/validate-handoff-publish-install.mjs",
     "test:phase-01:quick": "vitest run --project phase-01-unit",
     "test:phase-01:full": "vitest run --project phase-01-unit && playwright test --project=phase-01-e2e-mobile",
+    "test:phase-11:quick": "vitest run --project phase-11-unit",
+    "test:phase-11:full": "vitest run --project phase-11-unit && playwright test --project=achilles-renderer",
     "db:generate": "npm run db:generate --workspace packages/db"
   },
   "devDependencies": {
