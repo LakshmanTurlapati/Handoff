@@ -1,0 +1,39 @@
+{
+  "name": "@achilles/voice-tts",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Main-process ElevenLabs Flash v2.5 stream-input TTS client. Sequence-tracked playback, chunk_length_schedule [80,120,160,220], outbound ElevenLabs allowlist (SAFE-03), key never persisted (consumer-injected keySource).",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist .tsbuildinfo && tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(lint placeholder for packages/voice-tts)\"",
+    "prepack": "npm run build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@achilles/voice-protocol": "*",
+    "@elevenlabs/elevenlabs-js": "2.51.0",
+    "ws": "8.18.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/ws": "8.5.13",
+    "typescript": "5.7.3",
+    "vitest": "2.1.8"
+  }
+}
