@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Achilles
-status: ready_to_plan
-last_updated: "2026-06-06T11:00:00.000Z"
-last_activity: 2026-06-06
+status: planning
+stopped_at: Completed 10-01-PLAN.md — @achilles/claude-code-bridge scaffold + extractors + workspace plumbing committed
+last_updated: "2026-06-06T14:10:54.107Z"
+last_activity: 2026-06-06 — v1.2 roadmap created mapping 30 requirements to 6 phases (09-14)
 progress:
-  total_phases: 6
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_phases: 10
+  completed_phases: 2
+  total_plans: 13
+  completed_plans: 9
+  percent: 20
 ---
 
 # Project State
@@ -29,11 +30,12 @@ Plan: — (no plans defined yet)
 Status: Roadmap approved, ready to plan Phase 09
 Last activity: 2026-06-06 — v1.2 roadmap created mapping 30 requirements to 6 phases (09-14)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███████░░░] 69%
 
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 0 (v1.2)
 - Average duration: — min
 - Total execution time: — hours
@@ -50,10 +52,12 @@ Progress: [░░░░░░░░░░] 0%
 | 14. Hardening, Privacy, Resilience | 0 | 0 | — |
 
 **Recent Trend:**
+
 - Last 5 plans: —
 - Trend: — (first v1.2 phase not yet planned)
 
 *Updated after each plan completion*
+| Phase 10 P01 | 10 | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -62,10 +66,14 @@ Progress: [░░░░░░░░░░] 0%
 Decisions are logged in PROJECT.md Key Decisions table and REQUIREMENTS.md Locked Decisions table.
 
 Locked at v1.2 scoping (do not reopen during planning):
+
 - Cloud-vs-local Claude Code target: Local Claude Code only in v1.2 (cloud routing deferred to v1.3)
 - Mic trigger model: Both press-to-toggle AND push-to-talk (configurable via setting)
 - Voice selection scope: One fixed default voice; `ELEVENLABS_VOICE_ID` env override honoured; no picker UI in v1.2
 - Claude Code integration default: Subprocess `claude -p --output-format stream-json` is the bridge spine
+- [Phase ?]: Mirror packages/voice-protocol shape verbatim for the @achilles/claude-code-bridge scaffold (package.json, tsconfig.json, src/.gitignore) — inherits Phase 09 CR-06 + CR-07 hardening for free.
+- [Phase ?]: ClaudeStreamEventSchema validates only the 9 NDJSON wire-format variants; process_exit is synthesised at the runtime layer by Plan 10-02 and joins ClaudeBridgeEvent at the TypeScript layer only.
+- [Phase ?]: extractSpokenSummary distinguishes 'markers absent' (returns null) from 'markers present but empty' (returns empty string ''). Phase 12 callers can use the distinction to drive different fallback behaviour.
 
 ### Pending Todos
 
@@ -94,6 +102,6 @@ Resume file for v1.1: `.planning/phases/08.1-authless-hosted-launch/08.1-CONTEXT
 
 ## Session Continuity
 
-Last session: 2026-06-06 — v1.2 roadmap created and approved
-Stopped at: ROADMAP.md written; STATE.md updated; REQUIREMENTS.md traceability filled; ready to plan Phase 09
-Resume file: None — next action is `/gsd:plan-phase 09`
+Last session: 2026-06-06T14:10:54.103Z
+Stopped at: Completed 10-01-PLAN.md — @achilles/claude-code-bridge scaffold + extractors + workspace plumbing committed
+Resume file: None — Plan 10-02 ready to plan/execute

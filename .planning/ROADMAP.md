@@ -104,7 +104,7 @@ Archived under `.planning/milestones/v1.0-ROADMAP.md`. Phase directories preserv
   3. `session.cancel()` sends SIGINT to the child within 50 ms; the child terminates; `events$` closes; a subsequent `send(text)` starts a new session via `--resume <sid>` with the previous session ID preserved
   4. When the child exits non-zero or any `tool_result` carries an error, the bridge emits a `failure` signal on `events$` regardless of what the assistant text said — verified against a fixture where the model narrates success but a tool actually failed
 **Plans**: 3 plans
-- [ ] 10-01-PLAN.md — Scaffold `@achilles/claude-code-bridge` package (constants, Zod event union, ClaudeVersionError, ack + spoken-summary pure-function extractors) + workspace plumbing (tsconfig.base.json path aliases + vitest.workspace.ts phase-10-unit project)
+- [x] 10-01-PLAN.md — Scaffold `@achilles/claude-code-bridge` package (constants, Zod event union, ClaudeVersionError, ack + spoken-summary pure-function extractors) + workspace plumbing (tsconfig.base.json path aliases + vitest.workspace.ts phase-10-unit project)
 - [ ] 10-02-PLAN.md — LDJSON line parser with MAX_LINE_BYTES watchdog, golden NDJSON fixtures + MockClaudeProcess test helper, wire-format to ClaudeStreamEvent mapper, `claude --version` probe with MIN_CLAUDE_VERSION gate, authoritative outcome derivation, createClaudeSession spawner (locked argv + stdin prompt injection + --resume sid flow)
 - [ ] 10-03-PLAN.md — Cancellation primitive (SIGINT to SIGTERM to SIGKILL escalation with 1s + 2s deadlines, idempotent, drain-aware) + session.cancel() wiring + resume-after-cancel integration test (LOOP-07)
 **UI hint**: no
@@ -208,7 +208,7 @@ Phases 09, 10, 11 are parallel-safe and can fan out if multiple engineers are av
 | 08. Hosted Launch & Active-Session Handoff | v1.1 | 0/3 | Paused | - |
 | 08.1. Authless Hosted Launch | v1.1 | 0/3 | Paused | - |
 | 09. Voice Vendor Wrappers | v1.2 | 0/3 | Planned | - |
-| 10. Claude Code Bridge | v1.2 | 0/3 | Planned | - |
+| 10. Claude Code Bridge | v1.2 | 1/3 | In Progress|  |
 | 11. Floating UI Shell | v1.2 | 0/TBD | Not started | - |
 | 12. End-to-End Integration & System Prompt | v1.2 | 0/TBD | Not started | - |
 | 13. Distribution — npm CLI + Skill + Installers | v1.2 | 0/TBD | Not started | - |
