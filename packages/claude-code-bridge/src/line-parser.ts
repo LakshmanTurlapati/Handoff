@@ -145,8 +145,17 @@ export function createLineParser(): LineParser {
       }
       // We have a complete line. Slice off the prefix (excluding `\n`)
       // and shift the accumulator past the newline.
-      const linePrefix = accumulator.subarray(0, newlineIdx);
-      accumulator = accumulator.subarray(newlineIdx + 1);
+      //
+      // CR-fix WR-05: copy via Buffer.from(...) rather than retain a
+      // subarray view of the underlying buffer. subarray() returns a
+      // view that shares the parent ArrayBuffer, which prevents GC of
+      // the parent until both view AND parent go out of scope. On a
+      // long-lived stream (e.g. a 30s tool call) this can pin an
+      // arbitrary-large parent buffer in memory. Copying the relevant
+      // bytes once means the parent's ArrayBuffer can be released as
+      // soon as the next write replaces `accumulator`.
+      const linePrefix = Buffer.from(accumulator.subarray(0, newlineIdx));
+      accumulator = Buffer.from(accumulator.subarray(newlineIdx + 1));
       if (discardingUntilNewline) {
         // The prefix was the tail of an over-cap line. Drop it and
         // re-enter normal mode for the next line.
