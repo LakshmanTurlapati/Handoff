@@ -21,8 +21,10 @@
  * `[achilles]` warning log.
  */
 import {
+  IPC_ERROR,
   IPC_MIC_AMPLITUDE,
   IPC_OPEN_SYSTEM_SETTINGS,
+  IPC_PERMISSION_STATE,
   IPC_REGISTER_HOTKEY,
   IPC_REQUEST_STATE,
   IPC_STATE_CHANGED,
@@ -31,7 +33,15 @@ import {
   IPC_UPDATE_WINDOW_POSITION,
 } from "../shared/constants.js";
 import { parseEnvelope } from "../shared/ipc-schemas.js";
-import type { AchillesState } from "../shared/constants.js";
+import type { AchillesState, PermissionState } from "../shared/constants.js";
+import {
+  applyDefaultTopRight,
+  wireDragPersistence,
+} from "./drag-persist.js";
+import type {
+  DragPersistClock,
+  WireDragPersistenceHandle,
+} from "./drag-persist.js";
 import { createMockAmplitudeStream } from "./mock-amplitude.js";
 import type { MockStateController } from "./state-machine.js";
 import type { AchillesStore } from "./store.js";
@@ -54,12 +64,52 @@ export interface WireIpcBridgeOptions {
   store: AchillesStore;
   ipcMainRef: IpcMainLike;
   /**
-   * Hook the IPC bridge can call when the renderer asks main to open
-   * the system mic settings panel. Plan 11-03 ships the real
-   * `shell.openExternal(...)` implementation; Plan 11-01 ships a
-   * default no-op stub so the channel is wired end-to-end.
+   * Hook the IPC bridge calls when the renderer requests the system
+   * mic settings panel. Plan 11-03 wires the real
+   * `shell.openExternal(...)` implementation through this seam by
+   * supplying a callback that defers to `permission.openSystemSettings`.
+   * Defaults to a no-op so the channel is wired end-to-end without
+   * launching anything in unit tests.
    */
   openSystemSettings?: () => void;
+  /**
+   * Optional dragPersistence injection seam — by default the bridge
+   * wires `wireDragPersistence` against the supplied window + store on
+   * init. Tests can suppress drag wiring by passing `enableDragPersistence: false`.
+   */
+  enableDragPersistence?: boolean;
+  /**
+   * Window adapter that exposes `on('move' | 'moved')` for the drag
+   * persistence helper. AchillesBrowserWindow does not include these
+   * in its narrow interface; the main entry passes a structural adapter.
+   * Tests pass a fake.
+   */
+  dragWindowAdapter?: {
+    on(channel: "move" | "moved", cb: (...args: unknown[]) => void): void;
+    getPosition(): [number, number];
+  };
+  /**
+   * Hook invoked by IPC_UPDATE_WINDOW_POSITION when the renderer sends
+   * the `{ x: -1, y: -1 }` sentinel (reset to default top-right). The
+   * callback receives the computed default position and is expected to
+   * call `BrowserWindow.setPosition`. Tests inject a spy.
+   */
+  resetWindowPosition?: (pos: { x: number; y: number }) => void;
+  /**
+   * Screen ref used by the reset-window-position default computation.
+   * Defaults to a 1920x1080 origin-zero workArea when undefined.
+   */
+  screenRef?: {
+    getPrimaryDisplay(): {
+      workArea: { x: number; y: number; width: number; height: number };
+    };
+  };
+  /**
+   * Optional clock injection forwarded to `wireDragPersistence`. Tests
+   * pass a deterministic clock so the debounce path is verifiable
+   * without sleeping.
+   */
+  dragClock?: DragPersistClock;
   /**
    * Optional logger for invalid IPC payloads. Defaults to
    * `console.warn`. Tests inject a recording stub.
@@ -73,6 +123,12 @@ export interface IpcBridgeHandle {
    * in the main entry point.
    */
   dispose(): void;
+  /**
+   * Forwards a permission state to the renderer via IPC_PERMISSION_STATE.
+   * Used by the boot probe + the schedulePermissionPoll callback so the
+   * renderer mounts / dismisses the PermissionOverlay.
+   */
+  broadcastPermissionState(state: PermissionState): void;
 }
 
 export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
@@ -81,6 +137,27 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
     // eslint-disable-next-line no-console
     console.warn(msg);
   });
+
+  // Track recently broadcast permission states so the schedulePermissionPoll
+  // tick can deduplicate identical states (T-11-16 mitigation against a
+  // permission poll storm flooding the renderer).
+  let lastBroadcastPermission: PermissionState | null = null;
+
+  // Drag persistence wiring — defaults to ON when a dragWindowAdapter is
+  // supplied so the bridge owns the move→persist pipeline. Tests can opt
+  // out via `enableDragPersistence: false`.
+  let dragHandle: WireDragPersistenceHandle | null = null;
+  if (opts.enableDragPersistence !== false && opts.dragWindowAdapter !== undefined) {
+    dragHandle = wireDragPersistence({
+      window: opts.dragWindowAdapter,
+      store,
+      emitError: (msg) => {
+        window.webContents.send(IPC_ERROR, { message: msg });
+      },
+      logger: opts.logger,
+      clock: opts.dragClock,
+    });
+  }
 
   // Amplitude streams — created lazily on state transitions so they
   // don't tick during idle/processing/error.
@@ -188,6 +265,19 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
         x: number;
         y: number;
       };
+      // Reset sentinel: { x: -1, y: -1 } means "reset to default
+      // top-right" — used by the SettingsPopover's reset button. The
+      // sentinel was chosen because Electron rejects negative window
+      // coordinates as invalid positions, so it cannot collide with a
+      // legitimate drag result.
+      if (parsed.x === -1 && parsed.y === -1) {
+        const defaultPos = applyDefaultTopRight({
+          screenRef: opts.screenRef,
+        });
+        opts.resetWindowPosition?.(defaultPos);
+        store.writeWindowPosition(defaultPos);
+        return;
+      }
       store.writeWindowPosition({ x: parsed.x, y: parsed.y });
     } catch (err) {
       log(
@@ -251,6 +341,7 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
   function dispose(): void {
     stopAmplitudeStreams();
     controller.cancelScheduledTransitions();
+    dragHandle?.dispose();
     ipcMainRef.removeAllListeners(IPC_REQUEST_STATE);
     ipcMainRef.removeAllListeners(IPC_REGISTER_HOTKEY);
     ipcMainRef.removeAllListeners(IPC_OPEN_SYSTEM_SETTINGS);
@@ -258,7 +349,13 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
     ipcMainRef.removeAllListeners(IPC_UPDATE_HOTKEY_CONFIG);
   }
 
-  return { dispose };
+  function broadcastPermissionState(state: PermissionState): void {
+    if (state === lastBroadcastPermission) return;
+    lastBroadcastPermission = state;
+    window.webContents.send(IPC_PERMISSION_STATE, { state });
+  }
+
+  return { dispose, broadcastPermissionState };
 }
 
 /**

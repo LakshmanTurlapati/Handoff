@@ -1,0 +1,341 @@
+/*
+ * Achilles overlay styles — Plan 11-03.
+ *
+ * Covers the four Plan-11-03 surfaces that compose on top of the
+ * Plan-11-02 FloatingShell:
+ *
+ *   - .permission-overlay        — UI-07 full-window 260×260 remediation
+ *   - .settings-popover          — UI-SPEC §7 220×180 popover surface
+ *   - .error-banner              — UI-SPEC §8 260×90 banner
+ *   - .drag-handle               — UI-05 invisible 260×30 -webkit-app-region: drag strip
+ *
+ * Tokens (--achilles-*, --space-*, --font-size-*, --motion-*) come from
+ * tokens.css (Plan 11-02). The component-side selectors only consume
+ * them via `var(...)` so theme overrides remain a single :root re-declare.
+ *
+ * NO emojis (CLAUDE.md global).
+ */
+
+/* ─────────────────────────────────────────────────────────────────── */
+/* DragHandle — UI-05 invisible 30 px top strip                       */
+/* ─────────────────────────────────────────────────────────────────── */
+
+.drag-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 260px;
+  height: 30px;
+  /* `-webkit-app-region: drag` tells Electron to treat this region as
+     the OS-level window drag target. The .drag-handle class is the
+     load-bearing declaration (jsdom strips the inline style, so the
+     unit tests assert against data-app-region="drag"; production
+     Electron respects the CSS property). */
+  -webkit-app-region: drag;
+  cursor: grab;
+  pointer-events: auto;
+  z-index: 10;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Children that need to receive clicks (e.g., a settings affordance
+   inside the drag strip) opt out of the drag region via .no-drag. */
+.no-drag {
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+}
+
+/* ─────────────────────────────────────────────────────────────────── */
+/* PermissionOverlay — UI-07 full-window remediation surface          */
+/* ─────────────────────────────────────────────────────────────────── */
+
+.permission-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 260px;
+  height: 260px;
+  background: var(--achilles-surface);
+  opacity: 0.95;
+  padding: var(--space-xl) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: auto;
+  z-index: 100;
+  box-sizing: border-box;
+  animation: permission-overlay-fade-in
+    var(--motion-duration-default) var(--motion-ease-out);
+}
+
+@keyframes permission-overlay-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.95;
+  }
+}
+
+.permission-overlay-icon {
+  color: var(--achilles-error);
+  margin-bottom: var(--space-md);
+}
+
+.permission-overlay-heading {
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-heading);
+  color: var(--achilles-text);
+  margin: 0 0 var(--space-md) 0;
+}
+
+.permission-overlay-body {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-body);
+  color: var(--achilles-text);
+  margin: 0 0 var(--space-lg) 0;
+  padding: 0 var(--space-md);
+}
+
+.permission-overlay-cta {
+  background: var(--achilles-listening);
+  color: #ffffff;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.permission-overlay-cta:focus-visible {
+  outline: 2px solid var(--achilles-text);
+  outline-offset: 2px;
+}
+
+/* ─────────────────────────────────────────────────────────────────── */
+/* SettingsPopover — UI-SPEC §7 220×180 popover surface               */
+/* ─────────────────────────────────────────────────────────────────── */
+
+.settings-popover {
+  background: var(--achilles-surface);
+  width: 220px;
+  height: 180px;
+  border: 1px solid var(--achilles-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: var(--space-md);
+  color: var(--achilles-text);
+  font-family: var(--font-family);
+  pointer-events: auto;
+  box-sizing: border-box;
+  animation: settings-popover-enter
+    var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+@keyframes settings-popover-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.settings-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-md);
+}
+
+.settings-popover-heading {
+  font-size: var(--font-size-heading);
+  font-weight: var(--font-weight-semibold);
+  color: var(--achilles-text);
+  margin: 0;
+}
+
+.settings-popover-close {
+  background: transparent;
+  border: none;
+  color: var(--achilles-text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.settings-popover-section {
+  margin-bottom: var(--space-sm);
+}
+
+.settings-popover-label {
+  display: block;
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-medium);
+  color: var(--achilles-text-dim);
+  margin-bottom: 4px;
+}
+
+.settings-popover-segmented {
+  display: flex;
+  gap: 4px;
+}
+
+.settings-popover-segmented-option {
+  flex: 1;
+  background: transparent;
+  border: 1px solid var(--achilles-border);
+  color: var(--achilles-text);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+}
+
+.settings-popover-segmented-option.selected {
+  border-color: var(--achilles-listening);
+  color: var(--achilles-listening);
+}
+
+.settings-popover-hotkey {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.settings-popover-hotkey-display {
+  flex: 1;
+  font-size: var(--font-size-label);
+  color: var(--achilles-text);
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.settings-popover-hotkey-change {
+  background: transparent;
+  border: 1px solid var(--achilles-border);
+  color: var(--achilles-text-dim);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+}
+
+.settings-popover-reset {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--achilles-border);
+  color: var(--achilles-text);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+}
+
+.settings-popover-reset-confirm {
+  font-size: var(--font-size-label);
+}
+
+.settings-popover-reset-confirm p {
+  margin: 0 0 4px 0;
+  color: var(--achilles-text);
+}
+
+.settings-popover-reset-confirm-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.settings-popover-reset-confirm-actions button {
+  flex: 1;
+  background: transparent;
+  border: 1px solid var(--achilles-border);
+  color: var(--achilles-text);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: var(--font-size-label);
+  cursor: pointer;
+}
+
+.settings-popover-reset-confirm-actions button:first-child {
+  border-color: var(--achilles-destructive);
+  color: var(--achilles-destructive);
+}
+
+/* ─────────────────────────────────────────────────────────────────── */
+/* ErrorBanner — UI-SPEC §8 260×90 banner                              */
+/* ─────────────────────────────────────────────────────────────────── */
+
+.error-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 260px;
+  height: 90px;
+  background: var(--achilles-surface);
+  border-bottom: 1px solid var(--achilles-error);
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  align-items: start;
+  padding: var(--space-md);
+  gap: var(--space-md);
+  pointer-events: auto;
+  z-index: 50;
+  box-sizing: border-box;
+  color: var(--achilles-text);
+  font-family: var(--font-family);
+}
+
+.error-banner-icon {
+  color: var(--achilles-error);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.error-banner-message {
+  font-size: var(--font-size-body);
+  line-height: 1.4;
+  color: var(--achilles-text);
+  /* Cap at 3 lines per UI-SPEC §8. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.error-banner-dismiss {
+  width: 60px;
+  height: 24px;
+  border: 1px solid var(--achilles-border);
+  background: transparent;
+  color: var(--achilles-text-dim);
+  border-radius: 4px;
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  align-self: end;
+}
+
+.error-banner-dismiss:focus-visible {
+  outline: 2px solid var(--achilles-text);
+  outline-offset: 2px;
+}

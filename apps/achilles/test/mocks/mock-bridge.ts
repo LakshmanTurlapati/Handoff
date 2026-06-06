@@ -18,6 +18,7 @@
 
 import type {
   AchillesState,
+  HotkeyMode,
   PermissionState,
 } from "../../src/shared/constants.js";
 
@@ -46,6 +47,28 @@ const subscribers: SubscriberSet = {
 };
 
 const ipcLog: Array<{ type: string; payload: unknown }> = [];
+
+// ─────────────────────────────────────────────────────────────────────
+// Plan 11-03 test seams — consumed by the drag-persistence, settings-popover,
+// and error-banner Playwright specs. Documented in each spec.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Persisted window-position store kept in renderer memory. The
+ * `simulateDrag` seam writes here directly so the e2e spec can observe
+ * the value via `getPersistedPosition()` without requiring main↔renderer
+ * round-trips. Consumed by `apps/achilles/test/e2e/drag-persistence.spec.ts`.
+ */
+let persistedPosition: { x: number; y: number } | null = null;
+
+/**
+ * In-memory hotkey config used by the settings-popover spec. Consumed
+ * by `apps/achilles/test/e2e/settings-popover.spec.ts`.
+ */
+let hotkeyConfig: { mode: HotkeyMode; key: string } = {
+  mode: "toggle",
+  key: "CommandOrControl+Shift+A",
+};
 
 let committedCounter = 0;
 function nextUuid(): string {
@@ -105,6 +128,55 @@ const mock = {
   getLastEmittedIPC(): Array<{ type: string; payload: unknown }> {
     return ipcLog;
   },
+
+  // ─── Plan 11-03 test seams ────────────────────────────────────────
+
+  /**
+   * Synthesises a drag-and-release at the supplied screen coordinates.
+   * The seam writes directly into `persistedPosition` so the e2e spec
+   * can verify the persistence round-trip without needing a real IPC
+   * round-trip. Consumed by `drag-persistence.spec.ts`.
+   */
+  simulateDrag(toX: number, toY: number): void {
+    persistedPosition = { x: toX, y: toY };
+    ipcLog.push({
+      type: "achilles:update-window-position",
+      payload: { x: toX, y: toY },
+    });
+  },
+
+  /**
+   * Returns the most-recently persisted window position. Consumed by
+   * `drag-persistence.spec.ts` to assert the round-trip across a
+   * page.reload (the page bootstrap reads this value to restore the
+   * persisted position into a debug surface).
+   */
+  getPersistedPosition(): { x: number; y: number } | null {
+    return persistedPosition;
+  },
+
+  /**
+   * Sets the in-memory hotkey config and records the IPC envelope.
+   * Consumed by `settings-popover.spec.ts` to seed the popover state.
+   */
+  setHotkeyConfig(cfg: { mode?: HotkeyMode; key?: string }): void {
+    if (cfg.mode !== undefined) hotkeyConfig.mode = cfg.mode;
+    if (cfg.key !== undefined) hotkeyConfig.key = cfg.key;
+    ipcLog.push({
+      type: "achilles:update-hotkey-config",
+      payload: cfg,
+    });
+  },
+
+  /**
+   * Returns the in-memory hotkey config. Consumed by
+   * `settings-popover.spec.ts` to confirm the popover persisted a mode
+   * change.
+   */
+  getHotkeyConfig(): { mode: HotkeyMode; key: string } {
+    return { mode: hotkeyConfig.mode, key: hotkeyConfig.key };
+  },
+
   // Internal: the renderer bridge adapter reads `_subscribers` to wire
   // its subscribe functions against the mock's lists.
   _subscribers: subscribers,

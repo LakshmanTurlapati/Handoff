@@ -23,14 +23,18 @@
  */
 import {
   IPC_MIC_AMPLITUDE,
-  IPC_PERMISSION_STATE,
   IPC_STATE_CHANGED,
   IPC_TTS_AMPLITUDE,
 } from "../shared/constants.js";
-import type { AchillesState } from "../shared/constants.js";
+import type { AchillesState, PermissionState } from "../shared/constants.js";
 import { registerAchillesHotkey, unregisterAchillesHotkey } from "./hotkey.js";
 import { wireIpcBridge } from "./ipc-bridge.js";
 import { createMockAmplitudeStream } from "./mock-amplitude.js";
+import {
+  openSystemSettings as openSystemSettingsHelper,
+  probePermission,
+  schedulePermissionPoll,
+} from "./permission.js";
 import { createMockStateController } from "./state-machine.js";
 import { createAchillesStore } from "./store.js";
 import { createAchillesWindow } from "./window.js";
@@ -92,7 +96,10 @@ async function bootstrap(): Promise<void> {
   // State machine wiring. We need to compose the controller's
   // broadcast with the amplitude swap so we set everything up here
   // and pass the resulting hook into createMockStateController.
-  let bridgeHandle: { dispose(): void } | null = null;
+  let bridgeHandle: {
+    dispose(): void;
+    broadcastPermissionState(state: PermissionState): void;
+  } | null = null;
   let activeAmplitudeStop: (() => void) | null = null;
 
   function startAmplitudeForState(state: AchillesState): void {
@@ -121,11 +128,49 @@ async function bootstrap(): Promise<void> {
     getMode: () => store.readHotkeyMode(),
   });
 
+  // Track latest permission state so the first-hotkey-press flow can
+  // decide whether to call systemPreferences.askForMediaAccess.
+  let currentPermissionState: PermissionState = "granted";
+
+  // Adapter that exposes the underlying BrowserWindow's 'move' /
+  // 'moved' events to wireDragPersistence. The createAchillesWindow
+  // interface is narrow on purpose; here we widen to the surface
+  // drag-persist needs without leaking it to other consumers.
+  const dragWindowAdapter = {
+    on(
+      channel: "move" | "moved",
+      cb: (...args: unknown[]) => void,
+    ): void {
+      (
+        window as unknown as {
+          on(c: string, l: (...args: unknown[]) => void): void;
+        }
+      ).on(channel, cb);
+    },
+    getPosition(): [number, number] {
+      return (
+        window as unknown as { getPosition(): [number, number] }
+      ).getPosition();
+    },
+  };
+
   bridgeHandle = wireIpcBridge({
     window,
     controller,
     store,
     ipcMainRef: ipcMain as never,
+    dragWindowAdapter,
+    screenRef: screen as never,
+    resetWindowPosition: (pos) => {
+      window.setPosition(pos.x, pos.y);
+    },
+    openSystemSettings: () => {
+      void openSystemSettingsHelper({
+        platform: process.platform,
+        shellRef: electron.shell as never,
+        dialogRef: electron.dialog as never,
+      });
+    },
   });
 
   // Hotkey wiring — use the persisted accelerator and the persisted
@@ -160,7 +205,25 @@ async function bootstrap(): Promise<void> {
   registerAchillesHotkey(
     initialKey,
     initialMode,
-    () => controller.dispatch({ type: "HOTKEY_PRESS" }),
+    async () => {
+      // On the FIRST hotkey press while permission is 'not-determined',
+      // invoke probePermission with triggerAskForMediaAccess=true (per
+      // CONTEXT.md "On first press, call systemPreferences.askForMediaAccess").
+      // The follow-up state is broadcast through IPC_PERMISSION_STATE so
+      // the renderer dismisses the overlay (on 'granted') or mounts it
+      // (on 'denied').
+      if (currentPermissionState === "not-determined") {
+        const asked = await probePermission({
+          platform: process.platform,
+          triggerAskForMediaAccess: true,
+          systemPreferencesRef: electron.systemPreferences as never,
+        });
+        currentPermissionState = asked;
+        bridgeHandle?.broadcastPermissionState(asked);
+        if (asked !== "granted") return;
+      }
+      controller.dispatch({ type: "HOTKEY_PRESS" });
+    },
     () => controller.dispatch({ type: "HOTKEY_RELEASE" }),
     {
       globalShortcutRef: globalShortcut as never,
@@ -168,15 +231,38 @@ async function bootstrap(): Promise<void> {
     },
   );
 
-  // Permission-state surfacing — emit once on boot so the renderer
-  // can compose against the current mic permission. Phase 11 uses the
-  // mocked 'not-determined' status; Plan 11-03 / Phase 12 swap in
-  // systemPreferences.getMediaAccessStatus('microphone') once that
-  // surface lands.
-  window.webContents.send(IPC_PERMISSION_STATE, { state: "not-determined" });
+  // Boot-time permission probe — silent (does NOT trigger ask). On
+  // 'denied' / 'restricted' the renderer mounts the PermissionOverlay
+  // on first paint. On 'not-determined' nothing renders; the first
+  // hotkey press triggers the ask flow above.
+  const bootPermission = await probePermission({
+    platform: process.platform,
+    triggerAskForMediaAccess: false,
+    systemPreferencesRef: electron.systemPreferences as never,
+  });
+  currentPermissionState = bootPermission;
+  bridgeHandle.broadcastPermissionState(bootPermission);
+
+  // Permission poll — UI-SPEC §6 re-poll cadence (2000ms) so the overlay
+  // dismisses without a restart when the user grants in System Settings.
+  // The schedule is alive for the app's lifetime; the bridge dedupes
+  // identical consecutive states (T-11-16 mitigation).
+  const cancelPermissionPoll = schedulePermissionPoll(
+    (state) => {
+      currentPermissionState = state;
+      bridgeHandle?.broadcastPermissionState(state);
+    },
+    {
+      probeOptions: {
+        platform: process.platform,
+        systemPreferencesRef: electron.systemPreferences as never,
+      },
+    },
+  );
 
   app.on("will-quit", () => {
     unregisterAchillesHotkey({ globalShortcutRef: globalShortcut as never });
+    cancelPermissionPoll();
     bridgeHandle?.dispose();
     if (activeAmplitudeStop !== null) {
       activeAmplitudeStop();
