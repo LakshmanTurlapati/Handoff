@@ -170,6 +170,15 @@ export default defineWorkspace([
     resolve: {
       alias: workspaceAlias,
     },
+    esbuild: {
+      // v1.2 phase-11-02 addition: renderer component tests (.test.tsx)
+      // need JSX automatic runtime so React does not have to be imported
+      // explicitly. The phase-11-unit project's environment defaults to
+      // node; per-file `// @vitest-environment jsdom` docblocks opt
+      // individual component tests into the DOM.
+      jsx: "automatic",
+      jsxImportSource: "react",
+    },
     test: {
       name: "phase-11-unit",
       include: [

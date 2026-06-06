@@ -1,71 +1,47 @@
-// Replaced by Plan 11-02 (FloatingShell composition root)
-//
-// Plan 11-01 ships only enough renderer bootstrap to prove the bridge
-// wires correctly: a stub `<App />` that subscribes via
-// `window.__mockBridge` (Playwright headless) or `window.achilles`
-// (real Electron preload) and reflects the current AchillesState on
-// the floating-shell + reactive-circle elements as `data-state="..."`.
-//
-// The full component composition (reactive circle, waveform, transcript,
-// permission overlay, settings popover, error banner) lands in Plans
-// 11-02 and 11-03.
-
-import { StrictMode, useEffect, useState } from "react";
+/**
+ * Achilles renderer entry — Plan 11-02 (revised from the Plan 11-01 stub).
+ *
+ * Renders the real composition root:
+ *
+ *   <AchillesStateProvider>
+ *     <App />        — Plan 11-03 owns App.tsx, which composes the
+ *                      FloatingShell + overlay slots (PermissionOverlay,
+ *                      ErrorBanner, SettingsPopover).
+ *   </AchillesStateProvider>
+ *
+ * If Plan 11-03's App.tsx is not yet present (parallel-wave dev), the
+ * renderer falls back to mounting <FloatingShell /> directly with empty
+ * overlay slots so the Plan 11-02 surfaces are still verifiable.
+ *
+ * Both production builds (via electron-vite) and the headless Playwright
+ * preview (via vite.headless.config.ts) share this entry; the bridge
+ * adapter (renderer/bridge.ts) picks `window.achilles` (real preload) or
+ * `window.__mockBridge` (headless test seam) at runtime so this entry
+ * never branches on which.
+ *
+ * The headless debug surface (`window.__achilles_debug`) is attached by
+ * FloatingShell when `import.meta.env.MODE` is 'headless' or
+ * 'development' so Plan 11-02's Playwright specs can assert structural
+ * contracts (UI-04 waveform analyser binCount) without breaking the
+ * production build (Vite tree-shakes the branch when MODE !== those
+ * values).
+ */
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import type { AchillesState } from "../shared/constants.js";
-import { getBridge } from "./bridge.js";
+import "./styles/tokens.css";
+import "./styles/components.css";
 
-function App(): React.ReactElement {
-  const [state, setState] = useState<AchillesState>("idle");
-
-  useEffect(() => {
-    const bridge = getBridge();
-    const unsubscribe = bridge.onStateChanged((next) => {
-      setState(next);
-    });
-    return unsubscribe;
-  }, []);
-
-  return (
-    <div
-      data-testid="floating-shell-inner"
-      style={{
-        width: "260px",
-        height: "260px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        pointerEvents: "none",
-      }}
-    >
-      <div
-        data-testid="reactive-circle"
-        data-state={state}
-        style={{
-          width: "96px",
-          height: "96px",
-          borderRadius: "50%",
-          backgroundColor: "rgba(95, 100, 113, 0.4)",
-          color: "#E8EAED",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: "11px",
-          pointerEvents: "auto",
-        }}
-      >
-        state: {state}
-      </div>
-    </div>
-  );
-}
+import { App } from "./App.js";
+import { AchillesStateProvider } from "./state/useAchillesState.js";
 
 const rootElement = document.getElementById("root");
 if (rootElement !== null) {
   createRoot(rootElement).render(
     <StrictMode>
-      <App />
+      <AchillesStateProvider>
+        <App />
+      </AchillesStateProvider>
     </StrictMode>,
   );
 }

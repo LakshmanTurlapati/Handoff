@@ -28,9 +28,9 @@ Six categories, mapped to phases by the roadmapper.
 ### Floating UI & Voice Capture (UI)
 
 - [x] **UI-01**: Achilles opens a frameless, transparent, always-on-top window (~220–300 px square) configured as a panel on macOS so it survives Spaces and full-screen apps without stealing focus. (Plan 11-01 — locked BrowserWindow contract asserted by window.test.ts W1/W2/W3.)
-- [ ] **UI-02**: The UI renders five visible states — idle, listening, processing, speaking, error — each with a distinct visual treatment.
-- [ ] **UI-03**: A central reactive circle pulses with live mic amplitude during listening and with TTS amplitude during speaking; idle state shows a slow breathing animation.
-- [ ] **UI-04**: A live waveform driven off `AnalyserNode` renders next to the circle; its audio source switches between the mic (during listening) and the TTS playback (during speaking).
+- [x] **UI-02**: The UI renders five visible states — idle, listening, processing, speaking, error — each with a distinct visual treatment. (Plan 11-02 — 5 state accents in tokens.css cascade through `[data-state='X']` selectors; e2e state-distinctness.spec.ts asserts pairwise-distinct `--circle-color-current` across the 5 states.)
+- [x] **UI-03**: A central reactive circle pulses with live mic amplitude during listening and with TTS amplitude during speaking; idle state shows a slow breathing animation. (Plan 11-02 — ReactiveCircle applies `breathing` class in idle when visible, `amplitude-driven` with `--circle-scale = 0.9 + amplitude * 0.5` in listening/speaking; e2e circle-amplitude.spec.ts verifies the scale tracks LISTENING_FIXTURE and SPEAKING_FIXTURE within 0.001 tolerance.)
+- [x] **UI-04**: A live waveform driven off `AnalyserNode` renders next to the circle; its audio source switches between the mic (during listening) and the TTS playback (during speaking). (Plan 11-02 — Waveform component renders 32 bars at 190×22 px Canvas2D, MockAnalyser shape-matches AnalyserNode; e2e waveform.spec.ts asserts canvas dimensions + `window.__achilles_debug.analyser.frequencyBinCount === 32`. Real AnalyserNode wired in Phase 12.)
 - [ ] **UI-05**: The user can drag the window to reposition it; window position persists across launches in encrypted local storage.
 - [x] **UI-06**: User can trigger listening via a configurable global hotkey or an on-screen click; both press-to-toggle and push-to-talk modes are supported and switchable via a setting. (Plan 11-01 — registerAchillesHotkey honours toggle + PTT; setHotkeyMode persists via electron-store; settings popover UI lands in Plan 11-03.)
 - [ ] **UI-07**: macOS microphone permission is requested by the Electron host (not the launching terminal), with explicit remediation copy that deep-links to System Settings → Privacy → Microphone when denied.
@@ -38,7 +38,7 @@ Six categories, mapped to phases by the roadmapper.
 ### STT → Claude Code → TTS Loop (LOOP)
 
 - [ ] **LOOP-01**: Mic audio is captured in the renderer via `getUserMedia`, downsampled to 16 kHz mono Int16 PCM in an AudioWorklet, and streamed to ElevenLabs Scribe v2 Realtime over a renderer-side WebSocket authenticated with a single-use token minted by the main process.
-- [ ] **LOOP-02**: Partial and committed transcripts surface live in the floating UI as confirmation (display only — not editable; re-utter to correct).
+- [x] **LOOP-02**: Partial and committed transcripts surface live in the floating UI as confirmation (display only — not editable; re-utter to correct). (Plan 11-02 — TranscriptOverlay renders partials at 0.7 opacity and committed at 1.0 opacity, with max 3 visible lines and 15s idle auto-fade via the `fading` class; e2e transcript.spec.ts verifies opacity values and the auto-fade behavior using page.clock.fastForward.)
 - [x] **LOOP-03**: On utterance commit, the transcript is injected into a child `claude` process via `claude -p --output-format stream-json --include-partial-messages --append-system-prompt-file <companion.md> --resume <sid>`; the session ID persists across utterances so context accumulates within an Achilles session.
 - [x] **LOOP-04**: Claude's streamed assistant output is parsed line-by-line (NDJSON); the spoken acknowledgement and `<spoken-summary>` block are extracted and routed to ElevenLabs Flash v2.5 streaming TTS in the main process.
 - [ ] **LOOP-05**: TTS audio chunks play back in arrival order via the renderer's AudioContext; the mic is gated during playback (half-duplex) and re-enabled ~300 ms after the last audio chunk drains.
@@ -129,14 +129,14 @@ Which phases cover which requirements. Populated by roadmapper on 2026-06-06.
 | DIST-04 | Phase 13 — Distribution | Pending |
 | DIST-05 | Phase 13 — Distribution | Pending |
 | UI-01 | Phase 11 — Floating UI Shell | Complete (Plan 11-01) |
-| UI-02 | Phase 11 — Floating UI Shell | Pending (Plan 11-02) |
-| UI-03 | Phase 11 — Floating UI Shell | Pending (Plan 11-02) |
-| UI-04 | Phase 11 — Floating UI Shell | Pending (Plan 11-02) |
+| UI-02 | Phase 11 — Floating UI Shell | Shipped (Plan 11-02) |
+| UI-03 | Phase 11 — Floating UI Shell | Shipped (Plan 11-02) |
+| UI-04 | Phase 11 — Floating UI Shell | Shipped (Plan 11-02) |
 | UI-05 | Phase 11 — Floating UI Shell | Pending (Plan 11-03) |
 | UI-06 | Phase 11 — Floating UI Shell | Complete (Plan 11-01) |
 | UI-07 | Phase 11 — Floating UI Shell | Pending (Plan 11-03) |
 | LOOP-01 | Phase 09 — Voice Vendor Wrappers | Pending |
-| LOOP-02 | Phase 11 — Floating UI Shell | Pending |
+| LOOP-02 | Phase 11 — Floating UI Shell | Shipped (Plan 11-02) |
 | LOOP-03 | Phase 10 — Claude Code Bridge | Complete |
 | LOOP-04 | Phase 10 — Claude Code Bridge | Complete |
 | LOOP-05 | Phase 12 — End-to-End Integration & System Prompt | Pending |

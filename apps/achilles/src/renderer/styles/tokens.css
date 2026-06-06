@@ -1,0 +1,97 @@
+/*
+ * Achilles design tokens — Phase 11 source of truth.
+ *
+ * Every visual decision documented in UI-SPEC.md `Design System` lives
+ * here as a CSS custom property. Component styles in `components.css`
+ * read these tokens via `var(--token)` so Phase 12+ can override the
+ * palette / motion durations by re-declaring tokens at `:root` in a
+ * theme file without touching component source.
+ *
+ * Tokens are scoped at `:root` so the entire renderer (and the headless
+ * Playwright preview) sees them identically.
+ *
+ * The `@media (prefers-reduced-motion: reduce)` block collapses every
+ * motion duration + breathing period to `0ms`. Amplitude-driven scaling
+ * (the inline `--circle-scale` custom property set by ReactiveCircle)
+ * still works because it conveys functional state — not decoration —
+ * per UI-SPEC §5.
+ */
+
+:root {
+  /* ─────────────────────────────────────────────────────────── */
+  /* Spacing scale (multiples of 4) — UI-SPEC Spacing Scale     */
+  /* ─────────────────────────────────────────────────────────── */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* ─────────────────────────────────────────────────────────── */
+  /* Typography — UI-SPEC Typography                             */
+  /* ─────────────────────────────────────────────────────────── */
+  --font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-size-body: 13px;
+  --font-size-label: 11px;
+  --font-size-heading: 15px;
+  --line-height-body: 1.5;
+  --line-height-label: 1.3;
+  --line-height-heading: 1.2;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  /* ─────────────────────────────────────────────────────────── */
+  /* Color — neutral palette (UI-SPEC Color: Base palette)      */
+  /* ─────────────────────────────────────────────────────────── */
+  --achilles-bg: rgba(20, 22, 28, 0.85);
+  --achilles-surface: rgba(28, 30, 38, 0.92);
+  --achilles-text: #e8eaed;
+  --achilles-text-dim: rgba(232, 234, 237, 0.7);
+  --achilles-border: rgba(255, 255, 255, 0.08);
+
+  /* ─────────────────────────────────────────────────────────── */
+  /* Color — state accents (UI-SPEC Color: State accents)        */
+  /*                                                              */
+  /* Each state owns exactly one accent. The accent applies to    */
+  /* the circle and glow only; transcript text never picks up an  */
+  /* accent. The 5 hex values are the locked palette referenced    */
+  /* by UI-02 distinctness assertions.                            */
+  /* ─────────────────────────────────────────────────────────── */
+  --achilles-idle: #5f6471;
+  --achilles-listening: #3dd68c;
+  --achilles-processing: #f5a623;
+  --achilles-speaking: #4a9eff;
+  --achilles-error: #ff4d4f;
+
+  /* Destructive equals error per UI-SPEC; reset-position is the   */
+  /* only destructive action in Phase 11.                         */
+  --achilles-destructive: #ff4d4f;
+
+  /* ─────────────────────────────────────────────────────────── */
+  /* Motion — UI-SPEC Motion & Animation                         */
+  /* ─────────────────────────────────────────────────────────── */
+  --motion-ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-duration-fast: 150ms;
+  --motion-duration-default: 250ms;
+  --motion-duration-state: 350ms;
+  --breathing-period: 2000ms;
+}
+
+/*
+ * Reduced-motion media query — collapses decorative motion to 0 so
+ * users with vestibular sensitivity are not exposed to the breathing /
+ * shake / spin animations. Amplitude-driven scaling is exempt because
+ * it is functional state, not decoration (UI-SPEC §5).
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration-fast: 0ms;
+    --motion-duration-default: 0ms;
+    --motion-duration-state: 0ms;
+    --breathing-period: 0ms;
+  }
+}

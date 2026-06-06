@@ -23,6 +23,14 @@ const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   plugins: [react()],
   root: resolve(PROJECT_ROOT, "test/mocks"),
+  // Phase 11 Plan 11-02 update: define a build-time constant so the
+  // renderer code can branch on `import.meta.env.MODE` to expose the
+  // `__achilles_debug` test seam (Plan 11-02 e2e WAVEFORM spec asserts
+  // analyser.frequencyBinCount === 32 via this seam). Vite's tree-shaker
+  // strips the branch in any build that does NOT set this constant.
+  define: {
+    "import.meta.env.MODE": JSON.stringify("headless"),
+  },
   build: {
     outDir: resolve(PROJECT_ROOT, "out/renderer-headless"),
     emptyOutDir: true,

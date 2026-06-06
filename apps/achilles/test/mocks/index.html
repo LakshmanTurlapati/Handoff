@@ -31,7 +31,14 @@
     </style>
   </head>
   <body>
-    <div id="root" data-testid="floating-shell"></div>
+    <!--
+      Plan 11-02 update: removed `data-testid="floating-shell"` from the
+      root wrapper because the FloatingShell React component now owns
+      that testid (UI-SPEC §10 locks the selector). Leaving the testid
+      on both elements yielded duplicate locator hits in strict-mode
+      Playwright (the scaffold spec failed against the headless bundle).
+    -->
+    <div id="root"></div>
     <!--
       Mock bridge MUST load before the renderer entry so window.__mockBridge
       is populated before main.tsx hooks into it.

@@ -1,0 +1,322 @@
+/*
+ * Achilles renderer component styles — Phase 11.
+ *
+ * Every selector is scoped under `.floating-shell` (or an internal
+ * BEM-like sub-class) so the styles do not leak into the headless
+ * preview's chrome. Tokens come from `tokens.css`; this file owns
+ * keyframes, layout, and state-driven class compositions only.
+ *
+ * Layout strategy: the 260×260 surface uses absolute positioning per
+ * UI-SPEC §2 pixel grid. The window itself is small enough that
+ * flow-layout adds no value over absolute positioning, and the locked
+ * pixel positions are easier to read this way.
+ *
+ * `pointer-events: none` is set on the window root so clicks pass
+ * through to apps behind. Each visible region re-enables
+ * `pointer-events: auto` so the drag handle, circle, waveform,
+ * transcript, settings affordance, and overlays remain interactive.
+ */
+
+/* ─────────────────────────────────────────────────────────────── */
+/* Window root + pointer-events boundary                          */
+/* ─────────────────────────────────────────────────────────────── */
+.floating-shell {
+  position: relative;
+  width: 260px;
+  height: 260px;
+  background: transparent;
+  pointer-events: none;
+  font-family: var(--font-family);
+  color: var(--achilles-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─────────────────────────────────────────────────────────────── */
+/* Drag handle (UI-SPEC §2: top 0..30 px)                          */
+/* ─────────────────────────────────────────────────────────────── */
+.floating-shell .drag-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 260px;
+  height: 30px;
+  -webkit-app-region: drag;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.floating-shell .drag-handle:active {
+  cursor: grabbing;
+}
+
+/* ─────────────────────────────────────────────────────────────── */
+/* Reactive circle (UI-SPEC §2: centered at x:130 y:98, 96×96)     */
+/* ─────────────────────────────────────────────────────────────── */
+.reactive-circle {
+  position: absolute;
+  /* center the 96×96 box at x:130 y:98 → top-left at (82, 50) */
+  top: 50px;
+  left: 82px;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: pointer;
+  /* Color is supplied per-state by a CSS variable read off the   */
+  /* container's --circle-color-current property. Default to idle */
+  /* so the initial paint is sane.                                 */
+  --circle-color-current: var(--achilles-idle);
+  background-color: transparent;
+  transition:
+    box-shadow var(--motion-duration-state) var(--motion-ease-out),
+    background-color var(--motion-duration-state) var(--motion-ease-out);
+}
+
+.reactive-circle svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+/* Per-state accent variable. Components.tsx sets data-state so the */
+/* selector cascades the right token onto --circle-color-current.   */
+.reactive-circle[data-state="idle"] {
+  --circle-color-current: var(--achilles-idle);
+}
+.reactive-circle[data-state="listening"] {
+  --circle-color-current: var(--achilles-listening);
+}
+.reactive-circle[data-state="processing"] {
+  --circle-color-current: var(--achilles-processing);
+}
+.reactive-circle[data-state="speaking"] {
+  --circle-color-current: var(--achilles-speaking);
+}
+.reactive-circle[data-state="error"] {
+  --circle-color-current: var(--achilles-error);
+}
+
+/* Idle treatment: solid fill at 0.4 opacity + breathing            */
+.reactive-circle[data-state="idle"] svg circle {
+  fill: var(--circle-color-current);
+  fill-opacity: 0.4;
+  stroke: var(--circle-color-current);
+  stroke-opacity: 0.6;
+  stroke-width: 1;
+}
+
+/* Listening treatment: radial gradient fill + amplitude scale +    */
+/* glow ring                                                        */
+.reactive-circle[data-state="listening"] svg circle {
+  fill: var(--circle-color-current);
+  fill-opacity: 0.8;
+  stroke: var(--circle-color-current);
+  stroke-width: 0;
+}
+.reactive-circle[data-state="listening"] {
+  box-shadow: 0 0 20px var(--achilles-listening);
+  background-color: rgba(61, 214, 140, 0.08);
+}
+
+/* Processing treatment: transparent fill, rotating ring via        */
+/* pseudo-element                                                   */
+.reactive-circle[data-state="processing"] svg circle {
+  fill: transparent;
+  stroke: transparent;
+}
+.reactive-circle[data-state="processing"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 3px solid var(--circle-color-current);
+  /* 270deg arc: hide bottom-right quadrant by transparent borders   */
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+  border-top-color: var(--circle-color-current);
+  border-left-color: var(--circle-color-current);
+  /* The spinning class controls the animation; this rule sets the  */
+  /* base shape.                                                     */
+}
+
+/* Speaking treatment: radial gradient fill + glow ring             */
+.reactive-circle[data-state="speaking"] svg circle {
+  fill: var(--circle-color-current);
+  fill-opacity: 0.8;
+  stroke: var(--circle-color-current);
+  stroke-width: 0;
+}
+.reactive-circle[data-state="speaking"] {
+  box-shadow: 0 0 20px var(--achilles-speaking);
+  background-color: rgba(74, 158, 255, 0.08);
+}
+
+/* Error treatment: stroke-only ring + shake                        */
+.reactive-circle[data-state="error"] svg circle {
+  fill: transparent;
+  stroke: var(--circle-color-current);
+  stroke-width: 3;
+}
+
+/* Behavioural classes layered on top of the per-state base        */
+.reactive-circle.breathing {
+  animation: breathing var(--breathing-period) infinite ease-in-out;
+}
+
+.reactive-circle.spinning::before {
+  animation: spin 1200ms linear infinite;
+}
+
+.reactive-circle.shake {
+  animation: shake 600ms var(--motion-ease-out);
+}
+
+.reactive-circle.amplitude-driven {
+  transform: scale(var(--circle-scale, 1));
+  transition: transform 50ms linear;
+}
+
+/* ─────────────────────────────────────────────────────────────── */
+/* Waveform (UI-SPEC §2: top:148 left:35 size 190×22)              */
+/* ─────────────────────────────────────────────────────────────── */
+.waveform {
+  position: absolute;
+  top: 148px;
+  left: 35px;
+  width: 190px;
+  height: 22px;
+  pointer-events: none;
+}
+
+.waveform canvas {
+  display: block;
+  width: 190px;
+  height: 22px;
+}
+
+/* ─────────────────────────────────────────────────────────────── */
+/* Transcript overlay (UI-SPEC §2: top:176 left:16 right:16, 228×64) */
+/* ─────────────────────────────────────────────────────────────── */
+.transcript-overlay {
+  position: absolute;
+  top: 176px;
+  left: 16px;
+  width: 228px;
+  height: 64px;
+  overflow: hidden;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  transition: opacity var(--motion-duration-default) var(--motion-ease-out);
+}
+
+.transcript-overlay.speaking-hide {
+  opacity: 0;
+  transition: opacity 1000ms linear;
+}
+
+.transcript-partial {
+  opacity: 0.7;
+  color: var(--achilles-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transcript-committed {
+  opacity: 1;
+  color: var(--achilles-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transcript-committed.fading {
+  animation: transcript-fade 1500ms linear forwards;
+}
+
+/* ─────────────────────────────────────────────────────────────── */
+/* Keyframes                                                        */
+/* ─────────────────────────────────────────────────────────────── */
+
+/*
+ * Breathing — idle state slow pulse. Per UI-SPEC §1 the cycle is
+ * 0.95 → 1.05 → 0.95 over `--breathing-period` (default 2000ms).
+ */
+@keyframes breathing {
+  0% {
+    transform: scale(0.95);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(0.95);
+  }
+}
+
+/*
+ * Spin — processing state's 270deg ring. The pseudo-element draws
+ * the partial arc; this keyframe rotates the entire element so the
+ * gap walks around the circle.
+ */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/*
+ * Shake — error state dampened jitter. 600ms total with declining
+ * displacement so the motion settles into a static red ring.
+ */
+@keyframes shake {
+  0% {
+    transform: translateX(0);
+  }
+  15% {
+    transform: translateX(-2px);
+  }
+  30% {
+    transform: translateX(2px);
+  }
+  45% {
+    transform: translateX(-2px);
+  }
+  60% {
+    transform: translateX(1px);
+  }
+  75% {
+    transform: translateX(-1px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+/*
+ * Transcript fade — committed lines fade linearly to transparent
+ * over 1500ms after the 15s idle threshold. LOOP-02.
+ */
+@keyframes transcript-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}

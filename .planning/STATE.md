@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Achilles
 status: executing
-stopped_at: Completed 11-01-PLAN.md — apps/achilles scaffold (window + state machine + hotkey + electron-store + IPC schemas); Wave 1 of Phase 11 complete
-last_updated: "2026-06-06T20:58:57Z"
-last_activity: 2026-06-06 — Plan 11-01 delivered the Wave-1 substrate for Phase 11 (UI-01 + UI-06 + IPC schemas + workspace plumbing)
+stopped_at: Completed 11-02-PLAN.md — reactive circle + waveform + transcript + 5-state visual treatments (UI-02 + UI-03 + UI-04 + LOOP-02); Wave 2 plan-02 of Phase 11 complete
+last_updated: "2026-06-06T21:51:53Z"
+last_activity: 2026-06-06 — Plan 11-02 delivered the 4 renderer components proving UI-02/03/04 + LOOP-02 against the headless Vite bundle
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 13
-  completed_plans: 12
-  percent: 27
+  completed_plans: 13
+  percent: 30
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-06)
 
 ## Current Position
 
-Phase: 11 of 14 (Floating UI Shell) — Wave 1 of 2 complete
-Plan: 01 complete (Wave 1); Plans 11-02 + 11-03 are Wave 2 and can run in parallel
-Status: apps/achilles scaffold shipped — locked BrowserWindow contract (UI-01) + pure state machine reducer + .strict() Zod IPC schemas + electron-store with safeStorage fallback + global hotkey honouring toggle + PTT (UI-06) + preload contextBridge surface + MockAchillesBridge test seam + workspace plumbing. 89/89 unit tests + 3/3 Playwright scaffold specs pass. NO Electron launch in CI (per CLAUDE.md global + CONTEXT.md test strategy).
-Last activity: 2026-06-06 — Plan 11-01 delivered the Wave-1 substrate for Phase 11 (UI-01 BrowserWindow contract, AchillesState reducer, 12 IPC channel schemas, electron-store wrapper, hotkey + PTT key-up substrate, MockAchillesBridge seam, tsconfig + vitest + playwright project plumbing)
+Phase: 11 of 14 (Floating UI Shell) — Wave 2 plan-02 complete (11-03 runs in parallel)
+Plan: 02 complete (Wave 2 / plan-02); Plan 11-03 is the Wave-2 sibling
+Status: 4 renderer components shipped — FloatingShell (composition root), ReactiveCircle (96px SVG with per-state CSS classes + amplitude scaling), Waveform (32-bar Canvas2D visualizer), TranscriptOverlay (LOOP-02 partial/committed renderer with 15s auto-fade). useAchillesState reducer + provider + hook clamps amplitude to [0,1]. MockAnalyser AnalyserNode-shape testability seam (Phase 12 swaps in a real AnalyserNode). Design tokens declare the 5 state accents + motion durations at :root with reduced-motion override. 76/76 new unit tests + 8/8 new Playwright e2e specs pass against the headless Vite bundle (UI-02 + UI-03 + UI-04 + LOOP-02). Cumulative: 212/212 phase-11-unit tests + 26/26 achilles-renderer specs. NO Electron launch in CI.
+Last activity: 2026-06-06 — Plan 11-02 delivered the 4 renderer components proving UI-02 (5-state distinctness), UI-03 (amplitude-driven circle scaling), UI-04 (32-bar Canvas2D waveform), LOOP-02 (partial/committed transcript opacity + 15s auto-fade) against the headless Vite bundle
 
-Progress: [████████░░] 78%
+Progress: [████████░░] 79%
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Progress: [████████░░] 78%
 | Phase 10 P02 | 11 | 3 tasks | 18 files |
 | Phase 10 P03 | 10 | 2 tasks | 5 files |
 | Phase 11 P01 | ~75 | 2 tasks | 30 files |
+| Phase 11 P02 | ~60 | 2 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -88,6 +89,12 @@ Locked at v1.2 scoping (do not reopen during planning):
 - [Phase 11 P01]: Added apps/achilles/vite.headless.config.ts as a separate plain-vite config (Rule 3 fix). electron-vite lacks a clean "skip main+preload, build only the renderer against an alternate HTML root" mode; the plain-vite config is ~30 lines and runs against test/mocks/index.html which pre-injects mock-bridge.ts so window.__mockBridge populates before main.tsx hydrates.
 - [Phase 11 P01]: Locked timer durations live in shared/constants.ts (LISTENING_VAD_DELAY_MS=1200, PROCESSING_DELAY_MS=800, SPEAKING_DELAY_MS=2000, ERROR_AUTO_DISMISS_MS=8000) so Phase 12's real voice loop has a single source of truth to swap into.
 - [Phase 11 P01]: getBridge() adapter pattern — the renderer never branches on bridge identity; bridge.ts returns a unified AchillesBridge surface backed by window.__mockBridge in headless tests or window.achilles in production. Plans 11-02 + 11-03 import only getBridge.
+- [Phase 11 P02]: Per-file jsdom environment via `// @vitest-environment jsdom` docblock — phase-11-unit project keeps node default; component tests opt in per file. Cleaner than splitting the project into two workspace entries.
+- [Phase 11 P02]: Canvas 2D shim in test setup, not the `canvas` npm package — jsdom 26 does NOT ship Canvas2D (returns null). A 30-line getContext('2d') stub recording fillStyle / fillRect calls satisfies WF1-WF4 without ballooning the dev dependency footprint with Cairo + pixman.
+- [Phase 11 P02]: Headless debug surface gated by `import.meta.env.MODE === 'headless' || 'development' || 'test'` — vite.headless.config.ts defines MODE='headless' so the debug conditional resolves true only there; production electron-vite path sets MODE='production' so the branch is dead code.
+- [Phase 11 P02]: MockAnalyser inlines the LCG generator instead of importing createMockAmplitudeStream from src/main — renderer / main process separation lock. Seed convention (42) + Numerical Recipes constants duplicated so streams pair up for fixture comparison without crossing the process boundary.
+- [Phase 11 P02]: Per-state accent via CSS custom property cascade — `[data-state='X']` selectors set `--circle-color-current` to `var(--achilles-X)`. The state-distinctness e2e reads the resolved property and asserts pairwise distinctness across all 5 states without hard-coding hex values.
+- [Phase 11 P02]: useAchillesState reducer clamps mic/TTS amplitude into [0,1] (T-11-08 defence in depth). ReactiveCircle has a second-line clamp in its inline --circle-scale calculation. Both defences cap the scaled circle at 1.4× the natural size.
 
 ### Pending Todos
 
@@ -116,6 +123,6 @@ Resume file for v1.1: `.planning/phases/08.1-authless-hosted-launch/08.1-CONTEXT
 
 ## Session Continuity
 
-Last session: 2026-06-06T20:58:57Z
-Stopped at: Completed 11-01-PLAN.md — Wave 1 of Phase 11 (Floating UI Shell) substrate shipped; ready to execute Plans 11-02 (visual components) and 11-03 (drag/permission/settings/error) in parallel
-Resume file: None — Wave 2 of Phase 11 ready to dispatch
+Last session: 2026-06-06T21:51:53Z
+Stopped at: Completed 11-02-PLAN.md — Wave 2 plan-02 of Phase 11 (4 renderer components + 4 e2e specs proving UI-02/03/04 + LOOP-02) shipped; Plan 11-03 (Wave-2 sibling) ships drag/permission/settings/error overlay components in parallel
+Resume file: None — Phase 11 Wave 2 nearing completion; Plan 11-03 still in progress as parallel sibling
