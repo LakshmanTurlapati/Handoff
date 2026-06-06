@@ -90,6 +90,30 @@ export const IPC_UPDATE_WINDOW_POSITION = "achilles:update-window-position";
 export const IPC_UPDATE_HOTKEY_CONFIG = "achilles:update-hotkey-config";
 
 // ─────────────────────────────────────────────────────────────────────
+// Phase 12 IPC channels
+//
+// Six new channels added by Plan 12-03 to support the renderer audio
+// infrastructure (mic frame forward, TTS chunk fan-out, playback
+// completion signal) and the STT auth surface (renderer-side token
+// request / mint round-trip). Plan 12-04 will consume these in the
+// orchestrator wiring.
+//
+// Direction:
+//   Renderer → Main: utterance-commit, mic-frame, stt-token-request
+//   Main → Renderer: tts-chunk, stt-token
+//   Renderer → Main: tts-playback-complete
+//
+// Naming follows the established `achilles:` kebab-case convention.
+// ─────────────────────────────────────────────────────────────────────
+
+export const IPC_TTS_CHUNK = "achilles:tts-chunk";
+export const IPC_TTS_PLAYBACK_COMPLETE = "achilles:tts-playback-complete";
+export const IPC_UTTERANCE_COMMIT = "achilles:utterance-commit";
+export const IPC_MIC_FRAME = "achilles:mic-frame";
+export const IPC_STT_TOKEN_REQUEST = "achilles:stt-token-request";
+export const IPC_STT_TOKEN = "achilles:stt-token";
+
+// ─────────────────────────────────────────────────────────────────────
 // `as const` tuples — the single membership source for both the pure
 // state machine reducer and the Zod schemas.
 //
