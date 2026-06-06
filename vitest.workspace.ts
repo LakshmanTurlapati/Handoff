@@ -63,6 +63,16 @@ const workspaceAlias = [
  *   - .planning/phases/01-identity-pairing-foundation/01-VALIDATION.md
  *
  * Do not rename `phase-01-unit` without updating every caller.
+ *
+ * WR-10 note: `passWithNoTests: true` is set on each project's `test`
+ * config. The flag works at runtime (verified by running each project
+ * with an empty include glob) but the `defineWorkspace` `ProjectConfig`
+ * type in Vitest 2.x does not declare it directly, only on the deeper
+ * `ResolvedConfig` (see node_modules/vitest/dist/chunks/config.*.d.ts).
+ * This is a pre-existing type gap tracked in
+ * .planning/phases/09-voice-vendor-wrappers/deferred-items.md and is
+ * the cleanest expression site — moving it to the CLI invocation would
+ * scatter the configuration across multiple package.json scripts.
  */
 export default defineWorkspace([
   {
