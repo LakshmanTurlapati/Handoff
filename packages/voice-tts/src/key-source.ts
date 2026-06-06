@@ -36,13 +36,20 @@
 export type KeySource = () => Promise<string>;
 
 /**
- * Minimum length we require for a valid API key. Achilles' real
- * ElevenLabs keys start with `sk_` and run well beyond 30 characters;
- * the 8-character floor is purely defence in depth — it catches "empty
- * keystore returned empty string" failure modes early instead of
- * letting the WebSocket open with an empty `xi-api-key` header.
+ * Minimum length we require for a valid API key. ElevenLabs production
+ * keys are `sk_` + a long hex suffix and run well past 32 characters;
+ * 32 is the floor used by the renderer-side validator in
+ * `@achilles/voice-protocol/ipc.ts` (`ELEVENLABS_KEY_MIN_LENGTH`) and
+ * we align here so misconfigurations fail at the wrapper boundary
+ * with a clear message instead of being accepted, sent over the wire,
+ * and rejected by ElevenLabs with an opaque close code.
+ *
+ * Aligning with the renderer floor also means the IPC envelope check
+ * and the main-process keystore check enforce the SAME shape; a key
+ * that survives the IPC validator will, by construction, survive this
+ * check too.
  */
-const MIN_KEY_LENGTH = 8;
+const MIN_KEY_LENGTH = 32;
 
 /**
  * Await the injected `KeySource` callback and validate the resolved

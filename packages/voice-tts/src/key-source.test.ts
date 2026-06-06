@@ -18,9 +18,9 @@ import { callKeySource, type KeySource } from "./key-source.js";
 
 describe("voice-tts/key-source — consumer-injected KeySource callback", () => {
   it("returns the awaited key when the source resolves successfully", async () => {
-    const source: KeySource = async () => "sk_test_keyvalue_long_enough";
+    const source: KeySource = async () => "sk_test_0123456789abcdef0123456789abcdef";
     await expect(callKeySource(source)).resolves.toBe(
-      "sk_test_keyvalue_long_enough",
+      "sk_test_0123456789abcdef0123456789abcdef",
     );
   });
 
@@ -42,9 +42,20 @@ describe("voice-tts/key-source — consumer-injected KeySource callback", () => 
     );
   });
 
-  it("rejects keys shorter than 8 characters with 'invalid key shape from keySource'", async () => {
+  it("rejects keys shorter than the 32-character floor with 'invalid key shape from keySource'", async () => {
+    // WR-11 raised the floor to 32 chars (matching the renderer-side
+    // ELEVENLABS_KEY_MIN_LENGTH in voice-protocol/ipc.ts). A short key
+    // like "abc" or even "sk_short9" must fail at this boundary so a
+    // misconfigured keystore surfaces a clear error instead of being
+    // forwarded to ElevenLabs and rejected with an opaque close code.
     const tooShort: KeySource = async () => "abc";
     await expect(callKeySource(tooShort)).rejects.toThrowError(
+      /invalid key shape from keySource/,
+    );
+
+    const justShortOfFloor: KeySource = async () =>
+      "sk_test_0123456789abcdef0123456"; // 31 chars — one short of the floor.
+    await expect(callKeySource(justShortOfFloor)).rejects.toThrowError(
       /invalid key shape from keySource/,
     );
   });
@@ -61,7 +72,8 @@ describe("voice-tts/key-source — consumer-injected KeySource callback", () => 
     // value type of KeySource is exactly `() => Promise<string>` — a
     // zero-argument callback. If a future commit changes the signature
     // to accept an `apiKey` parameter, this assignment fails to compile.
-    const sentinel: () => Promise<string> = async () => "sk_test_long_enough";
+    const sentinel: () => Promise<string> = async () =>
+      "sk_test_0123456789abcdef0123456789abcdef";
     const reassign: KeySource = sentinel;
     expect(typeof reassign).toBe("function");
   });

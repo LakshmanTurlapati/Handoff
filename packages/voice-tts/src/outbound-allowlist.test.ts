@@ -35,7 +35,8 @@ import type { KeySource } from "./key-source.js";
  * NOT call the key source — the test only asserts the URL guard fires
  * before any WS opens. The callback is here for type-shape parity.
  */
-const stubKeySource: KeySource = async () => "sk_test_keyvalue_long_enough";
+const stubKeySource: KeySource = async () =>
+  "sk_test_0123456789abcdef0123456789abcdef";
 
 describe("voice-tts/outbound-allowlist — SAFE-03 enforcement at construction", () => {
   it("accepts the locked default Flash v2.5 stream-input URL", () => {
