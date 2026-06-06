@@ -214,4 +214,5 @@ None — the package introduces no new attack surface beyond what the threat mod
 - Test pass: 41/41 across 7 test files.
 - Build pass: `tsc -p tsconfig.json` exit 0; dist/index.js produced.
 - Workspace typecheck pass: `npm run typecheck --workspace @achilles/voice-tts` exit 0.
-- Commit verification: will be appended below after the final commit lands.
+- Commit verification: `c64283d feat(09-03): @achilles/voice-tts — Flash v2.5 streaming with sequence-tracked playback` FOUND in git log.
+- Cross-package verification: all 17 test files in the phase-09-unit project pass (143 tests across @achilles/voice-protocol, @achilles/voice-stt, @achilles/voice-tts).
