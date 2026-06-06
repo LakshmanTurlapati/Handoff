@@ -80,7 +80,10 @@ Archived under `.planning/milestones/v1.0-ROADMAP.md`. Phase directories preserv
   3. The renderer authenticates to Scribe v2 Realtime using a single-use token minted by the main process — the raw API key never crosses IPC
   4. `packages/voice-tts` plays a 30-second narration through the renderer's `AudioContext` with no audible gaps and in arrival order, verified against a sequence-numbered chunk fixture
   5. Outbound network traffic from `packages/voice-stt` and `packages/voice-tts` resolves only to ElevenLabs hostnames; a denylist test against any other host produces a refusal
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 09-01-PLAN.md — Build `@achilles/voice-protocol` (shared Zod schemas + types for STT/TTS events, IPC envelope including single-use token mint flow, outbound ElevenLabs host allowlist matcher) and wire root workspace plumbing (tsconfig.base.json path aliases + vitest.workspace.ts project entries) for all three Phase 09 packages
+- [ ] 09-02-PLAN.md — Build `@achilles/voice-stt` (renderer-side Scribe v2 Realtime client with single-use token auth, main-process token mint helper isolated to a separate exports subpath, exp-backoff reconnect with 429 distinction, 5-second WAV fixture + round-trip test against stubbed Scribe WS, SAFE-01 dist grep guard)
+- [ ] 09-03-PLAN.md — Build `@achilles/voice-tts` (main-process Flash v2.5 stream-input client with consumer-injected keySource callback, chunk_length_schedule [80,120,160,220], SequenceBuffer for monotonic-order delivery, 30-second sequenced-chunk fixture replayed in scrambled order, SAFE-03 outbound-allowlist enforcement)
 **UI hint**: no
 
 #### Phase 10: Claude Code Bridge
@@ -201,7 +204,7 @@ Phases 09, 10, 11 are parallel-safe and can fan out if multiple engineers are av
 | 07. Codex-Native `/handoff` Command | v1.1 | 2/3 | Paused | - |
 | 08. Hosted Launch & Active-Session Handoff | v1.1 | 0/3 | Paused | - |
 | 08.1. Authless Hosted Launch | v1.1 | 0/3 | Paused | - |
-| 09. Voice Vendor Wrappers | v1.2 | 0/TBD | Not started | - |
+| 09. Voice Vendor Wrappers | v1.2 | 0/3 | Planned | - |
 | 10. Claude Code Bridge | v1.2 | 0/TBD | Not started | - |
 | 11. Floating UI Shell | v1.2 | 0/TBD | Not started | - |
 | 12. End-to-End Integration & System Prompt | v1.2 | 0/TBD | Not started | - |
