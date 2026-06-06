@@ -1,3 +1,4 @@
+// v1.2 hand-rolls the wire protocol for CI offline-testability; v1.3 will migrate to @elevenlabs/* SDKs once a sandbox account is provisioned.
 /**
  * Renderer-side ElevenLabs Scribe v2 Realtime client.
  *
@@ -325,7 +326,15 @@ export function createRealtimeSttClient(
     // wrapper torn down — we MUST NOT construct a fresh WebSocket
     // afterwards. Silent return is correct: stop() already set
     // lifecycle = "closed" and closed the iterable.
-    if (lifecycle === "closing" || lifecycle === "closed") {
+    //
+    // The double-cast is necessary because TypeScript's control-flow
+    // analyzer narrows `lifecycle` to "connecting" after the assignment
+    // on the first line of connect(); it does not see that the outer
+    // `let` can be mutated by stop() during the await. We re-read
+    // through a non-narrowing reference so the comparison type-checks.
+    const readLifecycle = (): Lifecycle => lifecycle;
+    const post = readLifecycle();
+    if (post === "closing" || post === "closed") {
       return;
     }
 
