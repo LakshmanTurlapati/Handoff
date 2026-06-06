@@ -288,3 +288,50 @@ Seven Critical findings cluster around two themes: (1) WebSocket lifecycle corre
 _Reviewed: 2026-06-06_
 _Reviewer: gsd-code-reviewer_
 _Depth: standard_
+
+---
+
+## FIX LOG
+
+Fixes applied on 2026-06-06 by `gsd-code-fixer` against the `Achilles` branch via an isolated `gsd-reviewfix/09-*` worktree. Test count rose from 143 (12 of which were skipped pending dist) to 145 (zero skipped — SAFE-01 grep guard now runs against the rebuilt dist).
+
+| ID    | Status   | Fix summary                                                                                                                                                                                                                                                                       | Commit    |
+|-------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------|
+| CR-01 | fixed    | `scheduleReconnect` retains the `setTimeout` handle; `stop()` clears it before tearing down the socket. Defensive lifecycle re-check inside the timer body.                                                                                                                       | be8ac14   |
+| CR-02 | fixed    | `connect()` re-reads `lifecycle` through a non-narrowing closure after `await getToken()`; a `stop()` during the token fetch now silently aborts before a fresh WebSocket is constructed.                                                                                          | be8ac14   |
+| CR-03 | fixed    | `close()` races `openPromise` against a 250 ms timeout and a `closeSignal` Promise that `ensureOpen()` awaits in parallel with `onopen`. `close()` now always resolves in finite time even when the WebSocket never opens.                                                          | 80778d9   |
+| CR-04 | fixed    | TTS `scheduleReconnect` retains the `setTimeout` handle; `close()` clears it. Pre-existing `closedByCaller` guard inside the timer remains.                                                                                                                                       | 80778d9   |
+| CR-05 | fixed    | Removed the silent two-arg fallback. Browser-style WebSocket constructors now throw the explicit auth-mode error: `voice-tts WebSocket transport requires Node.js-style WebSocket constructor accepting headers; got browser-style. This package must run in the main process.`   | 80778d9   |
+| CR-06 | fixed    | Added `"src/**/*.test.ts"` and `"test/**"` to the exclude arrays of `packages/voice-protocol/tsconfig.json` (was missing entirely) and added `"test/**"` to voice-stt and voice-tts. Verified `dist/` no longer contains `*.test.*` files via `npm run build`.                       | de34785   |
+| CR-07 | fixed    | Added `src/.gitignore` to each of voice-protocol / voice-stt / voice-tts with rules for `*.js`, `*.d.ts`, `*.js.map`, `*.d.ts.map`. Current trees verified clean via `find`; gitignore is defence in depth so a future `tsc` without `-p` cannot land artefacts in `git`.            | 01c93c4   |
+| WR-01 | fixed    | Schema-parse failures for partial/committed transcripts now `console.error` with the Zod issue and emit a synthetic `SttErrorEventSchema` event (code "unknown", retryable=true) via the existing `emitErrorEvent` helper.                                                          | b09f9ef   |
+| WR-02 | fixed    | New `finishStream()` helper closes the WS (code 1000, "stream-complete") and marks the iterable complete in one idempotent step. `stream_complete` and the normal-1000 onclose path both route through it.                                                                          | 80778d9   |
+| WR-03 | fixed    | Both wrappers' `events$` now throw on the second `[Symbol.asyncIterator]()` call with a clear "single-consumer" error; protects against silent concurrent-consumer races on shared shift()/awaiter.                                                                                | 82f99d6   |
+| WR-04 | fixed    | Listeners are stored in a named bag and removed via `detachAll()` before the socket is replaced. The close handler also compares its own bag to the active `listeners` reference and bails out on mismatch.                                                                       | be8ac14   |
+| WR-05 | fixed    | Narrowed the WebSocket-constructor catch to `TypeError` only. OOM/security/URL-parse errors now bubble up unchanged.                                                                                                                                                              | 80778d9   |
+| WR-06 | fixed    | `buildInitialFrame` is now a zero-arg function returning the JSON string; the misleading `{ headerFrame, apiKey }` return shape is gone.                                                                                                                                          | 80778d9   |
+| WR-07 | fixed    | Mock TTS server constructor now accepts `(url, _protocols?, options?)` and exposes an `optionsSink` callback; new stream-client test asserts `options.headers["xi-api-key"] === TEST_KEY`.                                                                                          | 070a7ac   |
+| WR-08 | fixed    | New realtime-client test drives the wrapper through the real close-event pathway, asserts the iterator resolves `done=true`, and asserts no further `onEvent` calls occur after `stop()` even if the mock socket attempts to push.                                                  | aa13df3   |
+| WR-09 | fixed    | Replaced both `as SttEvent` / `as TtsEvent` casts on `shift()` with defensive undefined checks; preserves the runtime behaviour but lets the type system enforce the invariant.                                                                                                    | 82f99d6   |
+| WR-10 | deferred (documented) | The `passWithNoTests` flag works at runtime (verified against Vitest 2.x's `ResolvedConfig`); the ProjectConfig type gap is pre-existing and tracked in `deferred-items.md`. Added an inline comment in `vitest.workspace.ts` referencing it.                                       | a5e7650   |
+| WR-11 | fixed    | Raised `MIN_KEY_LENGTH` from 8 to 32 (matches `ELEVENLABS_KEY_MIN_LENGTH` in `voice-protocol/ipc.ts`). Test fixtures updated to use `sk_test_` + 32 hex chars (40-char total). Added explicit 31-char rejection test to assert the floor value.                                     | 520d30c   |
+| IN-01 | deferred (v1.3) | Per fix-scope instructions, added a one-line top-of-file comment to `realtime-client.ts` and `stream-client.ts` documenting that the v1.2 implementation hand-rolls the wire protocol for CI offline-testability; v1.3 will migrate to `@elevenlabs/*` SDKs once a sandbox account is provisioned. The declared SDK dependencies remain in `package.json` for v1.3 migration. | aab9ab8   |
+| IN-02 | skipped (Info, out of scope) | Allowlist matcher rejects trailing-dot FQDNs. Not in the fix scope (Critical + Warning only).                                                                                                                                                                                | —         |
+| IN-03 | skipped (Info, out of scope) | STT WebSocket subprotocol token-in-header exposure surface. Informational only; not in the fix scope.                                                                                                                                                                       | —         |
+| IN-04 | skipped (Info, out of scope) | Duplicate `BACKOFF_BASE_MS` constants. CONTEXT.md notes this is an intentional v1.3 refactor candidate.                                                                                                                                                                       | —         |
+| IN-05 | skipped (Info, out of scope) | Mint body `model` literal redundancy. Reviewer's recommendation was "None required".                                                                                                                                                                                          | —         |
+
+### Verification
+
+- `npx vitest run --project phase-09-unit` → 145 passed (was 143; +1 WR-07 header-forwarding assertion, +1 WR-08 strengthened stop test; SAFE-01 grep guard previously 12-of-14 skipped now 0-skipped after `npm run build`).
+- `npm test --workspace @achilles/voice-protocol` → 57 passed.
+- `npm test --workspace @achilles/voice-stt` → 46 passed.
+- `npm test --workspace @achilles/voice-tts` → 42 passed.
+- `npx tsc -p packages/voice-protocol/tsconfig.json --noEmit` → clean.
+- `npx tsc -p packages/voice-stt/tsconfig.json --noEmit` → clean.
+- `npx tsc -p packages/voice-tts/tsconfig.json --noEmit` → clean.
+- `npm run build --workspace @achilles/voice-{protocol,stt,tts}` → all three dists rebuilt; no `*.test.*` files in any dist (CR-06 verified at runtime).
+
+_Fixes applied: 2026-06-06_
+_Fixer: gsd-code-fixer_
+_Worktree: `gsd-reviewfix/09-51880` (transactionally fast-forwarded to `Achilles` on completion)_
