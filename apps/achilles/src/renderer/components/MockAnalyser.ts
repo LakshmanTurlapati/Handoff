@@ -192,6 +192,13 @@ export class MockAnalyser implements AnalyserLike {
    * Halts the internal tick. After `stop()` is called,
    * `getByteFrequencyData` returns the last-emitted snapshot without
    * further mutation. Safe to call multiple times.
+   *
+   * CR-07: callable AND reversible via `start()`. React.StrictMode's
+   * double-invocation of effect cleanups previously left the analyser
+   * permanently stopped (mount -> cleanup -> mount; the second mount
+   * recorded the same memoized instance but its tickHandle was already
+   * gone). The `start()` method below restores the tick so the second
+   * mount picks up where the first left off.
    */
   public stop(): void {
     this.stopped = true;
@@ -199,5 +206,17 @@ export class MockAnalyser implements AnalyserLike {
       clearInterval(this.tickHandle);
       this.tickHandle = null;
     }
+  }
+
+  /**
+   * CR-07: restarts the internal tick after a previous `stop()`. The
+   * buffer retains its last snapshot so `getByteFrequencyData` keeps
+   * returning sensible data through the brief stop+start sequence
+   * StrictMode imposes. Idempotent — calling `start()` on an already-
+   * running analyser is a no-op.
+   */
+  public start(): void {
+    this.stopped = false;
+    this.startTicking();
   }
 }

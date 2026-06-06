@@ -181,3 +181,46 @@ describe("MockAnalyser — MA4: stop() halts the internal tick", () => {
     }).not.toThrow();
   });
 });
+
+describe("MockAnalyser — CR-07 stop() + start() is reversible across StrictMode probe", () => {
+  it("CR-07: start() after stop() resumes the internal tick so the buffer keeps mutating", () => {
+    const a = new MockAnalyser({
+      state: "listening",
+      amplitudeSource: () => 0.5,
+      seed: 99,
+    });
+
+    // Stop the analyser (StrictMode probe cleanup).
+    a.stop();
+
+    // Capture the post-stop snapshot.
+    const snapStopped = new Uint8Array(32);
+    a.getByteFrequencyData(snapStopped);
+
+    // Restart (StrictMode mount #2).
+    a.start();
+
+    // Advance enough virtual time for several ticks.
+    vi.advanceTimersByTime(500);
+
+    const snapResumed = new Uint8Array(32);
+    a.getByteFrequencyData(snapResumed);
+
+    // At least one bin must have changed, proving the tick resumed.
+    let diffCount = 0;
+    for (let i = 0; i < 32; i++) {
+      if (snapStopped[i] !== snapResumed[i]) diffCount++;
+    }
+    expect(diffCount).toBeGreaterThan(0);
+    a.stop();
+  });
+
+  it("CR-07: start() is idempotent on a still-running analyser", () => {
+    const a = new MockAnalyser({ state: "listening" });
+    expect(() => {
+      a.start();
+      a.start();
+    }).not.toThrow();
+    a.stop();
+  });
+});

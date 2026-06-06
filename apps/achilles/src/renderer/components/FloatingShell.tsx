@@ -36,6 +36,7 @@ import {
 
 import { getBridge } from "../bridge.js";
 import { useAchillesState } from "../state/useAchillesState.js";
+import { DragHandle } from "./DragHandle.js";
 import { MockAnalyser } from "./MockAnalyser.js";
 import { ReactiveCircle } from "./ReactiveCircle.js";
 import { TranscriptOverlay } from "./TranscriptOverlay.js";
@@ -155,6 +156,16 @@ export function FloatingShell({
     onSettingsOpen?.(event.clientX, event.clientY);
   }
 
+  function handleSettingsAffordanceClick(event: React.MouseEvent): void {
+    // UI BLOCKER 1 fix: forward the affordance's screen coords so the
+    // SettingsPopover anchors next to the dot button when triggered via
+    // the visible fallback path (the right-click path uses
+    // handleRightClick above).
+    event.preventDefault();
+    event.stopPropagation();
+    onSettingsOpen?.(event.clientX, event.clientY);
+  }
+
   // FS4: permission overlay full-screen replacement. When the
   // permissionOverlay slot is supplied AND permissionState is denied
   // or restricted, the core regions are hidden.
@@ -183,21 +194,12 @@ export function FloatingShell({
       {!fullScreenPermission && (
         <>
           {/*
-            Drag handle stub — the `.drag-handle` rule in
-            `components.css` applies `-webkit-app-region: drag`. The
-            `data-app-region="drag"` attribute is the test seam (jsdom
-            does not honour the proprietary CSS property in inline
-            styles, so the data attribute exposes the drag-region
-            intent to assertions without depending on jsdom CSS
-            parsing). Plan 11-03's <DragHandle/> is the canonical
-            component; the stub here lives so Plan 11-02 can be
-            reviewed standalone without depending on Plan 11-03 first.
+            WR-13 fix: compose the canonical <DragHandle/> component
+            instead of an inline div stub. The drag handle owns the
+            `data-app-region="drag"` test seam and the `.drag-handle`
+            class that applies `-webkit-app-region: drag` in Electron.
           */}
-          <div
-            className="drag-handle"
-            data-testid="drag-handle"
-            data-app-region="drag"
-          />
+          <DragHandle />
           <ReactiveCircle
             state={state}
             amplitude={circleAmplitude}
@@ -212,6 +214,26 @@ export function FloatingShell({
               committed={committed}
             />
           )}
+          {/*
+            UI BLOCKER 1 fix: visible settings affordance (three-dot
+            button) at bottom: 8, right: 12 per UI-SPEC §2. Provides a
+            discoverable fallback for users who do not find the
+            right-click trigger. The `.no-drag` class opts out of the
+            drag region so the click reaches the button. The screen
+            coordinates of the click flow through `onSettingsOpen` so
+            App.tsx can anchor the popover.
+          */}
+          <button
+            type="button"
+            data-testid="settings-affordance"
+            className="settings-affordance no-drag"
+            aria-label="Open settings"
+            onClick={handleSettingsAffordanceClick}
+          >
+            <span className="settings-affordance-dot" />
+            <span className="settings-affordance-dot" />
+            <span className="settings-affordance-dot" />
+          </button>
         </>
       )}
       {permissionOverlay}
@@ -237,11 +259,23 @@ function useMemoCleanup(
   ref: MutableRefObject<MockAnalyser | null>,
 ): void {
   useEffect(() => {
+    // CR-07 fix: on mount/remount restart `next` so the React.StrictMode
+    // double-invocation (mount -> cleanup -> mount) does not leave the
+    // analyser permanently stopped. MockAnalyser.start() is idempotent
+    // when the tick is already alive, so toggle-mode never restarts
+    // a running tick. The previous instance is stopped explicitly when
+    // `next` changes; the cleanup below stops on both StrictMode probe
+    // unmount AND real unmount — the next mount's start() restores the
+    // live tick under StrictMode, while the real-unmount path stays
+    // stopped because no remount runs.
     const previous = ref.current;
     if (previous !== null && previous !== next) {
       previous.stop();
     }
     ref.current = next;
+    if (next !== null) {
+      next.start();
+    }
     return () => {
       if (next !== null) next.stop();
     };
