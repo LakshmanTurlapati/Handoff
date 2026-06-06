@@ -52,6 +52,14 @@ const workspaceAlias = [
     find: /^@achilles\/voice-tts\/(.+)$/,
     replacement: resolve(ROOT_DIR, "packages/voice-tts/src/$1.ts"),
   },
+  {
+    find: "@achilles/claude-code-bridge",
+    replacement: resolve(ROOT_DIR, "packages/claude-code-bridge/src/index.ts"),
+  },
+  {
+    find: /^@achilles\/claude-code-bridge\/(.+)$/,
+    replacement: resolve(ROOT_DIR, "packages/claude-code-bridge/src/$1.ts"),
+  },
 ];
 
 /**
@@ -123,6 +131,18 @@ export default defineWorkspace([
       passWithNoTests: true,
     },
   },
+  {
+    resolve: {
+      alias: workspaceAlias,
+    },
+    test: {
+      name: "phase-10-unit",
+      include: ["packages/claude-code-bridge/src/**/*.test.ts"],
+      environment: "node",
+      passWithNoTests: true,
+    },
+  },
 ]);
 // v1.2 phase-09 addition: workspace aliases + phase-09-unit project for the
 // "@achilles/voice-protocol", "@achilles/voice-stt", and "@achilles/voice-tts" packages.
+// v1.2 phase-10 addition: workspace aliases + phase-10-unit project for @achilles/claude-code-bridge.

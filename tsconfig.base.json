@@ -30,6 +30,8 @@
       "@codex-mobile/auth/*": ["packages/auth/src/*"],
       "@codex-mobile/db": ["packages/db/src/index.ts"],
       "@codex-mobile/db/*": ["packages/db/src/*"],
+      "@achilles/claude-code-bridge": ["packages/claude-code-bridge/src/index.ts"],
+      "@achilles/claude-code-bridge/*": ["packages/claude-code-bridge/src/*"],
       "@achilles/voice-protocol": ["packages/voice-protocol/src/index.ts"],
       "@achilles/voice-protocol/*": ["packages/voice-protocol/src/*"],
       "@achilles/voice-stt": ["packages/voice-stt/src/index.ts"],
