@@ -16,7 +16,9 @@
  * process.
  */
 
+import { ERROR_COPY } from "../../src/shared/constants.js";
 import type {
+  AchillesErrorKind,
   AchillesState,
   HotkeyMode,
   PermissionState,
@@ -106,24 +108,12 @@ const mock = {
   emitError(message: string): void {
     for (const cb of subscribers.err) cb(message);
   },
-  __test_inject_error(
-    kind:
-      | "mic_unavailable"
-      | "hotkey_collision"
-      | "persistence_failure"
-      | "unknown",
-  ): void {
-    const copy: Record<string, string> = {
-      mic_unavailable:
-        "Microphone not available. Check your input device.",
-      hotkey_collision:
-        "Hotkey is in use by another app. Change it in Settings.",
-      persistence_failure:
-        "Could not save window position. Settings may not persist.",
-      unknown: "Something went wrong. Try again in a moment.",
-    };
+  __test_inject_error(kind: AchillesErrorKind): void {
+    // Use the centralized ERROR_COPY map from shared/constants.ts so
+    // the mock-bridge and the production ipc-bridge use a single source
+    // of truth (CR-02 fix).
     for (const cb of subscribers.state) cb("error");
-    for (const cb of subscribers.err) cb(copy[kind]!);
+    for (const cb of subscribers.err) cb(ERROR_COPY[kind]);
   },
   getLastEmittedIPC(): Array<{ type: string; payload: unknown }> {
     return ipcLog;

@@ -135,6 +135,33 @@ export const PROCESSING_DELAY_MS = 800;
 export const SPEAKING_DELAY_MS = 2000;
 export const ERROR_AUTO_DISMISS_MS = 8000;
 
+// ─────────────────────────────────────────────────────────────────────
+// CR-02 fix: error-kind to UI-SPEC §8 banner copy map.
+//
+// The four error kinds used by the state machine and the renderer's
+// ErrorBanner share a single source of truth for the surfaced message.
+// `ipc-bridge.ts` resolves the copy via this map when the renderer's
+// __test_inject_error or any internal INJECT_ERROR dispatch fires, so
+// the renderer's ErrorBanner receives `error.message` populated
+// alongside the `state-changed: error` broadcast.
+// ─────────────────────────────────────────────────────────────────────
+
+export type AchillesErrorKind =
+  | "mic_unavailable"
+  | "hotkey_collision"
+  | "persistence_failure"
+  | "unknown";
+
+export const ERROR_COPY: Record<AchillesErrorKind, string> = {
+  mic_unavailable:
+    "Microphone not available. Check your input device.",
+  hotkey_collision:
+    "Hotkey is in use by another app. Change it in Settings.",
+  persistence_failure:
+    "Could not save window position. Settings may not persist.",
+  unknown: "Something went wrong. Try again in a moment.",
+};
+
 /**
  * Tick rate for the mocked amplitude stream. UI-SPEC.md section 1
  * calls for RMS sampled at 20 fps (every 50 ms) so the renderer can
