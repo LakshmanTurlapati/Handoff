@@ -1079,6 +1079,90 @@ describe("createClaudeSession — WR-03 regression (close() ends stdin + escalat
 });
 
 /**
+ * WR-04 regression: buildArgv validates systemPromptFile and
+ * resumeSessionId so callers cannot inadvertently smuggle argv flags
+ * into claude's own parser. The validation runs synchronously at
+ * createClaudeSession() construction time; a malformed value throws
+ * before the streaming spawn is reached.
+ */
+describe("createClaudeSession — WR-04 regression (argv input validation)", () => {
+  it("WR-04: empty systemPromptFile throws synchronously before spawn", () => {
+    const { spawnImpl } = makeFakeSpawn();
+    const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+    expect(() =>
+      createClaudeSession(
+        { systemPromptFile: "" },
+        { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+      ),
+    ).toThrow(/systemPromptFile must be a non-empty string/);
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it("WR-04: systemPromptFile with NUL byte throws synchronously", () => {
+    const { spawnImpl } = makeFakeSpawn();
+    const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+    expect(() =>
+      createClaudeSession(
+        { systemPromptFile: "/tmp/bad file.md" },
+        { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+      ),
+    ).toThrow(/must not contain NUL bytes/);
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it("WR-04: resumeSessionId with a leading dash (flag-like) throws", () => {
+    const { spawnImpl } = makeFakeSpawn();
+    const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+    expect(() =>
+      createClaudeSession(
+        { systemPromptFile: "/tmp/companion.md", resumeSessionId: "--inject-flag" },
+        { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+      ),
+    ).toThrow(/resumeSessionId contains characters that argv may misinterpret/);
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it("WR-04: resumeSessionId with whitespace throws", () => {
+    const { spawnImpl } = makeFakeSpawn();
+    const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+    expect(() =>
+      createClaudeSession(
+        { systemPromptFile: "/tmp/companion.md", resumeSessionId: "sid with space" },
+        { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+      ),
+    ).toThrow(/resumeSessionId contains characters that argv may misinterpret/);
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it("WR-04: empty resumeSessionId throws", () => {
+    const { spawnImpl } = makeFakeSpawn();
+    const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+    expect(() =>
+      createClaudeSession(
+        { systemPromptFile: "/tmp/companion.md", resumeSessionId: "" },
+        { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+      ),
+    ).toThrow(/resumeSessionId must be a non-empty string/);
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it("WR-04: valid resumeSessionId (alphanumeric + allowed punctuation) is accepted", () => {
+    const { spawnImpl } = makeFakeSpawn();
+    const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+    expect(() =>
+      createClaudeSession(
+        {
+          systemPromptFile: "/tmp/companion.md",
+          resumeSessionId: "sid-abc_123.4:5",
+        },
+        { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+      ),
+    ).not.toThrow();
+    expect(spawnImpl).toHaveBeenCalled();
+  });
+});
+
+/**
  * WR-01 regression: wire-mapper drops content blocks beyond content[0].
  * The session-level test below exercises the same code path via a
  * synthetic stdout fixture that puts a text block AND a tool_use block

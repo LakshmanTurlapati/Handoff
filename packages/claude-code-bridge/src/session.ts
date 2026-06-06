@@ -198,11 +198,53 @@ export function createClaudeSession(
  * values. The plan acceptance criterion 1 + 2 asserts the exact shape;
  * keep this function pure so the assertion is over the function's
  * return, not over a side-effect of construction.
+ *
+ * CR-fix WR-04: tighten the input contract on the caller-provided
+ * values. `spawn` is invoked with `shell: false` so the OS does not
+ * shell-interpret argv — direct command injection is not possible —
+ * but a value like `"--inject-flag"` would still cause the `claude`
+ * CLI itself to interpret the position as a flag, and a value with
+ * embedded NUL bytes would crash argv preparation late. We validate
+ * both shapes at the boundary so failures surface as a clear
+ * synchronous Error rather than a deep argv parse error.
  */
 function buildArgv(
   systemPromptFile: string,
   resumeSessionId: string | undefined,
 ): readonly string[] {
+  // CR-fix WR-04 input validation. Both throws use a fixed message
+  // template (no caller value interpolation) so the error surface
+  // cannot leak prompt fragments or paths into logs.
+  if (typeof systemPromptFile !== "string" || systemPromptFile.length === 0) {
+    throw new Error("systemPromptFile must be a non-empty string");
+  }
+  if (systemPromptFile.includes(" ")) {
+    throw new Error("systemPromptFile must not contain NUL bytes");
+  }
+  if (resumeSessionId !== undefined) {
+    if (typeof resumeSessionId !== "string" || resumeSessionId.length === 0) {
+      throw new Error("resumeSessionId must be a non-empty string when provided");
+    }
+    // Reject leading dash explicitly so a value of "--something" cannot
+    // be interpreted by claude's argv parser as another flag. This
+    // catches the case the regex below cannot (`-` is otherwise a
+    // legal interior character in session ids).
+    if (resumeSessionId.startsWith("-")) {
+      throw new Error(
+        "resumeSessionId contains characters that argv may misinterpret",
+      );
+    }
+    // Conservative regex: session ids are opaque from the bridge's
+    // perspective but in practice match this character class. The
+    // restriction prevents a value with whitespace/quotes from being
+    // misinterpreted by claude's own argv parser. We deliberately
+    // exclude `=` since some flag syntaxes interpret `--flag=value`.
+    if (!/^[A-Za-z0-9_.:-]+$/.test(resumeSessionId)) {
+      throw new Error(
+        "resumeSessionId contains characters that argv may misinterpret",
+      );
+    }
+  }
   // Mutable copy of the locked recipe. LOCKED_FLAGS = [
   //   "-p", "--output-format", "stream-json",
   //   "--include-partial-messages", "--append-system-prompt-file",
