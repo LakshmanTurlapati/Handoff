@@ -1,0 +1,41 @@
+{
+  "name": "@achilles/voice-stt",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Renderer-side ElevenLabs Scribe v2 Realtime STT client + main-process token mint helper. Single-use token boundary (SAFE-01) and outbound ElevenLabs allowlist (SAFE-03) enforced at the wrapper layer.",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./token-mint": {
+      "types": "./dist/token-mint.d.ts",
+      "default": "./dist/token-mint.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist .tsbuildinfo && tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(lint placeholder for packages/voice-stt)\"",
+    "prepack": "npm run build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@achilles/voice-protocol": "*",
+    "@elevenlabs/client": "1.9.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3",
+    "vitest": "2.1.8"
+  }
+}

@@ -1,0 +1,556 @@
+/**
+ * Renderer-side ElevenLabs Scribe v2 Realtime client.
+ *
+ * Boundary contract (SAFE-01):
+ *   This module accepts a `getToken` callback ONLY. The raw ElevenLabs
+ *   API key is the main process's responsibility (see
+ *   `./token-mint.ts`) and never reaches this surface. The
+ *   `createRealtimeSttClient` signature deliberately excludes any
+ *   `apiKey` field; adding one is a regression.
+ *
+ * Boundary contract (SAFE-03):
+ *   The outbound WebSocket URL is validated against the ElevenLabs
+ *   allowlist (`assertElevenLabsHost`) at construction time, BEFORE
+ *   any network I/O. A substring-attack host such as
+ *   `wss://api.elevenlabs.io.evil.com/...` is refused with the
+ *   `SAFE-03` marker in the error message.
+ *
+ * Boundary contract (PITFALLS #1):
+ *   Frames passed to `write(frame)` MUST already be 16 kHz mono int16
+ *   PCM. Resampling is the responsibility of the renderer's
+ *   AudioWorklet (Phase 11). The wrapper does not inspect the audio
+ *   bytes; it simply base64-encodes them and forwards them.
+ *
+ * Boundary contract (PITFALLS #4):
+ *   The WebSocket is opened on `start()` and closed on `stop()` or on
+ *   a final committed transcript. Reconnect logic uses
+ *   `computeBackoffMs` with the cap from `RECONNECT_MAX_ATTEMPTS`. The
+ *   429 family is mapped to typed `SttErrorEvent` codes
+ *   (`rate_limit`, `concurrent_limit`, `auth`) so the UI surface can
+ *   distinguish them and so a `concurrent_limit` does not provoke a
+ *   retry storm.
+ *
+ * Logging discipline (PITFALLS #22):
+ *   Only `console.error` is used and only with the `[voice-stt]` prefix.
+ *   Audio bytes, the token, and full transcript content are NEVER
+ *   logged. Transcript length and lifecycle transitions are permitted.
+ */
+import type { SttEvent } from "@achilles/voice-protocol";
+import {
+  CommittedTranscriptSchema,
+  PartialTranscriptSchema,
+  SttErrorEventSchema,
+  assertElevenLabsHost,
+} from "@achilles/voice-protocol";
+import { computeBackoffMs } from "./backoff.js";
+import {
+  AUDIO_FORMAT,
+  RECONNECT_MAX_ATTEMPTS,
+  STT_REALTIME_URL,
+} from "./constants.js";
+
+// ---------------------------------------------------------------------------
+// Public surface
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal WebSocket type accepted by the realtime client. We do not
+ * import `lib.dom`'s `WebSocket` directly because the wrapper must be
+ * able to run under Node's Vitest where the global type is absent;
+ * accepting a structural interface keeps the surface portable.
+ */
+export interface SttWebSocketLike {
+  readonly readyState: number;
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+  addEventListener(
+    event: "open" | "close" | "message" | "error",
+    handler: (ev: SttSocketEvent) => void,
+  ): void;
+  removeEventListener?(
+    event: "open" | "close" | "message" | "error",
+    handler: (ev: SttSocketEvent) => void,
+  ): void;
+}
+
+/**
+ * Tagged-union of the WebSocket events the wrapper cares about. The
+ * shape mirrors the DOM `WebSocket` event surface but is intentionally
+ * narrow so a mock WebSocket in tests does not need to implement the
+ * full DOM type hierarchy.
+ */
+export type SttSocketEvent =
+  | { type: "open" }
+  | { type: "close"; code: number; reason?: string }
+  | { type: "message"; data: string }
+  | { type: "error"; message?: string };
+
+/**
+ * Constructor signature for a WebSocket-like factory. Accepts the URL
+ * and an optional sub-protocols array (Scribe v2 Realtime carries the
+ * single-use token in the subprotocol position; see
+ * https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/realtime/client-side-streaming).
+ */
+export type SttWebSocketCtor = (
+  url: string,
+  protocols?: string | string[],
+) => SttWebSocketLike;
+
+/**
+ * Options for `createRealtimeSttClient`.
+ *
+ * - `getToken`: callback the wrapper invokes on every `start()` to
+ *   obtain a fresh single-use STT token. The token is short-lived
+ *   (~15 minutes); the callback typically delegates to the main
+ *   process over IPC.
+ * - `url`: optional WebSocket URL override. Defaults to
+ *   `STT_REALTIME_URL`. MUST pass the SAFE-03 allowlist or
+ *   construction throws.
+ * - `webSocketCtor`: optional WebSocket constructor for testing or
+ *   bring-your-own-transport. Defaults to `globalThis.WebSocket`.
+ * - `onEvent`: optional sink that receives every emitted `SttEvent`.
+ *   Provided as a synchronous callback so tests can collect events
+ *   without depending on async-iterator polyfills.
+ */
+export interface CreateRealtimeSttClientOptions {
+  getToken: () => Promise<{ token: string; expiresAt: string }>;
+  url?: string;
+  webSocketCtor?: SttWebSocketCtor;
+  onEvent?: (e: SttEvent) => void;
+}
+
+/**
+ * The realtime STT client surface returned by
+ * `createRealtimeSttClient`. The `events$` field is an
+ * `AsyncIterable<SttEvent>` for downstream code that wants to consume
+ * the event stream as an async iterator. `onEvent` (set at
+ * construction time) is the synchronous alternative used by tests.
+ */
+export interface RealtimeSttClient {
+  events$: AsyncIterable<SttEvent>;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  write(frame: Int16Array): void;
+}
+
+// ---------------------------------------------------------------------------
+// Implementation
+// ---------------------------------------------------------------------------
+
+/**
+ * WebSocket close code emitted by ElevenLabs on a successful clean
+ * close. 1000 is the standard "normal closure" close code; any other
+ * code is treated as a candidate for reconnect.
+ */
+const WS_NORMAL_CLOSE = 1000;
+
+/**
+ * Logging prefix per PITFALLS #22 / CONTEXT.md logging directive.
+ * Stable so the consuming app can grep for `[voice-stt]` in logs.
+ */
+const LOG_PREFIX = "[voice-stt]";
+
+/**
+ * Internal lifecycle states. Kept narrow so the wrapper cannot fall
+ * into an in-between state silently.
+ */
+type Lifecycle = "idle" | "connecting" | "open" | "closing" | "closed";
+
+/**
+ * Inbound ElevenLabs Scribe v2 Realtime message types we recognise.
+ * Any other `type` value is logged and ignored — the wrapper is a
+ * lenient consumer to survive minor server-side additions.
+ */
+interface ServerSessionStarted {
+  type: "session_started";
+}
+interface ServerPartialTranscript {
+  type: "partial_transcript";
+  text?: string;
+  confidence?: number;
+}
+interface ServerCommittedTranscript {
+  type: "committed_transcript";
+  text?: string;
+  duration_ms?: number;
+}
+interface ServerError {
+  type: "error";
+  status?: string;
+  message?: string;
+}
+type ServerMessage =
+  | ServerSessionStarted
+  | ServerPartialTranscript
+  | ServerCommittedTranscript
+  | ServerError
+  | { type: string };
+
+/**
+ * Factory for the realtime STT client. See
+ * {@link CreateRealtimeSttClientOptions} for the input contract and
+ * {@link RealtimeSttClient} for the output.
+ */
+export function createRealtimeSttClient(
+  opts: CreateRealtimeSttClientOptions,
+): RealtimeSttClient {
+  // ---- SAFE-03 enforcement (BEFORE any I/O, BEFORE any return) ----
+  const url = opts.url ?? STT_REALTIME_URL;
+  assertElevenLabsHost(url);
+
+  // ---- Defence-in-depth: ensure the caller did not slip an apiKey in.
+  // TypeScript already rejects this, but a JS caller could. We pluck
+  // the documented fields and ignore anything else.
+  const getToken = opts.getToken;
+  const webSocketCtor = opts.webSocketCtor ?? defaultWebSocketCtor();
+  const onEvent = opts.onEvent;
+
+  let lifecycle: Lifecycle = "idle";
+  let socket: SttWebSocketLike | null = null;
+  let reconnectAttempt = 0;
+  let utteranceStartMs: number | null = null;
+
+  // Async-iterable backing buffer. We hold a list of pending events
+  // and an awaiter promise; this is the standard pattern for turning
+  // a push-based callback into an async iterable without an external
+  // dep.
+  const pendingEvents: SttEvent[] = [];
+  let awaiter: (() => void) | null = null;
+  let iterableDone = false;
+
+  function emit(event: SttEvent): void {
+    pendingEvents.push(event);
+    if (awaiter) {
+      const fn = awaiter;
+      awaiter = null;
+      fn();
+    }
+    if (onEvent) {
+      try {
+        onEvent(event);
+      } catch (cbErr) {
+        console.error(`${LOG_PREFIX} onEvent callback threw`, asError(cbErr));
+      }
+    }
+  }
+
+  const events$: AsyncIterable<SttEvent> = {
+    [Symbol.asyncIterator](): AsyncIterator<SttEvent> {
+      return {
+        async next(): Promise<IteratorResult<SttEvent>> {
+          while (pendingEvents.length === 0 && !iterableDone) {
+            await new Promise<void>((resolve) => {
+              awaiter = resolve;
+            });
+          }
+          if (pendingEvents.length > 0) {
+            const value = pendingEvents.shift() as SttEvent;
+            return { value, done: false };
+          }
+          return { value: undefined, done: true };
+        },
+      };
+    },
+  };
+
+  function closeIterable(): void {
+    iterableDone = true;
+    if (awaiter) {
+      const fn = awaiter;
+      awaiter = null;
+      fn();
+    }
+  }
+
+  async function connect(): Promise<void> {
+    lifecycle = "connecting";
+    let token: string;
+    try {
+      const tokenResult = await getToken();
+      token = tokenResult.token;
+    } catch (tokenErr) {
+      const err = asError(tokenErr);
+      console.error(`${LOG_PREFIX} getToken failed`, err.message);
+      emitErrorEvent("auth", false, "getToken rejected");
+      lifecycle = "closed";
+      closeIterable();
+      return;
+    }
+
+    // ElevenLabs realtime auth uses the single-use token in a header
+    // location they document. The browser SDK passes the token via the
+    // WebSocket subprotocol position; we mirror that here so the same
+    // shape works against the real SDK and the mock in tests.
+    let ws: SttWebSocketLike;
+    try {
+      ws = webSocketCtor(url, ["xi-realtime-token", token]);
+    } catch (ctorErr) {
+      console.error(
+        `${LOG_PREFIX} WebSocket construction threw`,
+        asError(ctorErr).message,
+      );
+      scheduleReconnect("network");
+      return;
+    }
+    socket = ws;
+
+    ws.addEventListener("open", () => {
+      lifecycle = "open";
+      reconnectAttempt = 0;
+      utteranceStartMs = Date.now();
+    });
+
+    ws.addEventListener("message", (ev) => {
+      if (ev.type !== "message") {
+        return;
+      }
+      handleServerMessage(ev.data);
+    });
+
+    ws.addEventListener("close", (ev) => {
+      if (ev.type !== "close") {
+        return;
+      }
+      socket = null;
+      if (lifecycle === "closing") {
+        lifecycle = "closed";
+        closeIterable();
+        return;
+      }
+      if (ev.code === WS_NORMAL_CLOSE) {
+        lifecycle = "closed";
+        closeIterable();
+        return;
+      }
+      scheduleReconnect("network");
+    });
+
+    ws.addEventListener("error", (ev) => {
+      if (ev.type !== "error") {
+        return;
+      }
+      console.error(
+        `${LOG_PREFIX} websocket error`,
+        ev.message ?? "(no message)",
+      );
+    });
+  }
+
+  function handleServerMessage(raw: string): void {
+    let parsed: ServerMessage;
+    try {
+      parsed = JSON.parse(raw) as ServerMessage;
+    } catch {
+      console.error(`${LOG_PREFIX} dropped non-JSON server message`);
+      return;
+    }
+
+    switch (parsed.type) {
+      case "session_started":
+        return;
+      case "partial_transcript": {
+        const candidate = {
+          type: "partial" as const,
+          text: (parsed as ServerPartialTranscript).text ?? "",
+          confidence: (parsed as ServerPartialTranscript).confidence ?? 0,
+        };
+        const result = PartialTranscriptSchema.safeParse(candidate);
+        if (result.success) {
+          emit(result.data);
+        }
+        return;
+      }
+      case "committed_transcript": {
+        const startedAt = utteranceStartMs ?? Date.now();
+        const inferredDuration = Math.max(0, Date.now() - startedAt);
+        const candidate = {
+          type: "committed" as const,
+          text: (parsed as ServerCommittedTranscript).text ?? "",
+          durationMs: Math.floor(
+            (parsed as ServerCommittedTranscript).duration_ms ??
+              inferredDuration,
+          ),
+        };
+        const result = CommittedTranscriptSchema.safeParse(candidate);
+        if (result.success) {
+          emit(result.data);
+        }
+        utteranceStartMs = Date.now();
+        return;
+      }
+      case "error": {
+        const status = (parsed as ServerError).status ?? "";
+        if (status === "too_many_concurrent_requests") {
+          emitErrorEvent("concurrent_limit", true);
+        } else if (status === "system_busy" || status === "rate_limited") {
+          emitErrorEvent("rate_limit", true);
+        } else if (status === "unauthorized" || status === "auth") {
+          emitErrorEvent("auth", false);
+        } else {
+          emitErrorEvent("unknown", true);
+        }
+        return;
+      }
+      default:
+        // Unknown server type — log and ignore.
+        console.error(
+          `${LOG_PREFIX} unknown server message type`,
+          String(parsed.type),
+        );
+    }
+  }
+
+  function emitErrorEvent(
+    code:
+      | "rate_limit"
+      | "concurrent_limit"
+      | "network"
+      | "auth"
+      | "unknown",
+    retryable: boolean,
+    message?: string,
+  ): void {
+    const candidate = {
+      type: "error" as const,
+      code,
+      retryable,
+      ...(message ? { message } : {}),
+    };
+    const parsed = SttErrorEventSchema.safeParse(candidate);
+    if (parsed.success) {
+      emit(parsed.data);
+    }
+  }
+
+  function scheduleReconnect(reason: "network" | "rate_limit"): void {
+    if (lifecycle === "closing" || lifecycle === "closed") {
+      return;
+    }
+    const delay = computeBackoffMs(reconnectAttempt);
+    if (!Number.isFinite(delay)) {
+      // Give-up sentinel — surface terminal error.
+      emitErrorEvent(
+        reason === "rate_limit" ? "rate_limit" : "network",
+        false,
+        `reconnect cap reached after ${RECONNECT_MAX_ATTEMPTS} attempts`,
+      );
+      lifecycle = "closed";
+      closeIterable();
+      return;
+    }
+    reconnectAttempt += 1;
+    lifecycle = "connecting";
+    setTimeout(() => {
+      void connect();
+    }, delay);
+  }
+
+  function write(frame: Int16Array): void {
+    if (!socket || lifecycle !== "open") {
+      // Silently drop frames before the socket is open — the renderer's
+      // AudioWorklet may begin emitting frames before `start()` resolves.
+      return;
+    }
+    const audioB64 = encodeInt16ToBase64(frame);
+    const payload = JSON.stringify({
+      type: "input_audio_chunk",
+      audio: audioB64,
+      sample_rate: AUDIO_FORMAT.sampleRate,
+    });
+    try {
+      socket.send(payload);
+    } catch (sendErr) {
+      console.error(
+        `${LOG_PREFIX} socket send failed`,
+        asError(sendErr).message,
+      );
+    }
+  }
+
+  async function start(): Promise<void> {
+    if (lifecycle !== "idle" && lifecycle !== "closed") {
+      return;
+    }
+    lifecycle = "idle";
+    reconnectAttempt = 0;
+    await connect();
+  }
+
+  async function stop(): Promise<void> {
+    lifecycle = "closing";
+    if (socket) {
+      try {
+        socket.close(WS_NORMAL_CLOSE, "client requested stop");
+      } catch (closeErr) {
+        console.error(
+          `${LOG_PREFIX} socket close failed`,
+          asError(closeErr).message,
+        );
+      }
+    }
+    lifecycle = "closed";
+    closeIterable();
+  }
+
+  return { events$, start, stop, write };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function asError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
+
+/**
+ * Resolve a default WebSocket constructor at lookup time. We do the
+ * lookup lazily so the module can be imported under Node (Vitest)
+ * without `globalThis.WebSocket` being defined.
+ */
+function defaultWebSocketCtor(): SttWebSocketCtor {
+  return (url: string, protocols?: string | string[]): SttWebSocketLike => {
+    const Ctor = (globalThis as { WebSocket?: unknown }).WebSocket as
+      | (new (u: string, p?: string | string[]) => SttWebSocketLike)
+      | undefined;
+    if (!Ctor) {
+      throw new Error(
+        "createRealtimeSttClient: globalThis.WebSocket is not defined; pass `webSocketCtor` explicitly",
+      );
+    }
+    return new Ctor(url, protocols);
+  };
+}
+
+/**
+ * Base64-encode an Int16Array. Uses `Buffer` when available (Node /
+ * Electron main) and falls back to `btoa` (renderer / browsers).
+ *
+ * NOTE: this helper does NOT inspect the audio bytes; it just relays
+ * them. PITFALLS #1 / #22 — audio bytes are never logged here.
+ */
+function encodeInt16ToBase64(frame: Int16Array): string {
+  const bytes = new Uint8Array(
+    frame.buffer,
+    frame.byteOffset,
+    frame.byteLength,
+  );
+  const NodeBuffer = (
+    globalThis as { Buffer?: { from(b: Uint8Array): { toString(e: string): string } } }
+  ).Buffer;
+  if (NodeBuffer) {
+    return NodeBuffer.from(bytes).toString("base64");
+  }
+  // Browser fallback.
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i] ?? 0);
+  }
+  const browserBtoa = (globalThis as { btoa?: (s: string) => string }).btoa;
+  if (browserBtoa) {
+    return browserBtoa(binary);
+  }
+  throw new Error(
+    "encodeInt16ToBase64: no Buffer or btoa available in this runtime",
+  );
+}
