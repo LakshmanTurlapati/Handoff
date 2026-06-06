@@ -44,6 +44,7 @@ import {
 } from "./session.js";
 import type { ClaudeBridgeEvent } from "./types.js";
 import { LOCKED_FLAGS } from "./constants.js";
+import { MockClaudeProcess } from "../test/mock-claude-process.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -793,5 +794,119 @@ describe("createClaudeSession.cancel()", () => {
     // flipped to cancelled.
     expect(session.outcome).toBe(naturalOutcome);
     expect(session.outcome?.kind).toBe("success");
+  });
+});
+
+/**
+ * CR-fix regression tests (Phase 10 review CR-01).
+ *
+ * These tests cover the production wiring gap the review caught:
+ * child.on("error") must synthesise a process_exit instead of
+ * escalating ENOENT/EACCES into an uncaughtException that crashes
+ * the host.
+ *
+ * Each test installs a host-level `uncaughtException` listener that
+ * fails the test if any unhandled error escapes, so a regression
+ * surfaces as a test failure rather than a process crash.
+ */
+describe("createClaudeSession — CR-fix regressions (CR-01: child error listener)", () => {
+  /**
+   * Install an uncaughtException trap that fails the test if hit, then
+   * remove it after the test body resolves. The exact assertion-fail
+   * mechanism: we capture the unhandled error on a closed-over var, do
+   * the test work, remove the listener, and assert the var stayed null
+   * at the end.
+   */
+  async function runWithUncaughtTrap(
+    body: () => Promise<void>,
+  ): Promise<void> {
+    let captured: Error | null = null;
+    const onUncaught = (err: Error): void => {
+      captured = err;
+    };
+    process.on("uncaughtException", onUncaught);
+    try {
+      await body();
+    } finally {
+      process.off("uncaughtException", onUncaught);
+    }
+    expect(captured).toBeNull();
+  }
+
+  it("CR-01: child error event (ENOENT) synthesises process_exit and does NOT crash the host", async () => {
+    await runWithUncaughtTrap(async () => {
+      const { spawnImpl, childRef } = makeFakeSpawn();
+      const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+      const session = createClaudeSession(
+        { systemPromptFile: "/tmp/companion.md" },
+        { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+      );
+      const child = childRef.current as FakeChildProcess;
+      const drainPromise = drainEvents(session);
+      // Use the documented MockClaudeProcess helper to play the
+      // spawn-failure event. The session's child.on("error") listener
+      // must absorb this WITHOUT escalating to uncaughtException.
+      const enoentError: NodeJS.ErrnoException = Object.assign(
+        new Error("spawn claude ENOENT"),
+        {
+          code: "ENOENT",
+          errno: -2,
+          syscall: "spawn claude",
+          path: "claude",
+        },
+      );
+      MockClaudeProcess.simulateSpawnError(child, enoentError);
+      const events = await drainPromise;
+      // Verify the events$ stream observed the expected ordered emit:
+      // parse_error("spawn_error: ...") followed by process_exit{null,null}.
+      const types = events.map((e) => e.type);
+      expect(types).toContain("parse_error");
+      const spawnErr = events.find(
+        (e) => e.type === "parse_error" && e.error.startsWith("spawn_error:"),
+      );
+      expect(spawnErr).toBeDefined();
+      expect(types[types.length - 1]).toBe("process_exit");
+      const last = events[events.length - 1];
+      if (last?.type === "process_exit") {
+        expect(last.exit_code).toBeNull();
+        expect(last.signal).toBeNull();
+      }
+      // Outcome must be derived from the synthetic exit code (failure).
+      expect(session.outcome?.kind).toBe("failure");
+    });
+  });
+
+  it("CR-01: spawn-time error during in-flight cancel still synthesises process_exit", async () => {
+    // Models a race the review highlighted: child.on("error") arrives
+    // between session.cancel() and the expected SIGINT-then-exit
+    // sequence. The cancel primitive's exit listener gets the synthetic
+    // exit shape via the same path as a natural exit.
+    await runWithUncaughtTrap(async () => {
+      const { spawnImpl, childRef } = makeFakeSpawn();
+      const runVersionCheckStub = vi.fn(() => ({ skipped: true }));
+      const session = createClaudeSession(
+        { systemPromptFile: "/tmp/companion.md" },
+        { spawnImpl: spawnImpl as never, runVersionCheck: runVersionCheckStub as never },
+      );
+      const child = childRef.current as FakeChildProcess;
+      const drainPromise = drainEvents(session);
+      // Begin cancel.
+      const cancelPromise = session.cancel();
+      expect(child.kill).toHaveBeenCalledWith("SIGINT");
+      // Drive the spawn error in the same tick as the cancel.
+      child.emit("error", Object.assign(new Error("EACCES"), { code: "EACCES" }));
+      // The cancel primitive listens on child.on("exit"). The session's
+      // own error listener does NOT emit an "exit" — it bypasses the
+      // exit path entirely. So we still need to emit("exit",...) to
+      // satisfy the cancel primitive's resolver. This mirrors the
+      // production scenario where the child crashes mid-cancel.
+      child.emit("exit", null, "SIGINT");
+      await cancelPromise;
+      await drainPromise;
+      // The outcome must be failure (cancelled takes priority over
+      // exit_code in deriveOutcome).
+      expect(session.outcome?.kind).toBe("failure");
+      expect(session.outcome?.reason).toBe("cancelled");
+    });
   });
 });

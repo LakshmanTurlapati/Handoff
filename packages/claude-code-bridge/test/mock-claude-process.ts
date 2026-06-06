@@ -42,6 +42,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Buffer } from "node:buffer";
+import { EventEmitter } from "node:events";
 
 import { MAX_LINE_BYTES } from "../src/constants.js";
 import type { LineParser } from "../src/line-parser.js";
@@ -170,5 +171,35 @@ export class MockClaudeProcess {
    */
   async readFixture(): Promise<Buffer> {
     return fs.readFile(this.fixturePath);
+  }
+
+  /**
+   * Trigger a synchronous ChildProcess `'error'` event on the given
+   * EventEmitter — used by the CR-fix CR-01 regression tests to verify
+   * the bridge's `child.on("error")` listener synthesises a
+   * `process_exit` event instead of escalating to `uncaughtException`.
+   *
+   * The session-level tests in `session.test.ts` construct an
+   * EventEmitter-backed fake child via `makeFakeChild()`; this helper
+   * is the documented surface for "play an ENOENT-style spawn failure"
+   * regardless of which fake-child shape the call site uses. Production
+   * Node would emit this event asynchronously after `spawn` returned,
+   * but for unit testing the synchronous emit reproduces the same
+   * listener-dispatch path.
+   *
+   * Usage:
+   *
+   *   const child = makeFakeChild();
+   *   MockClaudeProcess.simulateSpawnError(child, new Error("ENOENT"));
+   *
+   * The session under test should observe a parse_error event with
+   * "spawn_error: ENOENT" in its events$ stream followed by a
+   * process_exit { exit_code: null, signal: null }.
+   *
+   * @param child the EventEmitter-backed fake ChildProcess.
+   * @param err   the Error to emit (typically `Object.assign(new Error("..."), { code: "ENOENT" })`).
+   */
+  static simulateSpawnError(child: EventEmitter, err: Error): void {
+    child.emit("error", err);
   }
 }

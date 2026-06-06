@@ -332,6 +332,10 @@ function createSessionState(
     pushEvent(payload);
   });
 
+  // ─── exit waiters (declared before listeners so error + exit paths
+  //     can both resolve close() callers) ──────────────────────────────
+  const exitWaiters: Array<() => void> = [];
+
   // ─── child.stdout plumbing ─────────────────────────────────────────
   if (child.stdout !== null) {
     child.stdout.on("data", (chunk: Buffer) => {
@@ -342,8 +346,46 @@ function createSessionState(
     });
   }
 
+  // ─── child error handling (CR-fix CR-01) ───────────────────────────
+  // Node emits 'error' on the ChildProcess for ENOENT (binary not on
+  // PATH), EACCES, EAGAIN/ulimit nproc, and other post-construction
+  // spawn failures. Without a listener, Node escalates to
+  // 'uncaughtException' which crashes the host process — defeating
+  // the bridge's "child failures surface as outcome.failure" contract.
+  // Synthesise a process_exit and route it through the same code path
+  // as a natural exit so callers see the failure on events$ and
+  // session.outcome resolves to failure / exit_code.
+  child.on("error", (err: Error) => {
+    if (exited) return;
+    exited = true;
+    exitCode = null;
+    exitSignal = null;
+    // Surface the spawn-error message via parse_error for observability.
+    // We do NOT include cwd, argv, env or other potentially sensitive
+    // host state — only the OS error message Node gave us.
+    pushEvent({
+      type: "parse_error",
+      error: `spawn_error: ${err.message}`,
+    });
+    // Best-effort flush of any trailing partial (no-op if the child
+    // never produced stdout).
+    parser.flush();
+    const exitEvent: ProcessExitEvent = {
+      type: "process_exit",
+      exit_code: null,
+      signal: null,
+    };
+    capturedExitEvent = exitEvent;
+    pushEvent(exitEvent);
+    outcome = deriveOutcome({ exitCode, toolErrors, cancelled });
+    endStream();
+    while (exitWaiters.length > 0) {
+      const next = exitWaiters.shift();
+      if (next !== undefined) next();
+    }
+  });
+
   // ─── child.exit handling ───────────────────────────────────────────
-  const exitWaiters: Array<() => void> = [];
   child.on("exit", (code, signal) => {
     if (exited) return;
     exited = true;
