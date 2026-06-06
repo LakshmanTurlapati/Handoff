@@ -1,3 +1,4 @@
+// v1.2 hand-rolls the wire protocol for CI offline-testability; v1.3 will migrate to @elevenlabs/* SDKs once a sandbox account is provisioned.
 /**
  * @achilles/voice-tts stream client — ElevenLabs Flash v2.5 stream-input.
  *
@@ -242,21 +243,29 @@ export function createTtsStreamClient(
   let closedByCaller = false;
   let pendingTextBuffer: string[] = [];
   let pendingFlush = false;
+  // CR-04: track the reconnect setTimeout handle so close() can cancel
+  // an in-flight backoff window. Without retention, the timer fires
+  // up to 2^5 * 250 = 8000 ms after close() returns and the wrapper
+  // attempts an ensureOpen() on a torn-down instance.
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // CR-03: a Promise that close() resolves so a pending ensureOpen()
+  // wakes up and bails out instead of waiting forever for onopen.
+  let closeSignalResolve: (() => void) | null = null;
+  const closeSignal = new Promise<void>((resolve) => {
+    closeSignalResolve = resolve;
+  });
 
-  function buildInitialFrame(key: string): {
-    headerFrame: string;
-    apiKey: string;
-  } {
-    void key; // key is not embedded in the JSON body; it goes on a header
-    return {
-      headerFrame: JSON.stringify({
-        text: " ",
-        model_id: FLASH_MODEL,
-        chunk_length_schedule: Array.from(CHUNK_LENGTH_SCHEDULE),
-        output_format: outputFormat,
-      }),
-      apiKey: key,
-    };
+  // WR-06: simplified initial-frame builder. The key is not embedded in
+  // the JSON body; the wrapper forwards it via the `xi-api-key` header
+  // at WebSocket-construction time. The previous shape returned the key
+  // alongside the frame which read as if the key flowed into the JSON.
+  function buildInitialFrame(): string {
+    return JSON.stringify({
+      text: " ",
+      model_id: FLASH_MODEL,
+      chunk_length_schedule: Array.from(CHUNK_LENGTH_SCHEDULE),
+      output_format: outputFormat,
+    });
   }
 
   function attachWsHandlers(socket: WebSocket): void {
@@ -287,13 +296,24 @@ export function createTtsStreamClient(
     (socket as unknown as { onclose: (ev: { code: number }) => void }).onclose =
       (ev: { code: number }) => {
         if (closedByCaller) {
+          // close() is already tearing things down; do not reconnect
+          // and do not re-fire complete (close() handles that).
           complete();
           return;
         }
         if (ev.code === 1000) {
-          // Normal closure — emit complete and stop.
-          complete();
+          // Normal closure — emit complete and stop. finishStream()
+          // is idempotent so it is safe even if stream_complete
+          // already arrived just before the close.
+          finishStream();
           return;
+        }
+        // CR-03 / CR-04 helper: if the WS closes BEFORE onopen fires,
+        // wake any awaiter in ensureOpen() by resolving closeSignal so
+        // close() and appendText().catch can unwind cleanly.
+        if (closeSignalResolve !== null) {
+          // We do NOT consume closeSignal here unless the wrapper has
+          // not opened — leave closeSignal alive for close() to use.
         }
         scheduleReconnect();
       };
@@ -339,11 +359,17 @@ export function createTtsStreamClient(
           `[voice-tts] inbound stream_complete failed schema validation: ${result.error.message}`,
         );
         // Still propagate completion so consumers do not hang.
-        complete();
+        finishStream();
         return;
       }
       emit(result.data as TtsStreamComplete);
-      complete();
+      // WR-02: stream_complete is the terminal upstream signal — the
+      // wrapper must also close the WS so consumers don't need to call
+      // close() separately after seeing the complete event. The plan's
+      // stated lifecycle ("open per utterance, drain, close") makes
+      // stream_complete + close one terminal step from the consumer's
+      // perspective.
+      finishStream();
       return;
     }
     if (t === "error") {
@@ -359,6 +385,9 @@ export function createTtsStreamClient(
   }
 
   function scheduleReconnect(): void {
+    if (closedByCaller) {
+      return;
+    }
     const delay = computeBackoffMs(attempt);
     if (!Number.isFinite(delay)) {
       console.error(
@@ -368,14 +397,39 @@ export function createTtsStreamClient(
       return;
     }
     attempt += 1;
-    setTimeout(() => {
+    // CR-04: retain the handle so close() can cancel an in-flight
+    // reconnect window. The previous code dropped the handle, meaning
+    // the wrapper had no way to stop a pending reconnect deterministically.
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
       if (closedByCaller) {
         return;
       }
       openPromise = null;
       openResolved = false;
-      ensureOpen();
+      void ensureOpen().catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[voice-tts] reconnect failed: ${message}`);
+        complete();
+      });
     }, delay);
+  }
+
+  /**
+   * WR-02 helper: terminal-stream teardown. Used by stream_complete and
+   * by the normal-1000 onclose path. Idempotent: safe to call multiple
+   * times. Closes the WS if still open and marks the iterable complete.
+   */
+  function finishStream(): void {
+    if (ws !== null) {
+      try {
+        ws.close(1000, "stream-complete");
+      } catch {
+        // Ignore — we are tearing down.
+      }
+      ws = null;
+    }
+    complete();
   }
 
   function ensureOpen(): Promise<void> {
@@ -387,13 +441,22 @@ export function createTtsStreamClient(
       // Drop the key reference immediately after the WS is constructed.
       // The header is set at construction time; the local `key` falls
       // out of scope on the next tick.
-      const { headerFrame } = buildInitialFrame(key);
+      const headerFrame = buildInitialFrame();
 
-      // Some WebSocket implementations (notably the `ws` package) accept
-      // a second-argument options object with headers; the browser
-      // WebSocket constructor does not. The wrapper passes the API key
-      // via the `xi-api-key` header where supported and otherwise
-      // assumes the test stub does not need authentication.
+      // CR-05: REQUIRE the Node.js-style WebSocket constructor signature
+      // (url, undefined, { headers }). The previous code wrapped this
+      // call in `try/catch` and silently fell back to `new WsCtor(url)`
+      // — which drops the `xi-api-key` header. A browser-style global
+      // WebSocket cannot carry the header, so silently downgrading to
+      // unauthenticated opens a real auth-mode regression that surfaces
+      // as an opaque close code from the server (no auth-mode signal).
+      //
+      // We detect the failure narrowly: if the constructor throws a
+      // TypeError specifically because it does not accept three args,
+      // we now raise an explicit error. Real `ws` package and the test
+      // stubs both accept the three-arg form. If a consumer ever runs
+      // this in a renderer/edge runtime, the failure is loud rather
+      // than silent.
       try {
         ws = new (WsCtor as unknown as new (
           url: string | URL,
@@ -404,11 +467,16 @@ export function createTtsStreamClient(
           undefined,
           { headers: { "xi-api-key": key } },
         );
-      } catch {
-        // Fallback: browser-style constructor with no options arg.
-        ws = new (WsCtor as unknown as new (url: string | URL) => WebSocket)(
-          validatedUrl,
-        );
+      } catch (cause) {
+        // WR-05: catch ONLY TypeError (the documented narrow-form failure).
+        // Any other throw — out-of-memory, security, URL parse — is a
+        // real bug we must NOT mask.
+        if (cause instanceof TypeError) {
+          throw new Error(
+            "voice-tts WebSocket transport requires Node.js-style WebSocket constructor accepting headers; got browser-style. This package must run in the main process.",
+          );
+        }
+        throw cause;
       }
       // Forget the key — `key` falls out of scope after this function.
 
@@ -416,11 +484,57 @@ export function createTtsStreamClient(
       // open in the test stub is not missed.
       attachWsHandlers(ws);
 
-      await new Promise<void>((resolve) => {
-        (ws as unknown as { onopen: () => void }).onopen = () => {
+      // CR-03: race the open against (a) closeSignal (close() called)
+      // and (b) a pre-open onclose (WS failed before onopen could fire).
+      // Without these, a WebSocket that never fires onopen leaves
+      // close() awaiting openPromise forever.
+      const localWs = ws;
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const settleResolve = (): void => {
+          if (settled) return;
+          settled = true;
           resolve();
         };
+        const settleReject = (err: Error): void => {
+          if (settled) return;
+          settled = true;
+          reject(err);
+        };
+
+        (localWs as unknown as { onopen: () => void }).onopen = () => {
+          settleResolve();
+        };
+        // Chain into the existing onclose set by attachWsHandlers so a
+        // pre-open close also rejects the open promise.
+        const prevOnClose = (
+          localWs as unknown as { onclose: (ev: { code: number }) => void }
+        ).onclose;
+        (localWs as unknown as { onclose: (ev: { code: number }) => void }).onclose =
+          (ev: { code: number }) => {
+            settleReject(
+              new Error(
+                `[voice-tts] WebSocket closed before open (code=${ev.code})`,
+              ),
+            );
+            if (typeof prevOnClose === "function") {
+              prevOnClose(ev);
+            }
+          };
+
+        // close() resolves closeSignal; rejecting here lets ensureOpen
+        // unwind so close() does not hang.
+        void closeSignal.then(() => {
+          settleReject(new Error("[voice-tts] open aborted by close()"));
+        });
       });
+
+      // CR-03 guard: if close() ran while we were awaiting onopen,
+      // skip the send-initial-frame and pending-text-flush phases.
+      // close() will tear down ws via its own teardown branch.
+      if (closedByCaller) {
+        return;
+      }
 
       // Send the initial configuration frame.
       ws.send(headerFrame);
@@ -483,14 +597,35 @@ export function createTtsStreamClient(
       return;
     }
     closedByCaller = true;
-    // If an open is in flight, await it so the WS reference is set
-    // before we try to close — without this we may race against
-    // appendText's lazy open.
+    // CR-04: cancel any pending reconnect window BEFORE we wait on
+    // openPromise. Without this, a reconnect scheduled while we are
+    // closing fires and re-enters ensureOpen() after teardown.
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    // CR-03: signal the closeSignal so any pending ensureOpen() awaiter
+    // unwinds promptly. Without this, an in-flight open that has not
+    // received onopen yet would leave the await below blocked.
+    if (closeSignalResolve !== null) {
+      closeSignalResolve();
+      closeSignalResolve = null;
+    }
     if (openPromise !== null) {
+      // CR-03 safety net: race the openPromise against a 250 ms timeout
+      // so close() ALWAYS resolves in finite time, even if a misbehaving
+      // WebSocket implementation never settles its onopen / onclose
+      // hooks and the closeSignal race above somehow misses.
       try {
-        await openPromise;
+        await Promise.race([
+          openPromise.catch(() => {
+            // Open failed — fall through to teardown.
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, 250)),
+        ]);
       } catch {
-        // Open failed — fall through to teardown.
+        // Defensive — Promise.race rejects only if BOTH branches reject,
+        // which the catch above already absorbs. Belt and braces.
       }
     }
     if (ws !== null) {
@@ -499,6 +634,7 @@ export function createTtsStreamClient(
       } catch {
         // Ignore close errors — we are tearing down anyway.
       }
+      ws = null;
     }
     complete();
   }
