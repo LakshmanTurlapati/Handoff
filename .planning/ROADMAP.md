@@ -202,7 +202,11 @@ Archived under `.planning/milestones/v1.0-ROADMAP.md`. Phase directories preserv
   3. When ElevenLabs STT is unreachable, the UI surfaces a "type your prompt" fallback input and the user can complete a turn end-to-end via typed input; when ElevenLabs TTS is unreachable, the completion text is surfaced visibly in the floating UI and printed to the launching terminal so it is not lost
   4. When Claude Code stalls for 60 seconds without progress events, Achilles audibly announces the stall ("Claude is still working — I'll let you know") and offers a cancel gesture via the configured hotkey; the cancel sends SIGINT to the child and returns the UI to idle
   5. Suspending the developer's machine mid-session and resuming, or unplugging a USB mic and switching to a Bluetooth headset mid-session, is handled without an Achilles process restart — mic capture resumes against the new device and the next utterance succeeds
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 14-01-PLAN.md — Latency probe (LOOP-06) — apps/achilles/src/main/latency-probe.ts + session.ts wiring at seven stage boundaries + rolling 20-utterance window with P50/P95; `--debug` CLI flag + `achilles latency --report` subcommand for offline rolling-window report; phase-14-unit Vitest project wired
+- [ ] 14-02-PLAN.md — Opt-in transcript persistence (SAFE-02) — apps/achilles/src/main/transcript-store.ts (default-off structural test; JSONL daily files; bounded retention) + FULL `achilles transcripts purge` + `transcripts list` (REPLACES Plan 13-01 stub) + `--save-transcripts` CLI flag + RecordingIndicator floating-UI affordance; ZERO transcript text in any log line
+- [ ] 14-03-PLAN.md — Graceful degradation (SAFE-05) — apps/achilles/src/main/incident-detection.ts (circuit breaker + exponential backoff full jitter + 4xx/5xx/network error classification) + TypedFallback + IncidentStatus renderer components + session.handleTypedPrompt routed through SAFE-04 wrapTranscript identically to spoken commit + IPC_INCIDENT_* channels + stderr fallback for TTS failure summary
+- [ ] 14-04-PLAN.md — SAFE-06 resilience — stuck-thinking-watchdog (60s default + locked announcement text + observe-progress heartbeat) + suspend-resume-handler (Electron powerMonitor wiring; tear down bridge + TTS + mic on suspend) + device-change-handler (navigator.mediaDevices.ondevicechange + HFP downgrade detection) + mic-capture.reacquireStream + session.onSuspend/onResume/onDeviceChange
 **UI hint**: yes
 
 ## Progress
@@ -223,4 +227,5 @@ Phases 09, 10, 11 are parallel-safe and can fan out if multiple engineers are av
 | 11. Floating UI Shell | v1.2 | 0/TBD | Not started | - |
 | 12. End-to-End Integration & System Prompt | v1.2 | 0/TBD | Not started | - |
 | 13. Distribution — npm CLI + Skill + Installers | v1.2 | 0/TBD | Not started | - |
-| 14. Hardening, Privacy, Resilience | v1.2 | 0/TBD | Not started | - |
+| 14. Hardening, Privacy, Resilience | v1.2 | 0/4 | Planned | - |
+</content>
