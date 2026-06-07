@@ -577,6 +577,16 @@ export function createTranscriptStore(
     try {
       entries = readDirImpl(dirPath);
     } catch (err) {
+      // WR-06 fix: ENOENT means the transcripts directory does not exist
+      // yet (typical on fresh install). This is NOT an error condition —
+      // there is simply nothing to retain. Without this guard a fresh-
+      // install boot would emit a spurious
+      // '[achilles] transcript-store retention readdir failed: ENOENT...'
+      // log line every time. We still log other errors (EACCES, EBUSY,
+      // etc.) so a genuine permission failure is visible.
+      if ((err as { code?: string }).code === "ENOENT") {
+        return { deleted: 0, retained: 0 };
+      }
       logger(
         `[achilles] transcript-store retention readdir failed: ${(err as Error).message}`,
       );

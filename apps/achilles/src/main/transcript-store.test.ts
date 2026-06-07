@@ -321,6 +321,61 @@ describe("createTranscriptStore — TS6 applyRetention age sweep", () => {
     createTranscriptStore(deps);
     expect(deleteFileSpy).toHaveBeenCalledTimes(0);
   });
+
+  // WR-06 regression. Phase 14 review found applyRetention emitted a noisy
+  // 'transcript-store retention readdir failed: ENOENT' line on every
+  // fresh-install boot because the transcripts directory does not exist
+  // yet. The catch block lumped ENOENT in with genuine permission failures.
+  // After WR-06 ENOENT is treated as 'directory does not exist, nothing to
+  // retain' and returns {deleted: 0, retained: 0} without logging.
+  it("WR-06: applyRetention swallows ENOENT silently (fresh install)", () => {
+    const { deps, logs } = buildDeps({
+      enabled: false,
+      retentionDays: 5,
+    });
+    // Replace readDirImpl with one that throws ENOENT.
+    const enoent = Object.assign(new Error("no such file or directory"), {
+      code: "ENOENT",
+    });
+    const enoentDeps: CreateTranscriptStoreDeps = {
+      ...deps,
+      readDirImpl: (() => {
+        throw enoent;
+      }) as never,
+    };
+    const store = createTranscriptStore(enoentDeps);
+    const result = store.applyRetention();
+    expect(result).toEqual({ deleted: 0, retained: 0 });
+    // No 'retention readdir failed' line was logged.
+    const errLogs = logs.filter((l) =>
+      l.includes("retention readdir failed"),
+    );
+    expect(errLogs.length).toBe(0);
+  });
+
+  it("WR-06: non-ENOENT readdir errors still log so a genuine failure is visible", () => {
+    const { deps, logs } = buildDeps({
+      enabled: false,
+      retentionDays: 5,
+    });
+    const eacces = Object.assign(new Error("permission denied"), {
+      code: "EACCES",
+    });
+    const errDeps: CreateTranscriptStoreDeps = {
+      ...deps,
+      readDirImpl: (() => {
+        throw eacces;
+      }) as never,
+    };
+    const store = createTranscriptStore(errDeps);
+    const result = store.applyRetention();
+    expect(result).toEqual({ deleted: 0, retained: 0 });
+    const errLogs = logs.filter((l) =>
+      l.includes("retention readdir failed"),
+    );
+    expect(errLogs.length).toBe(1);
+    expect(errLogs[0]).toContain("permission denied");
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────
