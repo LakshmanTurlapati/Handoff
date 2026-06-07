@@ -238,6 +238,23 @@ export default defineWorkspace([
       passWithNoTests: true,
     },
   },
+  {
+    // v1.2 phase-13 project. Owns the new `apps/achilles-cli` package:
+    // commander entrypoint (cli.ts), per-command modules under
+    // src/commands/, the platform-aware electron binary locator, and
+    // the Phase-14-deferred `transcripts purge` stub. Plan 13-01 wires
+    // the project; Plans 13-02 / 13-03 / 13-04 extend the include glob
+    // implicitly (everything under apps/achilles-cli/src/**/*.test.ts).
+    resolve: {
+      alias: workspaceAlias,
+    },
+    test: {
+      name: "phase-13-unit",
+      include: ["apps/achilles-cli/src/**/*.test.ts"],
+      environment: "node",
+      passWithNoTests: true,
+    },
+  },
 ]);
 // v1.2 phase-09 addition: workspace aliases + phase-09-unit project for the
 // "@achilles/voice-protocol", "@achilles/voice-stt", and "@achilles/voice-tts" packages.
@@ -247,3 +264,9 @@ export default defineWorkspace([
 // project runs in the node environment because the Phase 11 vitest tests
 // are pure helpers + injected-stub seams; the Playwright suite drives
 // the rendered DOM separately.
+// v1.2 phase-13 addition: phase-13-unit project for the `apps/achilles-cli`
+// npm package (commander entrypoint + per-command modules + electron
+// binary locator + Phase-14-deferred transcripts purge stub). The
+// project runs in the node environment; injected-seam tests cover the
+// CLI surface without launching Electron or invoking the real npm
+// registry.

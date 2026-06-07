@@ -27,6 +27,7 @@
     "test:phase-01:full": "vitest run --project phase-01-unit && playwright test --project=phase-01-e2e-mobile",
     "test:phase-11:quick": "vitest run --project phase-11-unit",
     "test:phase-11:full": "vitest run --project phase-11-unit && playwright test --project=achilles-renderer",
+    "test:phase-13:quick": "vitest run --project phase-13-unit",
     "db:generate": "npm run db:generate --workspace packages/db"
   },
   "devDependencies": {

@@ -1,0 +1,38 @@
+{
+  "name": "achilles",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Achilles voice companion for Claude Code. Global npm CLI that launches the floating voice UI, installs the Claude Code skill, runs the first-run wizard, and manages local transcripts.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "achilles": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "rm -rf dist .tsbuildinfo && tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(lint placeholder for apps/achilles-cli)\"",
+    "prepack": "npm run build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@achilles/achilles-skill": "0.1.0",
+    "commander": "13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.5",
+    "typescript": "5.7.3",
+    "vitest": "2.1.8"
+  }
+}

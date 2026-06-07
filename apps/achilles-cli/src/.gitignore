@@ -1,0 +1,9 @@
+# Compiled output never belongs inside src/. The build emits to ../dist/
+# via the package tsconfig outDir/rootDir; if any of these files appear
+# inside src/, someone ran tsc without the project config — clean them.
+# This guard mirrors Phase 09 CR-07 (packages/voice-protocol/src/.gitignore).
+*.js
+*.d.ts
+*.js.map
+*.d.ts.map
+*.jsx

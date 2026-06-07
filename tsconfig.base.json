@@ -44,7 +44,9 @@
       "@achilles/voice-stt": ["packages/voice-stt/src/index.ts"],
       "@achilles/voice-stt/*": ["packages/voice-stt/src/*"],
       "@achilles/voice-tts": ["packages/voice-tts/src/index.ts"],
-      "@achilles/voice-tts/*": ["packages/voice-tts/src/*"]
+      "@achilles/voice-tts/*": ["packages/voice-tts/src/*"],
+      "achilles-cli": ["apps/achilles-cli/src/cli.ts"],
+      "achilles-cli/*": ["apps/achilles-cli/src/*"]
     }
   },
   "exclude": ["**/node_modules", "**/dist", "**/.next", "**/build"]
