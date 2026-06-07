@@ -235,7 +235,19 @@ const invokedAsScript = (() => {
 })();
 
 if (invokedAsScript) {
+  // WR-05 fix: route every tmpdir disposal through a single finally
+  // block so EVERY exit path (happy, processExitImpl, outer catch)
+  // shares the cleanup. The previous shape duplicated `rmSync` inside
+  // both processExitImpl and the catch — but if defaultVersions() (or
+  // any other pre-tmp step) throws before tmpToClean is assigned, the
+  // catch fired without a cleanup and the script's outer reject path
+  // left whatever realTarballPathProducer wrote behind. The finally
+  // covers all three paths and is a no-op when tmpToClean is still
+  // null.
   let tmpToClean = null;
+  // The processExitImpl seam still needs to terminate the process; we
+  // defer cleanup into the finally instead of inlining rmSync calls.
+  let pendingExitCode = null;
   try {
     const sourcePaths = defaultSourcePaths();
     const versions = defaultVersions();
@@ -249,15 +261,27 @@ if (invokedAsScript) {
       stdout: process.stdout,
       stderr: process.stderr,
       processExitImpl: (code) => {
-        if (tmpToClean) rmSync(tmpToClean, { recursive: true, force: true });
-        process.exit(code);
+        // Capture the runner's intended exit code; the finally below
+        // disposes tmpToClean before we call process.exit so cleanup
+        // can never be skipped by a quick-exit path.
+        pendingExitCode = code;
       },
     });
   } catch (e) {
-    if (tmpToClean) rmSync(tmpToClean, { recursive: true, force: true });
     process.stderr.write(
       `[achilles] source-of-truth check failed: ${e.message}\n`,
     );
-    process.exit(1);
+    pendingExitCode = 1;
+  } finally {
+    if (tmpToClean) {
+      try {
+        rmSync(tmpToClean, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup; the OS-level tmp sweep collects the dir
+      }
+    }
+    if (pendingExitCode !== null) {
+      process.exit(pendingExitCode);
+    }
   }
 }
