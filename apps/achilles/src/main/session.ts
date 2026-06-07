@@ -953,7 +953,16 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
         );
       }
     }
-    deps.micCapture.resumeFrameDelivery();
+    // WR-06: apply the same SPEAKING_DEBOUNCE_MS half-duplex tail to
+    // the cancel path. The renderer-side playback-queue is still
+    // finishing the currently-playing chunk for ~50-150 ms after
+    // close() returns; resuming the mic immediately would let it pick
+    // up the cancellation tail (PITFALLS #2 echo loop). Push the mic
+    // resume to the natural tail boundary, mirroring the success path.
+    debounceToken = setT(() => {
+      debounceToken = null;
+      deps.micCapture.resumeFrameDelivery();
+    }, SPEAKING_DEBOUNCE_MS);
     // CIRCLE_CLICK drives speaking → idle and processing → idle per the
     // Plan 11-01 reducer behaviour.
     dispatch({ type: "CIRCLE_CLICK" });

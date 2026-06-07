@@ -342,7 +342,7 @@ describe("createSession — SE4 speaking → idle on TTS playback complete (300 
 // ─────────────────────────────────────────────────────────────────────
 
 describe("createSession — SE5 cancel during processing/speaking", () => {
-  it("onCancel during speaking calls bridge.cancel, tts.close, resumes mic, and drives speaking → idle", async () => {
+  it("onCancel during speaking calls bridge.cancel, tts.close, debounces mic resume (WR-06), and drives speaking → idle", async () => {
     const h = makeHarness();
     await h.session.onHotkeyPress();
     h.session.onUtteranceCommit({
@@ -359,6 +359,13 @@ describe("createSession — SE5 cancel during processing/speaking", () => {
     expect(closeSpy).toHaveBeenCalled();
     // CIRCLE_CLICK from speaking → idle.
     expect(h.controller.now()).toBe("idle");
+    // WR-06: mic resume is deferred to the SPEAKING_DEBOUNCE_MS tail
+    // boundary so the renderer's playback-queue can drain the
+    // currently-playing chunk without opening the echo path. Before
+    // the timer fires, resumeFrameDelivery has NOT been called.
+    expect(h.micCapture.resumeFrameDelivery).not.toHaveBeenCalled();
+    // Fire the scheduled debounce timer; resume now happens.
+    h.fireTimer();
     expect(h.micCapture.resumeFrameDelivery).toHaveBeenCalled();
   });
 });
