@@ -176,7 +176,11 @@ Archived under `.planning/milestones/v1.0-ROADMAP.md`. Phase directories preserv
   3. The `achilles init` wizard, on first run, prompts for the ElevenLabs API key (stored in the OS keystore), triggers the macOS mic permission flow via the Electron host (not the terminal), and runs a smoke round-trip that records a 2-second utterance and plays back a TTS confirmation before exiting cleanly
   4. `electron-builder` produces a signed and notarised `.dmg` with `NSMicrophoneUsageDescription` in `Info.plist`, a signed `.exe` NSIS installer that does not trigger SmartScreen blocking on first launch (or documents the override flow), and a `.AppImage` for Linux — all from one CI pipeline
   5. A `grep -r '<eleven-key-prefix>'` against the published npm tarball and the three installer artefacts returns nothing; renderer DevTools cannot read the ElevenLabs API key
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 13-01-PLAN.md — Scaffold apps/achilles-cli npm package (commander entrypoint, electron-binary-locator, launch + transcripts purge stub commands, workspace plumbing: tsconfig.base.json aliases + vitest.workspace.ts phase-13-unit project + root npm scripts) — DIST-01
+- [ ] 13-02-PLAN.md — install-skill command + skill-symlink primitive (cross-platform symlink + Windows-EPERM recursive-copy fallback) + finalised packages/achilles-skill/skill/SKILL.md body (<= 2000 words; references prompts/companion.md; no executable artefacts) — DIST-02
+- [ ] 13-03-PLAN.md — init wizard: ACHILLES_MODE=init CLI command + main-process createInitWizardWindow + createInitWizardSession (Step 1 API key entry + safeStorage persist; Step 2 mic permission via probePermission; Step 3 smoke round-trip with 60s budget) + renderer InitWizard.tsx (3 steps + locked copy) + preload mode exposure + main.tsx routing — DIST-04
+- [ ] 13-04-PLAN.md — electron-builder.json (mac dmg + hardened runtime + entitlements + NSMicrophoneUsageDescription; win nsis; linux AppImage) + entitlements.mac.plist + Info.plist.fragment + apps/achilles-cli/scripts/check-source-of-truth.mjs (Pitfall #12 diff gate) + apps/achilles-cli/scripts/check-tarball-no-secrets.mjs (Pitfall #22 + SAFE-01 scan) + bundledDependencies wiring + prepublishOnly gate + operator-facing build/README.md — DIST-03 + DIST-05
 **UI hint**: yes
 
 #### Phase 14: Hardening, Privacy, Resilience
