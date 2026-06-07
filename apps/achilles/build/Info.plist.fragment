@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Info.plist fragment — mirrors the keys electron-builder.json's
+  mac.extendInfo block injects into the generated .app/Contents/Info.plist
+  at build time. Kept here for human review. If you edit one, edit both
+  (the drift-prevention test in electron-builder.test.mjs asserts byte
+  equality between the NSMicrophoneUsageDescription value in this file
+  and the matching key in electron-builder.json).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Achilles uses your microphone to capture voice input and send it to ElevenLabs for transcription so Claude Code can act on what you say.</string>
+    <key>LSUIElement</key>
+    <true/>
+  </dict>
+</plist>

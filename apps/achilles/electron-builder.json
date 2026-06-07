@@ -1,0 +1,44 @@
+{
+  "appId": "com.achilles.voice",
+  "productName": "Achilles",
+  "directories": {
+    "output": "dist-installers",
+    "buildResources": "build"
+  },
+  "files": [
+    "out/**/*",
+    "package.json",
+    "!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,readme}",
+    "!**/{.DS_Store,.git,.gitignore,.editorconfig,.eslintrc,.eslintignore}"
+  ],
+  "asar": true,
+  "npmRebuild": false,
+  "publish": null,
+  "mac": {
+    "target": "dmg",
+    "category": "public.app-category.developer-tools",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist",
+    "icon": "build/icon.icns",
+    "extendInfo": {
+      "NSMicrophoneUsageDescription": "Achilles uses your microphone to capture voice input and send it to ElevenLabs for transcription so Claude Code can act on what you say.",
+      "LSUIElement": true
+    },
+    "notarize": {
+      "teamId": "${env.APPLE_TEAM_ID}"
+    }
+  },
+  "win": {
+    "target": "nsis",
+    "icon": "build/icon.ico",
+    "publisherName": "Achilles"
+  },
+  "linux": {
+    "target": "AppImage",
+    "category": "Development",
+    "icon": "build/icon.png",
+    "executableName": "achilles"
+  }
+}
