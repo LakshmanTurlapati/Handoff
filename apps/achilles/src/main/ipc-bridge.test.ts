@@ -211,6 +211,7 @@ describe("wireIpcBridge — CR-06 processing -> idle cancel routes through CIRCL
 function makeFakeSession(): AchillesSession & {
   spies: {
     onHotkeyPress: ReturnType<typeof vi.fn>;
+    requestSttToken: ReturnType<typeof vi.fn>;
     onUtteranceCommit: ReturnType<typeof vi.fn>;
     onMicFrame: ReturnType<typeof vi.fn>;
     onTtsPlaybackComplete: ReturnType<typeof vi.fn>;
@@ -220,6 +221,7 @@ function makeFakeSession(): AchillesSession & {
 } {
   const spies = {
     onHotkeyPress: vi.fn(async () => undefined),
+    requestSttToken: vi.fn(async () => undefined),
     onUtteranceCommit: vi.fn(),
     onMicFrame: vi.fn(),
     onTtsPlaybackComplete: vi.fn(),
@@ -228,6 +230,7 @@ function makeFakeSession(): AchillesSession & {
   };
   return {
     onHotkeyPress: spies.onHotkeyPress,
+    requestSttToken: spies.requestSttToken,
     onUtteranceCommit: spies.onUtteranceCommit,
     onMicFrame: spies.onMicFrame,
     onTtsPlaybackComplete: spies.onTtsPlaybackComplete,
@@ -366,7 +369,7 @@ describe("wireIpcBridge — Plan 12-04 IB3 mic-frame forwarding", () => {
 });
 
 describe("wireIpcBridge — Plan 12-04 IB4 stt-token-request forwarding", () => {
-  it("IPC_STT_TOKEN_REQUEST inbound triggers session.onHotkeyPress (renderer-requested mint)", () => {
+  it("IPC_STT_TOKEN_REQUEST inbound triggers session.requestSttToken (renderer-requested mint) and NOT onHotkeyPress (CR-02)", () => {
     const window = makeFakeWindow();
     const ipcMain = makeFakeIpcMain();
     const store = makeFakeStore();
@@ -381,7 +384,12 @@ describe("wireIpcBridge — Plan 12-04 IB4 stt-token-request forwarding", () => 
     });
     const handler = ipcMain.handlers.get(IPC_STT_TOKEN_REQUEST);
     handler!.listener({ sender: { id: 1 } }, {});
-    expect(session.spies.onHotkeyPress).toHaveBeenCalledTimes(1);
+    // CR-02: STT token-request must NOT route through onHotkeyPress
+    // because that mutates state (listening → processing on the half-
+    // committed path, or cancel from speaking). The dedicated
+    // requestSttToken method mints a token without touching the reducer.
+    expect(session.spies.requestSttToken).toHaveBeenCalledTimes(1);
+    expect(session.spies.onHotkeyPress).not.toHaveBeenCalled();
   });
 });
 

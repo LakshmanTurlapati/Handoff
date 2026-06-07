@@ -401,12 +401,15 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
       withSenderCheck(IPC_STT_TOKEN_REQUEST, (_event, payload) => {
         try {
           parseEnvelope(IPC_STT_TOKEN_REQUEST, payload);
-          // The renderer asks for a token at start-of-listening; the
-          // orchestrator's onHotkeyPress is the canonical mint+broadcast
-          // entry. It is intentionally idempotent — calling it from
-          // STT_TOKEN_REQUEST when the state is already 'listening' is a
-          // no-op for the state machine but re-mints the token.
-          void session.onHotkeyPress();
+          // CR-02: the renderer asks for a token at start-of-listening
+          // AND when its existing token expires / its WebSocket
+          // reconnects mid-turn. Routing this IPC through
+          // session.onHotkeyPress() previously mutated state — driving
+          // listening → processing on the half-committed path, OR
+          // triggering a cancel from speaking. session.requestSttToken
+          // mints a fresh token and broadcasts IPC_STT_TOKEN without
+          // touching the state machine.
+          void session.requestSttToken();
         } catch (err) {
           log(
             `[achilles] dropping invalid ${IPC_STT_TOKEN_REQUEST} payload: ${

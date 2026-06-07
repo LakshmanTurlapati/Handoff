@@ -325,6 +325,15 @@ export interface AchillesSession {
    */
   onHotkeyPress(): Promise<void>;
   /**
+   * CR-02: stateless STT token refresh. The renderer's STT client may
+   * need to re-mint the single-use token after a network reconnect or
+   * after the token has expired. Calling onHotkeyPress() to refresh the
+   * token would mutate the state machine (listening → processing, or
+   * cancel from speaking). This method mints a fresh token and
+   * broadcasts IPC_STT_TOKEN WITHOUT touching the reducer.
+   */
+  requestSttToken(): Promise<void>;
+  /**
    * The renderer's STT client commit. Drives listening → processing,
    * wraps the transcript via SAFE-04, and forwards to the Claude
    * bridge.
@@ -701,6 +710,34 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     }
   }
 
+  /**
+   * CR-02: stateless STT token refresh. The renderer's STT client
+   * calls this when its single-use token expires or its WebSocket
+   * reconnects mid-turn. The method mints a fresh token and broadcasts
+   * IPC_STT_TOKEN; it does NOT touch the state machine. Calling
+   * onHotkeyPress() here would dispatch HOTKEY_PRESS — driving
+   * listening → processing on the half-committed path, OR triggering a
+   * cancel from speaking — neither of which the renderer's refresh
+   * code intends.
+   *
+   * Errors are logged; the renderer surfaces the user-facing STT auth
+   * banner separately (Phase 14 graceful degradation).
+   */
+  async function requestSttToken(): Promise<void> {
+    if (disposed) return;
+    try {
+      const minted = await deps.mintSttToken();
+      deps.sendIpc(IPC_STT_TOKEN, {
+        token: minted.token,
+        expiresAt: minted.expiresAt,
+      });
+    } catch (err) {
+      log(
+        `[achilles] stt token refresh failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
   function onUtteranceCommit(payload: UtteranceCommitPayload): void {
     if (disposed) return;
     if (mirroredState !== "listening") {
@@ -880,6 +917,7 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
 
   return {
     onHotkeyPress,
+    requestSttToken,
     onUtteranceCommit,
     onMicFrame,
     onTtsPlaybackComplete,

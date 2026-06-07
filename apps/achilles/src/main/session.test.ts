@@ -946,3 +946,52 @@ describe("createSession — CR-01 null-ack + process_exit success path", () => {
     expect(overrideAppends.length).toBeGreaterThan(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// CR-02: STT token-refresh must NOT route through onHotkeyPress and
+// must NOT mutate the state machine. Calling the dedicated refresh
+// during a speaking turn must NOT cancel TTS.
+// ─────────────────────────────────────────────────────────────────────
+
+describe("createSession — CR-02 STT token refresh does not mutate state", () => {
+  it("requestSttToken mints a token and broadcasts IPC_STT_TOKEN without dispatching any state event", async () => {
+    const h = makeHarness();
+    // Drive to listening first; the renderer's STT client could refresh
+    // its token while listening. The mint count goes from 1 to 2 but
+    // the state must still be listening.
+    await h.session.onHotkeyPress();
+    expect(h.controller.now()).toBe("listening");
+    expect(h.mintSttToken).toHaveBeenCalledTimes(1);
+
+    await h.session.requestSttToken();
+    expect(h.controller.now()).toBe("listening");
+    expect(h.mintSttToken).toHaveBeenCalledTimes(2);
+    // Two IPC_STT_TOKEN broadcasts — one for the initial press, one
+    // for the refresh.
+    const tokenSends = h.sentIpc.filter((s) => s.channel === IPC_STT_TOKEN);
+    expect(tokenSends.length).toBe(2);
+  });
+
+  it("requestSttToken during speaking does NOT cancel the in-flight TTS turn", async () => {
+    const h = makeHarness();
+    await h.session.onHotkeyPress();
+    h.session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-0000000000c3",
+      text: "do the work",
+      committedAt: 0,
+    });
+    await flushAsync();
+    expect(h.controller.now()).toBe("speaking");
+
+    const cancelSpy = vi.spyOn(h.mockClaude, "cancel");
+    const closeSpy = vi.spyOn(h.mockTts, "close");
+
+    await h.session.requestSttToken();
+
+    // The refresh must NOT have driven cancel: bridge.cancel never
+    // called, TTS not closed, state still speaking.
+    expect(cancelSpy).not.toHaveBeenCalled();
+    expect(closeSpy).not.toHaveBeenCalled();
+    expect(h.controller.now()).toBe("speaking");
+  });
+});
