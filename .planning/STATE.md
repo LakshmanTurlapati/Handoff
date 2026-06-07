@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Achilles
-status: "Plan 12-04 session orchestrator shipped — apps/achilles/src/main/session.ts composes Phase 09/10/11/12-01/12-02/12-03 deliverables into the per-utterance voice loop with SAFE-04 sandwich-defence wrapping, pre-TTS normalisation, half-duplex gating (mic paused on processing → speaking + 300 ms debounce after TTS playback drains), and the PROMPT-05 runtime override that emits 'I ran into a problem. <reason>' regardless of LLM narration whenever deriveOutcome returns failure. ElevenLabs API key surface single read point in main only (store-first + env fallback + MissingApiKeyError graceful degradation). Plan 11-01 mock-timer back-compat preserved via MOCK_* event tags. 200/200 phase-12-unit tests (4 EE tests skip cleanly without MOCK_LOOP=1; all 200 pass under MOCK_LOOP=1). 413/413 phase-11-unit pass (no regression). 302/302 phase-09 + phase-10 pass (no regression). Typecheck clean. CR-07 hygiene clean."
-stopped_at: Completed 12-04-PLAN.md — Wave 3 of Phase 12 (session orchestrator composing voice-stt + claude-bridge + voice-tts + sandwich-defence + normalisation + half-duplex + error override) shipped
-last_updated: "2026-06-06T18:55:00.000Z"
-last_activity: 2026-06-06 — Plan 12-04 delivered the per-utterance orchestrator at apps/achilles/src/main/session.ts wired into main/index.ts production composition root, the single-read-point ElevenLabs API key surface at apps/achilles/src/main/key-source.ts, the deterministic mock-loop-clients factories, and the MOCK_LOOP=1 integration test
+status: "Plan 13-01 achilles npm CLI scaffold shipped — apps/achilles-cli/ is the publishable npm package with name:'achilles', bin:./dist/cli.js, publishConfig.access:public, commander@13.1.0 (pinned exact) + @achilles/achilles-skill@0.1.0 (workspace dep). commander entrypoint at src/cli.ts wires four top-level commands (launch / install-skill (placeholder for 13-02) / init (placeholder for 13-03) / transcripts <subcommand>) + bare-invocation default-to-launch. Per-command modules: launchCommand (detached + stdio:ignore + unref + env passthrough); transcriptsCommand (Phase-14-deferred stub, zero node:fs imports). locateElectronBinary returns absolute paths for darwin/win32/linux or throws typed ElectronBinaryMissingError (POSIX path joining uniformly). Workspace plumbing: tsconfig.base.json `achilles-cli` aliases + vitest.workspace.ts `phase-13-unit` project + root package.json test:phase-13:quick. 19/19 phase-13-unit tests (L1-L5 + LC1-LC3 + T1-T2 + C1-C9). Typecheck clean. Build produces dist/cli.js with shebang preserved. No phase-09/10/11/12 regressions. CR-07 hygiene clean. CLAUDE.md zero-emojis enforced."
+stopped_at: Completed 13-01-PLAN.md — Wave 1 of Phase 13 (achilles npm CLI scaffold + commander entrypoint + electron-binary-locator + launch + transcripts purge stub) shipped; parallel Wave-1 sibling 13-02 (install-skill) concurrent
+last_updated: "2026-06-07T01:31:17Z"
+last_activity: "2026-06-07 — Plan 13-01 shipped the apps/achilles-cli npm package scaffold (commit 8543708) with the commander entrypoint surface that Plans 13-02 / 13-03 will extend; the placeholder install-skill.ts + init.ts files keep cli.ts import paths stable across wave boundaries"
 progress:
   total_phases: 10
   completed_phases: 4
-  total_plans: 20
-  completed_plans: 18
-  percent: 45
+  total_plans: 24
+  completed_plans: 19
+  percent: 42
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-06)
 
 ## Current Position
 
-Phase: 12 of 14 (End-to-End Integration & System Prompt) — Wave 3 plan-04 complete
-Plan: 04 complete (Wave 3 / plan-04); all 4 plans of Phase 12 shipped
-Status: Plan 12-04 session orchestrator shipped — apps/achilles/src/main/session.ts composes Phase 09/10/11/12-01/12-02/12-03 deliverables into the per-utterance voice loop. SAFE-04 sandwich-defence wraps every transcript before bridge.send. Pre-TTS normalisation strips ANSI/paths/secret-prefixes from both the ack AND the spoken-summary body. Half-duplex gating: micCapture.pauseFrameDelivery on processing → speaking + MIC_FRAME drop during speaking + 300 ms (SPEAKING_DEBOUNCE_MS) tail before transitioning to idle. PROMPT-05 runtime override: deriveOutcome failure → "I ran into a problem. <humanReason>" regardless of LLM body. ElevenLabs API key surface single read point in main only (apps/achilles/src/main/key-source.ts with store-first + env fallback + MissingApiKeyError graceful degradation). 4 new state-machine event tags (STT_COMMITTED, CLAUDE_RESULT_READY, TTS_PLAYBACK_DRAINED, CLAUDE_FAILURE_OVERRIDE) + 4 new ipc-bridge inbound handlers + apps/achilles/src/main/mock-loop-clients.ts deterministic fakes + apps/achilles/test/integration/end-to-end-loop.test.ts gated by MOCK_LOOP=1. Plan 11-01 MOCK_* back-compat preserved. Cumulative: 200/200 phase-12-unit tests + 413/413 phase-11-unit + 302/302 phase-09/10 (no regression). Typecheck clean.
-Last activity: 2026-06-06 — Plan 12-04 shipped the per-utterance orchestrator composing every Phase 09/10/11/12-01/12-02/12-03 deliverable with structural enforcement of LOOP-05 half-duplex + PROMPT-05 PITFALLS #17 runtime override + SAFE-01 API key isolation + SAFE-04 sandwich-defence
+Phase: 13 of 14 (Distribution — npm CLI + Skill + Installers) — Wave 1 plan-01 complete
+Plan: 01 complete (Wave 1 / plan-01); Wave-1 sibling plan-02 (install-skill) is concurrent; Wave 2 = plan-03 (init wizard); Wave 3 = plan-04 (installers + diff check + tarball scan)
+Status: Plan 13-01 achilles npm CLI scaffold shipped — apps/achilles-cli/ is the publishable npm package with name:"achilles" (UNSCOPED public top-level), bin.achilles:./dist/cli.js, publishConfig.access:public, files:[dist, README.md], commander@13.1.0 (pinned exact; first added production dep for the achilles tarball) + @achilles/achilles-skill@0.1.0 (workspace dep — npm resolves to symlinked source). commander entrypoint at src/cli.ts wires four top-level commands (launch / install-skill (placeholder) / init (placeholder) / transcripts <subcommand>) + bare-invocation default-to-launch (pre-detected via argv.length === 2 so `achilles nonexistent` reaches commander's unknown-command path instead of "too many arguments"). Version read dynamically from package.json via import.meta.url + readFileSync. exitOverride + configureOutput route through injected processExitImpl + stdout/stderr seams. Per-command modules: launchCommand (detached + stdio:ignore + unref + env passthrough so Plan 13-03 can route ACHILLES_MODE=init); transcriptsCommand (Phase-14-deferred stub for SAFE-02 + LOOP-06; ZERO node:fs imports verified by grep; exit 0 on `purge` with deferred-marker, exit 2 on unknown subcommand); install-skill + init 5-line placeholders for Plans 13-02 / 13-03 with stable import paths. locateElectronBinary({ pkgRoot, platform, fileExistsAt }) returns absolute paths for darwin (dist/Achilles.app/Contents/MacOS/Achilles) / win32 (dist/Achilles.exe) / linux (dist/linux/achilles) or throws typed ElectronBinaryMissingError when absent / plain Error("Unsupported platform: ...") for unknown platforms. Uses path.posix.join uniformly across all three platforms — modern Windows fs.existsSync accepts forward slashes in absolute paths and the L2 test fixture passes POSIX-style pkgRoot. Workspace plumbing: tsconfig.base.json adds `achilles-cli` and `achilles-cli/*` path aliases; vitest.workspace.ts adds `phase-13-unit` project; root package.json adds `test:phase-13:quick` script. 19/19 phase-13-unit tests pass (L1-L5 + LC1-LC3 + T1-T2 + C1-C9 — every named behaviour test from the plan). Typecheck clean. Build produces dist/cli.js with shebang `#!/usr/bin/env node` preserved on line 1. Runtime: node apps/achilles-cli/dist/cli.js --version returns 0.1.0; --help lists four commands. No phase-09/10/11/12 regressions (145/145 + 157/157 + 423/423 + 220/220+4 skipped). CR-07 hygiene: zero compiled artefacts under src/. CLAUDE.md global: zero emojis verified.
+Last activity: 2026-06-07 — Plan 13-01 shipped the apps/achilles-cli npm package scaffold (commit 8543708) with the commander entrypoint surface that Plans 13-02 / 13-03 will extend (the placeholder install-skill.ts + init.ts files keep cli.ts import paths stable across wave boundaries)
 
-Progress: [█████████░] 90%
+Progress: [█████████░] 95%
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [█████████░] 90%
 | Phase 11 P01 | ~75 | 2 tasks | 30 files |
 | Phase 11 P02 | ~60 | 2 tasks | 17 files |
 | Phase 12 P04 | 30 | 3 tasks | 17 files (7 new + 10 modified) |
+| Phase 13 P01 | 75 | 2 tasks | 19 files (15 new + 4 modified); 19/19 new tests |
 
 ## Accumulated Context
 
