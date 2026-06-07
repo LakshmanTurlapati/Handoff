@@ -38,6 +38,7 @@
  */
 
 import { join as posixJoin } from "node:path/posix";
+import { sep as platformSep } from "node:path";
 
 /**
  * Thrown when the locator recognises the platform but the expected
@@ -137,8 +138,21 @@ export function locateElectronBinary(
   const { segments } = relativeBinaryFor(platform);
   const absolutePath = posixJoin(pkgRoot, ...segments);
   if (!fileExistsAt(absolutePath)) {
+    // WR-08 fix: render the path in the user's native separator style
+    // for diagnostic messages on Windows. Production keeps the
+    // forward-slash absolutePath for fs.existsSync (which Windows
+    // accepts transparently) and for the spawn() call, but the user-
+    // facing remediation reads `C:\Program Files\...` rather than
+    // `/Program Files/...`. The cosmetic conversion is bounded to the
+    // error string; the function's return value is unchanged so the
+    // L2 test fixture and downstream callers (cli.ts → spawn) see the
+    // same shape they always did.
+    const displayPath =
+      platform === "win32" && platformSep === "\\"
+        ? absolutePath.split("/").join("\\")
+        : absolutePath;
     throw new ElectronBinaryMissingError(
-      `Electron binary not found for platform ${platform} at ${absolutePath}. Did you run \`npm install\`?`,
+      `Electron binary not found for platform ${platform} at ${displayPath}. Did you run \`npm install\`?`,
     );
   }
   return absolutePath;
