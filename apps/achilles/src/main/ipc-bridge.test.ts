@@ -236,7 +236,11 @@ function makeFakeSession(): AchillesSession & {
     onTtsPlaybackComplete: spies.onTtsPlaybackComplete,
     onCancel: spies.onCancel,
     dispose: spies.dispose,
-    metrics: { framesDroppedDuringSpeaking: 0 },
+    metrics: {
+      framesDroppedDuringSpeaking: 0,
+      framesDroppedDuringProcessing: 0,
+      framesDroppedDuringHalfDuplexGate: 0,
+    },
     spies,
   };
 }

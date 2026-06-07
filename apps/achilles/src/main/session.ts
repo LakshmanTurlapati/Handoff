@@ -196,14 +196,34 @@ export interface OrchestratorStateController {
 
 /**
  * Per-utterance metrics surfaced on the AchillesSession handle.
+ *
+ * WR-07: the half-duplex gate runs in BOTH `processing` AND
+ * `speaking` (between STT_COMMITTED and the 300 ms post-playback tail).
+ * The previous single counter `framesDroppedDuringSpeaking` was a
+ * misnomer that masked the actual state distribution of dropped
+ * frames. The metric is split into two counters with the legacy
+ * name kept as the SUM so the SE9 test and any external monitoring
+ * continue to read what they expect.
  */
 export interface AchillesSessionMetrics {
   /**
-   * Number of mic frames the orchestrator dropped because the session
-   * was in the speaking state. Useful for verifying the half-duplex
+   * Number of mic frames the orchestrator dropped while the session
+   * was in the `speaking` state. Useful for verifying the half-duplex
    * gate at runtime; SE9 asserts this increments under simulation.
    */
   framesDroppedDuringSpeaking: number;
+  /**
+   * Number of mic frames the orchestrator dropped while the session
+   * was in the `processing` state.
+   */
+  framesDroppedDuringProcessing: number;
+  /**
+   * Total mic frames dropped by the half-duplex gate
+   * (framesDroppedDuringSpeaking + framesDroppedDuringProcessing).
+   * Convenience accessor for callers that previously read the single
+   * counter under the misleading name.
+   */
+  framesDroppedDuringHalfDuplexGate: number;
 }
 
 /**
@@ -443,9 +463,19 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
   // controller.now() every frame. Updated on every dispatch.
   let mirroredState: AchillesState = "idle";
 
+  // WR-07: split the drop counters by state so the metric name
+  // matches the increment site. framesDroppedDuringHalfDuplexGate is
+  // exposed as a derived read-only sum.
   const metrics: AchillesSessionMetrics = {
     framesDroppedDuringSpeaking: 0,
-  };
+    framesDroppedDuringProcessing: 0,
+    get framesDroppedDuringHalfDuplexGate(): number {
+      return (
+        this.framesDroppedDuringSpeaking +
+        this.framesDroppedDuringProcessing
+      );
+    },
+  } as AchillesSessionMetrics;
 
   function syncMirroredState(next: AchillesState): void {
     mirroredState = next;
@@ -888,8 +918,15 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
   function onMicFrame(_payload: MicFramePayload): void {
     if (disposed) return;
     // Half-duplex: drop the frame when we are not actively listening.
-    if (mirroredState === "speaking" || mirroredState === "processing") {
+    // WR-07: attribute the drop to the actual state so future debug
+    // sessions see whether the gate is holding frames during
+    // processing or speaking (or both).
+    if (mirroredState === "speaking") {
       metrics.framesDroppedDuringSpeaking += 1;
+      return;
+    }
+    if (mirroredState === "processing") {
+      metrics.framesDroppedDuringProcessing += 1;
       return;
     }
     // Production path: the renderer's STT client writes the frame to
