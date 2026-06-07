@@ -242,6 +242,42 @@ describe("initCommand", () => {
     expect(env.ACHILLES_MODE).toBeUndefined();
   });
 
+  it("WR-02: locate throws a non-ElectronBinaryMissingError (e.g. unsupported platform) — surfaces '[achilles] init failed:' and exits 1 without an unhandled exception", () => {
+    const locate = () => {
+      throw new Error("Unsupported platform: aix");
+    };
+    const { calls, spawn } = makeSpawnSpy();
+    let exitCode: number | null = null;
+    const processExitImpl = (code: number) => {
+      exitCode = code;
+    };
+    const stderrWrites: string[] = [];
+    const stderr = {
+      write: (chunk: string) => {
+        stderrWrites.push(chunk);
+        return true;
+      },
+    };
+
+    // Must NOT throw — the previous `throw err;` would have raised an
+    // unhandled exception out of commander's action callback.
+    expect(() =>
+      initCommand({
+        locate,
+        spawn,
+        processExitImpl,
+        stderr,
+        env: {},
+      }),
+    ).not.toThrow();
+
+    expect(exitCode).toBe(1);
+    const combined = stderrWrites.join("");
+    expect(combined).toContain("[achilles] init failed:");
+    expect(combined).toContain("Unsupported platform: aix");
+    expect(calls).toHaveLength(0);
+  });
+
   it("zero emojis in any stderr surface (CLAUDE.md global)", () => {
     const locate = () => {
       throw new ElectronBinaryMissingError(

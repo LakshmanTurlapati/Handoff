@@ -127,7 +127,18 @@ export function initCommand(deps: InitDeps): void {
       processExitImpl(1);
       return;
     }
-    throw err;
+    // WR-02 fix: locator threw something other than
+    // ElectronBinaryMissingError (e.g. "Unsupported platform: aix" from
+    // electron-binary-locator.ts). The previous `throw err;` here
+    // surfaced an unhandled exception with a raw Node stack trace
+    // because cli.ts's commander action callback has no top-level
+    // try/catch. Surface a typed `[achilles] init failed: ...` line
+    // and exit 1 cleanly so the user on an unsupported platform sees a
+    // diagnostic message rather than the V8 crash trace.
+    const detail = err instanceof Error ? err.message : String(err);
+    stderr.write(`[achilles] init failed: ${detail}\n`);
+    processExitImpl(1);
+    return;
   }
 
   // Build the child env. The supplied env is read-only; the spread

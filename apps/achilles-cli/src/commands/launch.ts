@@ -124,7 +124,16 @@ export function launchCommand(deps: LaunchDeps): void {
       processExitImpl(1);
       return;
     }
-    throw err;
+    // WR-02 fix: same rationale as in init.ts — locator threw something
+    // other than ElectronBinaryMissingError (e.g. "Unsupported platform:
+    // aix"). The previous `throw err;` surfaced an unhandled exception
+    // because cli.ts's commander action callback has no top-level
+    // try/catch. Surface a typed `[achilles] launch failed: ...` line
+    // and exit 1 cleanly.
+    const detail = err instanceof Error ? err.message : String(err);
+    stderr.write(`[achilles] launch failed: ${detail}\n`);
+    processExitImpl(1);
+    return;
   }
   const child = spawn(binaryPath, [], {
     detached: true,
