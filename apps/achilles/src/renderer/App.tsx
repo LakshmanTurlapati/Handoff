@@ -33,13 +33,14 @@
  * popover. Production wires the real Electron platform; in headless
  * tests the renderer falls back to navigator parsing.
  */
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 
 import type { HotkeyMode } from "../shared/constants.js";
 import { getBridge } from "./bridge.js";
 import { ErrorBanner } from "./components/ErrorBanner.js";
 import { FloatingShell } from "./components/FloatingShell.js";
 import { PermissionOverlay } from "./components/PermissionOverlay.js";
+import { RecordingIndicator } from "./components/RecordingIndicator.js";
 import { SettingsPopover } from "./components/SettingsPopover.js";
 import { useAchillesState } from "./state/useAchillesState.js";
 
@@ -94,6 +95,22 @@ export function App(): ReactElement {
   const [hotkeyMode, setHotkeyMode] = useState<HotkeyMode>("toggle");
   const [hotkeyKey, setHotkeyKey] = useState<string>(DEFAULT_HOTKEY);
   const platform = useMemo<"darwin" | "win32" | "linux">(detectPlatform, []);
+
+  // Plan 14-02 SAFE-02: subscribe to the transcript persistence
+  // broadcast. The default (until the first broadcast lands) is
+  // `false` — the indicator does not flash on a fresh boot before
+  // main reports the resolved flag.
+  const [persistenceEnabled, setPersistenceEnabled] = useState<boolean>(false);
+  useEffect(() => {
+    const bridge = getBridge();
+    if (bridge.onTranscriptPersistenceState === undefined) return;
+    const off = bridge.onTranscriptPersistenceState((enabled) => {
+      setPersistenceEnabled(enabled);
+    });
+    return () => {
+      off();
+    };
+  }, []);
 
   const handleOpenSystemSettings = useCallback(() => {
     getBridge().openSystemSettings();
@@ -171,12 +188,23 @@ export function App(): ReactElement {
     />
   ) : null;
 
+  // Plan 14-02 SAFE-02: the RecordingIndicator renders as a sibling
+  // overlay of the FloatingShell composition. The indicator is
+  // positioned (top-right corner) inside the floating-shell coordinate
+  // space; the CSS .floating-shell .recording-indicator selector
+  // anchors it via absolute positioning so it never disrupts the
+  // existing UI-SPEC s2 pixel grid for the circle / waveform /
+  // transcript region. When persistence is OFF the component returns
+  // null so no DOM is produced.
   return (
-    <FloatingShell
-      permissionOverlay={permissionOverlayNode}
-      errorBanner={errorBannerNode}
-      settingsPopover={settingsPopoverNode}
-      onSettingsOpen={handleSettingsOpen}
-    />
+    <>
+      <FloatingShell
+        permissionOverlay={permissionOverlayNode}
+        errorBanner={errorBannerNode}
+        settingsPopover={settingsPopoverNode}
+        onSettingsOpen={handleSettingsOpen}
+      />
+      <RecordingIndicator visible={persistenceEnabled} />
+    </>
   );
 }

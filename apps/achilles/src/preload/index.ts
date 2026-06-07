@@ -35,6 +35,7 @@ import {
   IPC_STATE_CHANGED,
   IPC_TRANSCRIPT_COMMITTED,
   IPC_TRANSCRIPT_PARTIAL,
+  IPC_TRANSCRIPT_PERSISTENCE_STATE,
   IPC_TTS_AMPLITUDE,
   IPC_UPDATE_HOTKEY_CONFIG,
   IPC_UPDATE_WINDOW_POSITION,
@@ -153,6 +154,20 @@ const api = {
   },
   onError(cb: (msg: string) => void): () => void {
     return subscribe<{ message: string }>(IPC_ERROR, (p) => cb(p.message));
+  },
+  /**
+   * Plan 14-02 SAFE-02. Main → Renderer. Subscribe to the transcript
+   * persistence state broadcast. When `enabled: true` arrives, the
+   * renderer mounts the RecordingIndicator (pulsing red dot + label);
+   * when `enabled: false` arrives, it unmounts. The default (until the
+   * first broadcast) is "no indicator" so a fresh boot before main's
+   * broadcast lands does not flash an indicator.
+   */
+  onTranscriptPersistenceState(cb: (enabled: boolean) => void): () => void {
+    return subscribe<{ enabled: boolean }>(
+      IPC_TRANSCRIPT_PERSISTENCE_STATE,
+      (p) => cb(p.enabled),
+    );
   },
   requestState(state: AchillesState): void {
     send(IPC_REQUEST_STATE, { state });

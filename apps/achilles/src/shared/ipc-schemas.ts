@@ -38,6 +38,7 @@ import {
   IPC_STT_TOKEN_REQUEST,
   IPC_TRANSCRIPT_COMMITTED,
   IPC_TRANSCRIPT_PARTIAL,
+  IPC_TRANSCRIPT_PERSISTENCE_STATE,
   IPC_TTS_AMPLITUDE,
   IPC_TTS_CHUNK,
   IPC_TTS_PLAYBACK_COMPLETE,
@@ -427,6 +428,28 @@ export const InitWizardDonePayloadSchema = z.object({}).strict();
 export type InitWizardDonePayload = z.infer<typeof InitWizardDonePayloadSchema>;
 
 // ─────────────────────────────────────────────────────────────────────
+// Phase 14-02 — Transcript persistence state (SAFE-02)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Main → Renderer. Carries the current SAFE-02 transcript persistence
+ * flag. `enabled: true` mounts the RecordingIndicator (pulsing red
+ * dot + 'Recording transcripts' label); `enabled: false` removes it.
+ *
+ * `.strict()` rejects unknown fields so a future field addition is a
+ * deliberate schema bump rather than a silent passthrough.
+ */
+export const TranscriptPersistenceStatePayloadSchema = z
+  .object({
+    enabled: z.boolean(),
+  })
+  .strict();
+
+export type TranscriptPersistenceStatePayload = z.infer<
+  typeof TranscriptPersistenceStatePayloadSchema
+>;
+
+// ─────────────────────────────────────────────────────────────────────
 // Channel-keyed schema map + helpers
 // ─────────────────────────────────────────────────────────────────────
 
@@ -472,6 +495,8 @@ export const IPC_PAYLOAD_SCHEMAS: Record<string, z.ZodTypeAny> = {
   [IPC_INIT_SMOKE_START]: InitSmokeStartPayloadSchema,
   [IPC_INIT_SMOKE_RESULT]: InitSmokeResultPayloadSchema,
   [IPC_INIT_WIZARD_DONE]: InitWizardDonePayloadSchema,
+  // Phase 14-02 SAFE-02 transcript persistence affordance state.
+  [IPC_TRANSCRIPT_PERSISTENCE_STATE]: TranscriptPersistenceStatePayloadSchema,
 };
 
 /**

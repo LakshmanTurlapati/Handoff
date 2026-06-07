@@ -89,6 +89,7 @@ import {
 import type { LatencyProbe } from "./latency-probe.js";
 import { normaliseForTts } from "./normalisation.js";
 import type { AchillesEvent } from "./state-machine.js";
+import type { TranscriptStoreLike } from "./transcript-store.js";
 
 /**
  * Locked half-duplex tail timer per CONTEXT.md "Half-duplex turn-taking"
@@ -333,6 +334,28 @@ export interface AchillesSessionDeps {
    * field iff ACHILLES_DEBUG=1.
    */
   latencyProbe?: LatencyProbe;
+  /**
+   * Plan 14-02 — optional SAFE-02 transcript store. When provided
+   * (production wiring: only when ACHILLES_SAVE_TRANSCRIPTS=1), the
+   * orchestrator calls `store.appendTurn` at two utterance
+   * boundaries:
+   *
+   *   - onUtteranceCommit success path → `{role:"user", text: payload.text}`
+   *     (the RAW user text, NOT the sandwich-wrapped form — we
+   *     persist the user's actual utterance, not the bridge envelope)
+   *   - consumeClaudeEvents process_exit branch → `{role:"assistant",
+   *     text: summaryBody}` (the post-normalisation,
+   *     post-PROMPT-05-override text — i.e., what the user heard)
+   *
+   * The store is undefined by default — Plan 12-04 callers (and the
+   * Plan 14-01 / 14-02 tests that do not exercise the store) pass
+   * nothing and the orchestrator's behaviour is bit-for-bit identical
+   * to its pre-14-02 surface. SAFE-02 invariant: when the store is
+   * undefined OR its `isEnabled()` returns false, the appendTurn
+   * optional-chain is a SYNC no-op that NEVER touches the filesystem
+   * (verified structurally by transcript-store.test.ts TS2 + TS10).
+   */
+  transcriptStore?: TranscriptStoreLike;
 }
 
 /**
@@ -766,6 +789,18 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
           }
         }
         const norm = normaliseForTts(summaryBody);
+        // Plan 14-02 SAFE-02: persist the assistant summary body —
+        // the post-normalisation, post-PROMPT-05-override text the
+        // user actually hears. We use summaryBody (NOT norm.normalised)
+        // because the user's transcript record should match the
+        // semantic content of the turn, not the TTS-normalised body
+        // with paths masked and ANSI stripped. The optional chain
+        // collapses to a SYNC no-op when the store is undefined or
+        // enabled=false (TS2 + TS10 invariant).
+        deps.transcriptStore?.appendTurn({
+          role: "assistant",
+          text: summaryBody,
+        });
         // Ensure TTS is open — defensive, since extractAck may have
         // missed the marker for a defective stream.
         await openTtsClient();
@@ -943,6 +978,17 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
       dispatch({ type: "CIRCLE_CLICK" });
       return;
     }
+    // Plan 14-02 SAFE-02: persist the RAW user utterance (NOT the
+    // sandwich-wrapped form) when the transcript store is configured
+    // and enabled. The optional chain collapses to a SYNC no-op when
+    // the store is undefined or enabled=false (verified structurally
+    // by transcript-store.test.ts TS2 + TS10). We persist payload.text
+    // because the user wants their own words back when they re-open
+    // their transcripts, not the DELIM_START / DELIM_END envelope.
+    deps.transcriptStore?.appendTurn({
+      role: "user",
+      text: payload.text,
+    });
     // Drive the production STT_COMMITTED tag. The reducer's
     // STT_COMMITTED case ignores the event when state is not
     // `listening`, so the toggle-mode race path (state already

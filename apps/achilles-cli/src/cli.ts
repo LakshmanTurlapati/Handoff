@@ -25,7 +25,13 @@
  * cli.ts route table.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import { spawn as nodeSpawn } from "node:child_process";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -119,25 +125,34 @@ const packageVersion: string = JSON.parse(
  */
 /**
  * Compose the env override passed to `deps.launchCommand` when the
- * top-level `--debug` flag is present. Inherits from `process.env` so
- * the spawned Electron child receives the operator's full environment
- * plus `ACHILLES_DEBUG=1`. Returns `undefined` when `--debug` is
- * absent so the launch command falls back to its default env binding.
+ * top-level `--debug` AND/OR `--save-transcripts` flags are present.
+ * Inherits from `process.env` so the spawned Electron child receives
+ * the operator's full environment plus the resolved env vars.
+ * Returns `undefined` when BOTH flags are absent so the launch
+ * command falls back to its default env binding (Plan 12-04 behaviour
+ * preserved).
+ *
+ * The two flags COMPOSE — `achilles --debug --save-transcripts launch`
+ * passes both `ACHILLES_DEBUG=1` AND `ACHILLES_SAVE_TRANSCRIPTS=1` to
+ * the Electron child. main/index.ts reads each env var independently
+ * (one wires the LatencyProbe; one wires the TranscriptStore).
  *
  * The function is exposed separately so the bare-invocation path
  * (`isBareInvocation === true`) and the explicit `launch` action use
  * the same code path — preventing a future refactor from silently
- * dropping the debug routing on one branch.
+ * dropping a flag on one branch.
  */
-function makeDebugEnv(
+function makeLaunchEnv(
   debug: boolean,
+  saveTranscripts: boolean,
 ):
   | { readonly env: Readonly<Record<string, string | undefined>> }
   | undefined {
-  if (!debug) return undefined;
-  return {
-    env: { ...process.env, ACHILLES_DEBUG: "1" },
-  };
+  if (!debug && !saveTranscripts) return undefined;
+  const env: Record<string, string | undefined> = { ...process.env };
+  if (debug) env.ACHILLES_DEBUG = "1";
+  if (saveTranscripts) env.ACHILLES_SAVE_TRANSCRIPTS = "1";
+  return { env };
 }
 
 function buildProgram(inputs: RunCliInputs): Command {
@@ -154,6 +169,16 @@ function buildProgram(inputs: RunCliInputs): Command {
     // --debug, the env passthrough is unchanged so the probe is
     // unwired (Plan 12-04 behaviour preserved).
     .option("--debug", "Enable per-utterance LOOP-06 latency probe logging")
+    // Plan 14-02: top-level --save-transcripts flag enables the SAFE-02
+    // opt-in transcript persistence. When present, the launch action
+    // passes ACHILLES_SAVE_TRANSCRIPTS=1 through to the spawned
+    // Electron child; main reads the env var at bootstrap and
+    // constructs the TranscriptStore. Composes with --debug — both
+    // env vars can be set in the same launch.
+    .option(
+      "--save-transcripts",
+      "Persist text transcripts to ~/.achilles/transcripts/ (SAFE-02 opt-in)",
+    )
     // Route commander's output to the injected stdout/stderr seams so
     // tests can capture --version / --help / error messages without
     // touching process.stdout / process.stderr.
@@ -180,8 +205,13 @@ function buildProgram(inputs: RunCliInputs): Command {
     .command("launch")
     .description("Open the floating Achilles UI")
     .action(() => {
-      const debugOpt = (program.opts() as { debug?: boolean }).debug ?? false;
-      deps.launchCommand(makeDebugEnv(debugOpt));
+      const opts = program.opts() as {
+        debug?: boolean;
+        saveTranscripts?: boolean;
+      };
+      const debugOpt = opts.debug ?? false;
+      const saveTranscriptsOpt = opts.saveTranscripts ?? false;
+      deps.launchCommand(makeLaunchEnv(debugOpt, saveTranscriptsOpt));
     });
 
   program
@@ -204,7 +234,7 @@ function buildProgram(inputs: RunCliInputs): Command {
   program
     .command("transcripts <subcommand>")
     .description(
-      "Manage transcript persistence (Phase 14 — currently `purge` is a stub)",
+      "Manage SAFE-02 transcript files: `purge` deletes all JSONL files; `list` enumerates them with line counts",
     )
     .action((sub: string) => {
       deps.transcriptsCommand(sub);
@@ -330,7 +360,22 @@ if (invokedAsScript) {
     transcriptsCommand: (sub) =>
       realTranscriptsCommand(sub, {
         stdout: process.stdout,
+        stderr: process.stderr,
         processExitImpl: (code) => process.exit(code),
+        // Plan 14-02: the production transcripts directory mirrors the
+        // main-side write path (`apps/achilles/src/main/index.ts`
+        // writes JSONL files under `~/.achilles/transcripts/` via the
+        // TranscriptStore's writeFileImpl seam). Both surfaces use the
+        // same location so the offline subcommand does not need an
+        // Electron IPC round-trip.
+        dirPath: join(homedir(), ".achilles", "transcripts"),
+        readDirImpl: (p) => readdirSync(p),
+        statFileImpl: (p) => {
+          const st = statSync(p);
+          return { size: st.size, mtime: st.mtime };
+        },
+        deleteFileImpl: (p) => unlinkSync(p),
+        readFileImpl: (p, enc) => readFileSync(p, enc),
       }),
     latencyCommand: (opts) =>
       realLatencyCommand({

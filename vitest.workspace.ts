@@ -272,11 +272,29 @@ export default defineWorkspace([
     resolve: {
       alias: workspaceAlias,
     },
+    esbuild: {
+      // Plan 14-02 addition: RecordingIndicator.test.tsx needs the
+      // JSX automatic runtime so React does not have to be imported
+      // explicitly. The per-file `// @vitest-environment jsdom`
+      // docblock opts the renderer component test into the DOM; the
+      // phase-14-unit default environment stays `node` for the
+      // main-process modules.
+      jsx: "automatic",
+      jsxImportSource: "react",
+    },
     test: {
       name: "phase-14-unit",
       include: [
         "apps/achilles/src/main/latency-probe.test.ts",
         "apps/achilles-cli/src/commands/latency.test.ts",
+        // Plan 14-02 additions: transcript-store (SAFE-02 default-off
+        // structural invariant TS10) + transcripts subcommand (full
+        // implementation replacing the Plan 13-01 stub) +
+        // RecordingIndicator (the visible UI affordance when
+        // ACHILLES_SAVE_TRANSCRIPTS=1).
+        "apps/achilles/src/main/transcript-store.test.ts",
+        "apps/achilles-cli/src/commands/transcripts.test.ts",
+        "apps/achilles/src/renderer/components/RecordingIndicator.test.tsx",
       ],
       environment: "node",
       passWithNoTests: true,

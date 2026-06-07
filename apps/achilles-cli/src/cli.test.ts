@@ -353,4 +353,102 @@ describe("runCli", () => {
     expect(combined).toContain("latency");
     expect(combined).toContain("--debug");
   });
+
+  // ───────────────────────────────────────────────────────────────────
+  // Plan 14-02 C13..C14 — --save-transcripts global flag + transcripts
+  // list subcommand routing
+  // ───────────────────────────────────────────────────────────────────
+
+  it("C13: `launch --save-transcripts` passes { env: { ...process.env, ACHILLES_SAVE_TRANSCRIPTS: '1' } } to deps.launchCommand", () => {
+    const stdout = makeStreamSpy();
+    const stderr = makeStreamSpy();
+    const processExitImpl = (_code: number) => {};
+    const { deps, launchCommand } = makeDepsWithSpies();
+
+    runCli({
+      argv: ["node", "achilles", "--save-transcripts", "launch"],
+      stdout: stdout.seam,
+      stderr: stderr.seam,
+      processExitImpl,
+      deps,
+    });
+
+    expect(launchCommand).toHaveBeenCalledTimes(1);
+    const overrides = launchCommand.mock.calls[0]?.[0] as
+      | { env?: Record<string, string | undefined> }
+      | undefined;
+    expect(overrides).toBeDefined();
+    expect(overrides?.env?.ACHILLES_SAVE_TRANSCRIPTS).toBe("1");
+    expect(overrides?.env?.PATH).toBe(process.env.PATH);
+  });
+
+  it("C13b: --debug AND --save-transcripts compose — both env vars set in the launch overrides", () => {
+    const stdout = makeStreamSpy();
+    const stderr = makeStreamSpy();
+    const processExitImpl = (_code: number) => {};
+    const { deps, launchCommand } = makeDepsWithSpies();
+
+    runCli({
+      argv: [
+        "node",
+        "achilles",
+        "--debug",
+        "--save-transcripts",
+        "launch",
+      ],
+      stdout: stdout.seam,
+      stderr: stderr.seam,
+      processExitImpl,
+      deps,
+    });
+
+    expect(launchCommand).toHaveBeenCalledTimes(1);
+    const overrides = launchCommand.mock.calls[0]?.[0] as
+      | { env?: Record<string, string | undefined> }
+      | undefined;
+    expect(overrides?.env?.ACHILLES_DEBUG).toBe("1");
+    expect(overrides?.env?.ACHILLES_SAVE_TRANSCRIPTS).toBe("1");
+  });
+
+  it("C14: `transcripts list` routes to deps.transcriptsCommand with first arg 'list'", () => {
+    const stdout = makeStreamSpy();
+    const stderr = makeStreamSpy();
+    const processExitImpl = (_code: number) => {};
+    const { deps, transcriptsCommand } = makeDepsWithSpies();
+
+    runCli({
+      argv: ["node", "achilles", "transcripts", "list"],
+      stdout: stdout.seam,
+      stderr: stderr.seam,
+      processExitImpl,
+      deps,
+    });
+
+    expect(transcriptsCommand).toHaveBeenCalledTimes(1);
+    expect(transcriptsCommand.mock.calls[0]?.[0]).toBe("list");
+  });
+
+  it("C14b: --help lists --save-transcripts (Plan 14-02 SAFE-02 affordance visible to operators)", () => {
+    const stdout = makeStreamSpy();
+    const stderr = makeStreamSpy();
+    const processExitImpl = (code: number) => {
+      throw new Error(`__EXIT_${code}__`);
+    };
+    const { deps } = makeDepsWithSpies();
+
+    try {
+      runCli({
+        argv: ["node", "achilles", "--help"],
+        stdout: stdout.seam,
+        stderr: stderr.seam,
+        processExitImpl,
+        deps,
+      });
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.startsWith("__EXIT_")) throw err;
+    }
+
+    const combined = stdout.chunks.join("");
+    expect(combined).toContain("--save-transcripts");
+  });
 });

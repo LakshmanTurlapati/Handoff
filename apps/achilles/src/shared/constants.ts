@@ -315,3 +315,33 @@ export const SMOKE_TEST_CANNED_PHRASE =
  * exit path so the wizard never blocks the user indefinitely.
  */
 export const SMOKE_TEST_TIMEOUT_MS = 60000;
+
+// ─────────────────────────────────────────────────────────────────────
+// Phase 14-02 — Transcript persistence (SAFE-02)
+//
+// One Main → Renderer broadcast channel signals whether transcript
+// persistence is currently active. The renderer subscribes once at App
+// composition root mount; when the boolean flips to true, the
+// RecordingIndicator (pulsing red dot + label) mounts in the floating
+// shell so the user cannot forget that their utterances are being
+// written to disk. When the boolean is false, the indicator is absent
+// (renders null).
+//
+// Production wiring: main/index.ts reads
+// `process.env.ACHILLES_SAVE_TRANSCRIPTS === "1"` at bootstrap and
+// broadcasts the resolved boolean on the BrowserWindow's
+// did-finish-load handler. The CLI's `--save-transcripts` flag sets
+// the env var via the launch overrides.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Main → Renderer. Broadcasts the current SAFE-02 transcript
+ * persistence flag. Payload shape: `{ enabled: boolean }`.
+ *
+ * When `enabled === true`, the floating UI renders the locked
+ * 'Recording transcripts' affordance (a pulsing red dot + label) per
+ * the SAFE-02 visibility invariant. When `enabled === false`, no
+ * indicator is shown.
+ */
+export const IPC_TRANSCRIPT_PERSISTENCE_STATE =
+  "achilles:transcript-persistence-state";

@@ -1487,3 +1487,190 @@ describe("createSession — SE17 LatencyProbe undefined preserves Plan 12-04 beh
     expect(probeSpy.calls.length).toBeGreaterThan(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Plan 14-02 SE30..SE31 — TranscriptStore wiring (SAFE-02)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Lightweight TranscriptStoreLike spy that records every appendTurn
+ * call as a {role, text} entry. The spy implements the
+ * TranscriptStoreLike surface bit-for-bit so it satisfies the
+ * (optional) deps.transcriptStore field AND lets the test assert
+ * call order + arguments.
+ */
+interface TranscriptCall {
+  readonly role: "user" | "assistant";
+  readonly text: string;
+}
+
+function makeTranscriptStoreSpy(): {
+  calls: TranscriptCall[];
+  store: { appendTurn: (turn: TranscriptCall) => void };
+} {
+  const calls: TranscriptCall[] = [];
+  return {
+    calls,
+    store: {
+      appendTurn: (turn: TranscriptCall): void => {
+        calls.push({ role: turn.role, text: turn.text });
+      },
+    },
+  };
+}
+
+describe("createSession — SE30 TranscriptStore wired at user + assistant boundaries", () => {
+  it("appendTurn is called with the RAW user payload.text on onUtteranceCommit AND with the assistant summaryBody on process_exit", async () => {
+    const h = makeHarness({
+      claudeFixture: {
+        ackText: "Looking at the auth module.",
+        spokenSummaryBody: "I have finished the refactor.",
+        exitCode: 0,
+        sessionId: "se30-sid",
+      },
+    });
+    const spy = makeTranscriptStoreSpy();
+    const session: AchillesSession = createSession({
+      stateController: h.controller,
+      claudeFactory: () => h.mockClaude,
+      ttsFactory: () => h.mockTts,
+      mintSttToken: h.mintSttToken,
+      micCapture: h.micCapture,
+      sendIpc: (channel, payload) => h.sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => h.logs.push(msg),
+      setTimeoutImpl: h.setTimeoutImpl,
+      clearTimeoutImpl: h.clearTimeoutImpl,
+      transcriptStore: spy.store as never,
+    });
+
+    const RAW_USER_TEXT = "refactor the auth module please";
+    await session.onHotkeyPress();
+    session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-00000000ab30",
+      text: RAW_USER_TEXT,
+      committedAt: 0,
+    });
+    await flushAsync();
+
+    // Exactly one user call recorded — with the RAW text, NOT the
+    // sandwich-wrapped form.
+    const userCalls = spy.calls.filter((c) => c.role === "user");
+    expect(userCalls.length).toBe(1);
+    expect(userCalls[0]!.text).toBe(RAW_USER_TEXT);
+    // The user persisted entry must NOT include the DELIM_START
+    // sandwich envelope — we persist the user's actual words.
+    expect(userCalls[0]!.text).not.toContain("---USER VOICE TRANSCRIPT START---");
+    expect(userCalls[0]!.text).not.toContain("---USER VOICE TRANSCRIPT END---");
+
+    // Exactly one assistant call recorded — with the summary body
+    // (the text the user heard).
+    const assistantCalls = spy.calls.filter((c) => c.role === "assistant");
+    expect(assistantCalls.length).toBe(1);
+    expect(assistantCalls[0]!.text).toContain("I have finished the refactor");
+  });
+
+  it("when transcriptStore is undefined, session behaviour is bit-for-bit identical (SAFE-02 default-off invariant)", async () => {
+    const baseline = makeHarness();
+    await baseline.session.onHotkeyPress();
+    baseline.session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-00000000ab31",
+      text: "do the work",
+      committedAt: 0,
+    });
+    await flushAsync();
+    baseline.session.onTtsPlaybackComplete();
+    baseline.fireTimer();
+
+    const withStore = makeHarness();
+    const spy = makeTranscriptStoreSpy();
+    const sessionWithStore = createSession({
+      stateController: withStore.controller,
+      claudeFactory: () => withStore.mockClaude,
+      ttsFactory: () => withStore.mockTts,
+      mintSttToken: withStore.mintSttToken,
+      micCapture: withStore.micCapture,
+      sendIpc: (channel, payload) =>
+        withStore.sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => withStore.logs.push(msg),
+      setTimeoutImpl: withStore.setTimeoutImpl,
+      clearTimeoutImpl: withStore.clearTimeoutImpl,
+      transcriptStore: spy.store as never,
+    });
+    await sessionWithStore.onHotkeyPress();
+    sessionWithStore.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-00000000ab32",
+      text: "do the work",
+      committedAt: 0,
+    });
+    await flushAsync();
+    sessionWithStore.onTtsPlaybackComplete();
+    withStore.fireTimer();
+
+    // Same IPC channel sequence — the store does NOT branch any state
+    // logic at IPC fan-out sites.
+    const baselineChannels = baseline.sentIpc.map((p) => p.channel);
+    const withStoreChannels = withStore.sentIpc.map((p) => p.channel);
+    expect(withStoreChannels).toEqual(baselineChannels);
+    // The store-equipped session DID make appendTurn calls — proving
+    // the wiring is present, not a no-op.
+    expect(spy.calls.length).toBeGreaterThan(0);
+  });
+});
+
+describe("createSession — SE31 persisted text is RAW + unredacted (no SANDWICH envelope, no failure-override drift)", () => {
+  it("user role persistence contains the raw payload.text and the assistant role persistence contains the failure override (not the LLM's claim) on exit_code != 0", async () => {
+    // The LLM CLAIMS success but exitCode=1 forces the PROMPT-05
+    // failure override. The persisted assistant entry must mirror the
+    // override (what the user heard), NOT the LLM's lying body.
+    const h = makeHarness({
+      claudeFixture: {
+        ackText: "Looking at the failing test.",
+        spokenSummaryBody: "I have fixed everything.",
+        exitCode: 1,
+      },
+    });
+    const spy = makeTranscriptStoreSpy();
+    const session: AchillesSession = createSession({
+      stateController: h.controller,
+      claudeFactory: () => h.mockClaude,
+      ttsFactory: () => h.mockTts,
+      mintSttToken: h.mintSttToken,
+      micCapture: h.micCapture,
+      sendIpc: (channel, payload) => h.sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => h.logs.push(msg),
+      setTimeoutImpl: h.setTimeoutImpl,
+      clearTimeoutImpl: h.clearTimeoutImpl,
+      transcriptStore: spy.store as never,
+    });
+
+    const RAW_USER = "fix the failing test";
+    await session.onHotkeyPress();
+    session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-00000000ab33",
+      text: RAW_USER,
+      committedAt: 0,
+    });
+    await flushAsync();
+
+    const userCalls = spy.calls.filter((c) => c.role === "user");
+    expect(userCalls.length).toBe(1);
+    expect(userCalls[0]!.text).toBe(RAW_USER);
+
+    // The assistant persistence routes the override, NOT the LLM's
+    // hallucinated success body.
+    const assistantCalls = spy.calls.filter((c) => c.role === "assistant");
+    expect(assistantCalls.length).toBe(1);
+    expect(assistantCalls[0]!.text.startsWith("I ran into a problem")).toBe(true);
+    expect(assistantCalls[0]!.text).not.toContain("I have fixed everything");
+  });
+});
+

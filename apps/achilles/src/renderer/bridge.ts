@@ -27,6 +27,16 @@ export interface AchillesBridge {
   onTtsAmplitude(cb: (rms: number) => void): () => void;
   onPermissionState(cb: (p: PermissionState) => void): () => void;
   onError(cb: (msg: string) => void): () => void;
+  /**
+   * Plan 14-02 SAFE-02. Subscribe to the transcript persistence flag
+   * broadcast — when `enabled: true` arrives, App.tsx renders the
+   * RecordingIndicator (pulsing red dot + 'Recording transcripts'
+   * label). The handler is optional on the bridge surface because
+   * the headless mock-bridge path does NOT need to drive the
+   * affordance (the indicator is a production visual surface; tests
+   * for the indicator render it directly with `visible={true}`).
+   */
+  onTranscriptPersistenceState?(cb: (enabled: boolean) => void): () => void;
   requestState(state: AchillesState): void;
   openSystemSettings(): void;
   updateWindowPosition(pos: { x: number; y: number }): void;

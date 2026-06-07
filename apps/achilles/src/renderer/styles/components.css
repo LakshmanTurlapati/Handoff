@@ -320,3 +320,71 @@
     opacity: 0;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────── */
+/* Recording indicator (Plan 14-02 SAFE-02)                        */
+/*                                                                 */
+/* Positioned at the top-right corner of the 260x260 floating      */
+/* viewport so it overlays adjacent to the drag handle without     */
+/* disrupting the existing region pixel grid (UI-SPEC s2). The     */
+/* dot pulses via the `recording-pulse` keyframe so the visible    */
+/* affordance is obviously moving — SAFE-02 mandates that the      */
+/* persistence-active state is unambiguous to the user.            */
+/*                                                                 */
+/* The selectors are top-level (not descended from `.floating-      */
+/* shell`) because App.tsx renders the indicator as a SIBLING of   */
+/* the shell. The fixed positioning anchors it to the viewport's   */
+/* top-right corner directly.                                       */
+/* ─────────────────────────────────────────────────────────────── */
+.recording-indicator {
+  position: fixed;
+  top: 6px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  font-size: 10px;
+  line-height: 12px;
+  color: #ffffff;
+  z-index: 5;
+}
+
+.recording-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff3b30;
+  display: inline-block;
+  animation: recording-pulse 1200ms infinite ease-in-out;
+}
+
+.recording-indicator-label {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/*
+ * Pulse keyframe — drives the recording dot's amplitude.
+ * SAFE-02 visibility invariant: the dot is clearly moving so a
+ * user looking at the floating window cannot mistake the
+ * affordance for a static decoration.
+ */
+@keyframes recording-pulse {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.85);
+    opacity: 0.85;
+  }
+}

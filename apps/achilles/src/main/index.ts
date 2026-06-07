@@ -34,6 +34,7 @@ import {
   IPC_INIT_WIZARD_DONE,
   IPC_MIC_AMPLITUDE,
   IPC_STATE_CHANGED,
+  IPC_TRANSCRIPT_PERSISTENCE_STATE,
   IPC_TTS_AMPLITUDE,
   SMOKE_TEST_CANNED_PHRASE,
 } from "../shared/constants.js";
@@ -64,6 +65,11 @@ import {
   type MockStateController,
 } from "./state-machine.js";
 import { createAchillesStore } from "./store.js";
+import {
+  createTranscriptStore,
+  DEFAULT_RETENTION_DAYS,
+  type TranscriptStore,
+} from "./transcript-store.js";
 import { createAchillesWindow } from "./window.js";
 
 process.title = "achilles";
@@ -417,6 +423,80 @@ async function bootstrap(): Promise<void> {
       // the launching terminal. No transcript content is included.
     });
   }
+  // ─── Plan 14-02 transcript store construction (SAFE-02) ────────────
+  //
+  // When the CLI was invoked with `--save-transcripts`, the spawned
+  // Electron child receives `ACHILLES_SAVE_TRANSCRIPTS=1` in its env
+  // (cli.ts/launchCommand wiring via makeLaunchEnv). The store
+  // captures user + assistant turns to ~/.achilles/transcripts/. When
+  // the env var is unset, the store is constructed with enabled=false
+  // — every appendTurn is a SYNC no-op that NEVER touches the
+  // filesystem (TS2 / TS10 SAFE-02 invariant). Either way the store
+  // is non-null so session.ts's transcriptStore wiring is uniform.
+  //
+  // The TranscriptStore is ALWAYS constructed — even when disabled —
+  // because the optional-chain semantics in session.ts means a present
+  // store with `enabled=false` is equivalent to an absent store, and
+  // constructing the store unconditionally keeps the broadcast +
+  // dispose wiring simpler (no branching on the env var here).
+  const transcriptsEnabled = process.env.ACHILLES_SAVE_TRANSCRIPTS === "1";
+  const retentionDaysRaw = process.env.ACHILLES_TRANSCRIPT_RETENTION_DAYS;
+  const retentionDays =
+    retentionDaysRaw !== undefined && retentionDaysRaw.length > 0
+      ? Number.parseInt(retentionDaysRaw, 10)
+      : DEFAULT_RETENTION_DAYS;
+  let transcriptStore: TranscriptStore;
+  {
+    const {
+      appendFileSync,
+      mkdirSync,
+      readdirSync,
+      readFileSync,
+      statSync,
+      unlinkSync,
+    } = await import("node:fs");
+    const { homedir } = await import("node:os");
+    const { join: pathJoin } = await import("node:path");
+    const transcriptsDir = pathJoin(homedir(), ".achilles", "transcripts");
+    transcriptStore = createTranscriptStore({
+      enabled: transcriptsEnabled,
+      dirPath: transcriptsDir,
+      retentionDays: Number.isFinite(retentionDays)
+        ? retentionDays
+        : DEFAULT_RETENTION_DAYS,
+      writeFileImpl: (path, data, options) => {
+        appendFileSync(path, data, { flag: options.flag });
+      },
+      readDirImpl: (p) => readdirSync(p),
+      statFileImpl: (p) => {
+        const st = statSync(p);
+        return { size: st.size, mtime: st.mtime };
+      },
+      deleteFileImpl: (p) => unlinkSync(p),
+      mkdirImpl: (p, options) => {
+        mkdirSync(p, { recursive: options.recursive });
+      },
+      readFileImpl: (p, enc) => readFileSync(p, enc),
+      nowImpl: () => new Date(),
+      logger: (msg) => {
+        // eslint-disable-next-line no-console
+        console.error(msg);
+      },
+    });
+  }
+  // SAFE-02 visibility: broadcast the persistence enabled state to the
+  // renderer on did-finish-load. The renderer's App.tsx mirrors the
+  // boolean into local state; the RecordingIndicator mounts when
+  // enabled=true. We re-broadcast on every load so a future window
+  // reload (e.g. via DevTools) does not orphan the renderer with a
+  // stale value.
+  (window as never as {
+    webContents: { on(channel: string, listener: () => void): void };
+  }).webContents.on("did-finish-load", () => {
+    window.webContents.send(IPC_TRANSCRIPT_PERSISTENCE_STATE, {
+      enabled: transcriptsEnabled,
+    });
+  });
   if (apiKey !== null) {
     // The mic-capture handle lives in the renderer (Phase 09 design).
     // The orchestrator gates the renderer-side mic by toggling state
@@ -466,6 +546,11 @@ async function bootstrap(): Promise<void> {
       // Plan 14-01: pass the optional probe iff ACHILLES_DEBUG=1.
       // When undefined, session.ts behaviour is preserved (SE17).
       ...(latencyProbe !== undefined ? { latencyProbe } : {}),
+      // Plan 14-02 SAFE-02: pass the transcript store always. When
+      // ACHILLES_SAVE_TRANSCRIPTS is unset the store's enabled=false
+      // collapses every appendTurn call to a SYNC no-op (TS2 / TS10
+      // structural invariant) so session.ts behaviour is preserved.
+      transcriptStore,
     });
   }
 
@@ -620,6 +705,10 @@ async function bootstrap(): Promise<void> {
     // Plan 14-01: tear down the LOOP-06 probe so the rolling window
     // and the file-write seam are released before the process exits.
     latencyProbe?.dispose();
+    // Plan 14-02 SAFE-02: dispose the transcript store so the fs seam
+    // references are released. Subsequent appendTurn calls after
+    // dispose are safe no-ops (disposed guard).
+    transcriptStore.dispose();
     if (activeAmplitudeStop !== null) {
       activeAmplitudeStop();
       activeAmplitudeStop = null;
