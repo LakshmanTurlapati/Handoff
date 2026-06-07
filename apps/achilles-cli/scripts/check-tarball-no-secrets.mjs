@@ -40,7 +40,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve, dirname, join, relative, extname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -178,7 +178,13 @@ function defaultScannerSeam() {
     }
     const tarballPath = join(tmp, tarballName);
     extractRoot = join(tmp, "extract");
-    execFileSync("mkdir", ["-p", extractRoot], { stdio: "ignore" });
+    // CR-04 fix: use the Node stdlib instead of shelling out to POSIX
+    // `mkdir -p`. The previous `execFileSync('mkdir', ['-p', ...])`
+    // would fail on Windows (`mkdir` is a cmd.exe built-in that does not
+    // accept the `-p` flag), aborting prepublishOnly with a misleading
+    // ENOENT / spawn error if the operator publishes from a Windows
+    // host.
+    mkdirSync(extractRoot, { recursive: true });
     execFileSync("tar", ["-xzf", tarballPath, "-C", extractRoot], {
       stdio: "ignore",
     });

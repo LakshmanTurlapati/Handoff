@@ -15,7 +15,12 @@
 
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
+import { readFile } from "node:fs/promises";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runSourceOfTruthCheck } from "./check-source-of-truth.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Build a minimal fs-read seam that returns the provided byte map. Throws
@@ -206,6 +211,43 @@ test("SOT4: tarball source missing (ENOENT) — exits 1 with a helpful 'did you 
   assert.ok(
     err.includes("bundledDependencies"),
     `expected bundledDependencies hint in stderr, got: ${err}`,
+  );
+});
+
+test("SOT6: CR-04 — directory creation uses node:fs mkdirSync recursive, NOT execFileSync('mkdir', ['-p', ...])", async () => {
+  // The script's real-mode tarball pipeline creates the extract dir
+  // before running `tar -xzf`. Under the original implementation this
+  // shelled out to POSIX `mkdir -p`, which fails on Windows (cmd.exe's
+  // built-in mkdir does not accept the -p flag). The CR-04 fix replaces
+  // the shell-out with `mkdirSync(path, { recursive: true })`.
+  //
+  // We can't easily exercise the real-mode pipeline without invoking
+  // `npm pack`, but we CAN assert the structural property: the source
+  // file imports `mkdirSync` from `node:fs` and contains no
+  // `execFileSync("mkdir", ...)` calls. The portability guarantee
+  // depends on this property holding.
+  const raw = await readFile(
+    resolve(HERE, "check-source-of-truth.mjs"),
+    "utf8",
+  );
+  // Strip block comments and line comments before pattern-matching so
+  // the assertions are not fooled by the CR-04-fix block comment that
+  // (deliberately) mentions the bad pattern as the thing being replaced.
+  const src = raw
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  assert.ok(
+    /mkdirSync/.test(src) && /from "node:fs"/.test(src),
+    "expected check-source-of-truth.mjs to import mkdirSync from node:fs",
+  );
+  assert.ok(
+    !/execFileSync\(\s*["']mkdir["']/.test(src),
+    "expected check-source-of-truth.mjs to NOT call execFileSync('mkdir', ...) — Windows portability regression",
+  );
+  // Confirm recursive option is set (not just any mkdirSync call).
+  assert.ok(
+    /mkdirSync\([^)]*recursive:\s*true/.test(src),
+    "expected mkdirSync call with { recursive: true }",
   );
 });
 

@@ -285,6 +285,36 @@ test("TNS6: live skill files (SKILL.md + companion.md) pass the scanner — self
   );
 });
 
+test("TNS9: CR-04 — directory creation uses node:fs mkdirSync recursive, NOT execFileSync('mkdir', ['-p', ...])", async () => {
+  // The script's real-mode tarball pipeline creates the extract dir
+  // before running `tar -xzf`. Under the original implementation this
+  // shelled out to POSIX `mkdir -p`, which fails on Windows (cmd.exe's
+  // built-in mkdir does not accept the -p flag). The CR-04 fix replaces
+  // the shell-out with `mkdirSync(path, { recursive: true })`.
+  const raw = await readFile(
+    resolve(HERE, "check-tarball-no-secrets.mjs"),
+    "utf8",
+  );
+  // Strip block comments and line comments before pattern-matching so
+  // the assertions are not fooled by the CR-04-fix block comment that
+  // (deliberately) mentions the bad pattern as the thing being replaced.
+  const src = raw
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  assert.ok(
+    /mkdirSync/.test(src) && /from "node:fs"/.test(src),
+    "expected check-tarball-no-secrets.mjs to import mkdirSync from node:fs",
+  );
+  assert.ok(
+    !/execFileSync\(\s*["']mkdir["']/.test(src),
+    "expected check-tarball-no-secrets.mjs to NOT call execFileSync('mkdir', ...) — Windows portability regression",
+  );
+  assert.ok(
+    /mkdirSync\([^)]*recursive:\s*true/.test(src),
+    "expected mkdirSync call with { recursive: true }",
+  );
+});
+
 test("TNS8: CR-03 — anthropic-sk-ant pattern rejects bare sk- kebab-case strings and accepts the real sk-ant- prefix", async () => {
   // Locate the anthropic regex by pattern name.
   const anthropic = KEY_PATTERNS.find((p) => p.name === "anthropic-sk-ant");

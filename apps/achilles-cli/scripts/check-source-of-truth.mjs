@@ -41,7 +41,7 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -111,8 +111,13 @@ function realTarballPathProducer() {
     }
     const tarballPath = join(tmp, tarballName);
     const extractDir = join(tmp, "extract");
-    // Make the extract dir
-    execFileSync("mkdir", ["-p", extractDir], { stdio: "ignore" });
+    // CR-04 fix: use the Node stdlib instead of shelling out to POSIX
+    // `mkdir -p`. The previous `execFileSync('mkdir', ['-p', ...])`
+    // would fail on Windows (`mkdir` is a cmd.exe built-in that does not
+    // accept the `-p` flag), aborting prepublishOnly with a misleading
+    // ENOENT / spawn error if the operator publishes from a Windows
+    // host.
+    mkdirSync(extractDir, { recursive: true });
     execFileSync("tar", ["-xzf", tarballPath, "-C", extractDir], {
       stdio: "ignore",
     });
