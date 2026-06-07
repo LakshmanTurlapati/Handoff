@@ -213,6 +213,27 @@ describe("S2: post-frontmatter body word count <= 2000", () => {
     }
     expect(count).toBeLessThanOrEqual(2000);
   });
+
+  // WR-04 fix: tighten the soft budget. The hard ceiling is 2000 (per
+  // Pitfall #11) but the negotiated soft budget is 1250 words —
+  // Claude Code's skill-discovery cost model is sensitive to body
+  // length and every Achilles user pays this overhead per session.
+  // The summary tracking doc claimed 1250 but the file shipped at
+  // 1360 before this fix. Asserting at 1250 prevents quiet drift.
+  it("WR-04: body length is <= 1250 words (negotiated soft budget; hard cap is 2000)", () => {
+    const noFences = parsed.body.replace(/```[\s\S]*?```/g, " ");
+    const noHeadingMarkers = noFences.replace(/^#{1,6}\s+/gm, "");
+    const tokens = noHeadingMarkers
+      .split(/\s+/)
+      .filter((tok) => tok.length > 0);
+    const count = tokens.length;
+    if (count > 1250) {
+      throw new Error(
+        `WR-04 SKILL.md soft budget — body must be <= 1250 words; got ${count}. Trim sections or update both the SUMMARY claim and this assertion.`,
+      );
+    }
+    expect(count).toBeLessThanOrEqual(1250);
+  });
 });
 
 describe("S3: no emoji codepoints anywhere in the file", () => {
