@@ -54,9 +54,22 @@ function subscribe<T>(
     try {
       const parsed = parseEnvelope(channel, raw);
       cb(parsed as T);
-    } catch {
+    } catch (err) {
       // Drop malformed Main→Renderer payloads; the main process is
       // expected to send valid envelopes (defence in depth).
+      //
+      // WR-03 fix: previously the catch block dropped the error
+      // silently. A Zod validation failure here (because main shipped
+      // an unexpected payload shape) would disappear with no
+      // observable signal in the renderer, making contract regressions
+      // invisible to debugging. Surface via console.error so DevTools
+      // picks it up; the renderer is NOT crashed (the payload still
+      // does not cross the boundary, preserving the security
+      // guarantee).
+      // eslint-disable-next-line no-console
+      console.error(
+        `[achilles-preload] dropped malformed inbound payload on channel ${channel}: ${(err as Error).message}`,
+      );
     }
   };
   ipcRenderer.on(channel, listener);
@@ -69,10 +82,20 @@ function send(channel: string, payload: unknown): void {
   try {
     const parsed = parseEnvelope(channel, payload);
     ipcRenderer.send(channel, parsed);
-  } catch {
+  } catch (err) {
     // Drop malformed Renderer→Main payloads; the renderer will see
     // no effect, which surfaces the contract violation in the next
     // state observation cycle.
+    //
+    // WR-03 fix: same diagnostic improvement as subscribe(). The
+    // security guarantee is unchanged — the payload never reaches
+    // ipcRenderer.send — but the renderer's DevTools console now
+    // shows a clear `[achilles-preload] dropped ...` line so a buggy
+    // renderer payload is no longer invisible.
+    // eslint-disable-next-line no-console
+    console.error(
+      `[achilles-preload] dropped malformed outbound payload on channel ${channel}: ${(err as Error).message}`,
+    );
   }
 }
 
