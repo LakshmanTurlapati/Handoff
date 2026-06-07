@@ -509,9 +509,19 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
    * process_exit branch route through this so the half-duplex contract
    * is honoured even when the ack is missing / malformed.
    *
+   * WR-09: when `failureReason` is supplied, dispatch the dedicated
+   * CLAUDE_FAILURE_OVERRIDE tag instead of CLAUDE_RESULT_READY. The
+   * reducer treats both identically at the state-transition layer
+   * (processing → speaking) but the distinct tag lets downstream
+   * loggers / future hardening attribute the speaking transition to
+   * a failure-override path rather than the LLM's ack body. Without
+   * this dispatch the CLAUDE_FAILURE_OVERRIDE tag was never used in
+   * production code and the reducer's distinction was meaningless at
+   * runtime.
+   *
    * Idempotent — repeated calls within a single turn are no-ops.
    */
-  function enterSpeakingForTurn(): void {
+  function enterSpeakingForTurn(failureReason?: string): void {
     if (speakingEnteredForTurn) return;
     if (mirroredState === "speaking") {
       speakingEnteredForTurn = true;
@@ -519,7 +529,14 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     }
     speakingEnteredForTurn = true;
     deps.micCapture.pauseFrameDelivery();
-    dispatch({ type: "CLAUDE_RESULT_READY" });
+    if (failureReason !== undefined) {
+      dispatch({
+        type: "CLAUDE_FAILURE_OVERRIDE",
+        reason: failureReason,
+      });
+    } else {
+      dispatch({ type: "CLAUDE_RESULT_READY" });
+    }
   }
 
   function buildFailureSummary(outcome: ClaudeOutcome): string {
@@ -710,7 +727,18 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
         // summary then plays through TTS into a live mic (PITFALLS #2).
         // enterSpeakingForTurn() is idempotent so the happy-path ack
         // branch above is unaffected.
-        enterSpeakingForTurn();
+        //
+        // WR-09: when outcome is failure, dispatch
+        // CLAUDE_FAILURE_OVERRIDE so the reducer's distinction between
+        // failure-driven and success-driven speaking is meaningful at
+        // runtime. The dispatch happens ONLY here (not via the ack
+        // branch above) because the ack branch fires before outcome
+        // is known.
+        if (outcome.kind === "failure") {
+          enterSpeakingForTurn(outcome.reason ?? "unknown");
+        } else {
+          enterSpeakingForTurn();
+        }
         currentTtsClient!.appendText(norm.normalised);
         log(
           `[achilles] tts normalisation report summary: ` +
