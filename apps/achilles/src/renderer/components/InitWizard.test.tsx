@@ -327,6 +327,84 @@ describe("U7: Step 2 — on denied the locked remediation copy renders + Open Sy
 });
 
 // ─────────────────────────────────────────────────────────────────────
+// U7b: CR-02 fix — Skip + Open Settings affordances render for
+//      'not-determined' and 'restricted' too, not just 'denied'.
+// ─────────────────────────────────────────────────────────────────────
+
+describe("U7b: CR-02 — not-determined and restricted surface Skip + Open Settings (not just denied)", () => {
+  it("on 'not-determined' the Skip + Open Settings + Retry buttons render and the Request button does NOT stall on 'requesting'", () => {
+    const { sends, subs } = installFakeBridge();
+    render(<InitWizard />);
+    const input = screen.getByLabelText(/elevenlabs api key/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "x".repeat(40) } });
+    fireEvent.click(screen.getByTestId("init-wizard-next"));
+    act(() => {
+      for (const cb of subs.apiKeyResult) cb({ accepted: true });
+    });
+    fireEvent.click(screen.getByTestId("init-wizard-request-mic"));
+    // OS reports not-determined (the user dismissed the system prompt
+    // without choosing). Before the CR-02 fix, the renderer stalled on
+    // a "requesting" spinner forever.
+    act(() => {
+      for (const cb of subs.micPermissionResult)
+        cb({ status: "not-determined" });
+    });
+    // The remediation surface must be reachable.
+    expect(screen.getByTestId("init-wizard-mic-denied-copy")).toBeTruthy();
+    expect(screen.getByTestId("init-wizard-open-settings")).toBeTruthy();
+    expect(screen.getByTestId("init-wizard-retry-mic")).toBeTruthy();
+    const skip = screen.getByTestId("init-wizard-skip-mic");
+    expect(skip).toBeTruthy();
+    // Skip advances to Step 3 without re-requesting permission.
+    fireEvent.click(skip);
+    expect(screen.getByText("Smoke test")).toBeTruthy();
+    // Only the initial request was fired — Skip does NOT re-trigger it.
+    expect(
+      sends.filter((s) => s.channel === "init-mic-permission-request"),
+    ).toHaveLength(1);
+  });
+
+  it("on 'restricted' (MDM-managed device) the Skip + Open Settings + Retry buttons render", () => {
+    const { subs } = installFakeBridge();
+    render(<InitWizard />);
+    const input = screen.getByLabelText(/elevenlabs api key/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "x".repeat(40) } });
+    fireEvent.click(screen.getByTestId("init-wizard-next"));
+    act(() => {
+      for (const cb of subs.apiKeyResult) cb({ accepted: true });
+    });
+    fireEvent.click(screen.getByTestId("init-wizard-request-mic"));
+    // OS reports restricted (MDM policy denies mic globally).
+    act(() => {
+      for (const cb of subs.micPermissionResult) cb({ status: "restricted" });
+    });
+    // Treat 'restricted' as denied-equivalent — surface the same
+    // remediation copy + Skip button so the user can still proceed.
+    expect(screen.getByTestId("init-wizard-mic-denied-copy")).toBeTruthy();
+    expect(screen.getByTestId("init-wizard-open-settings")).toBeTruthy();
+    expect(screen.getByTestId("init-wizard-skip-mic")).toBeTruthy();
+  });
+
+  it("on 'not-determined' the Retry button is enabled (not the 'requesting' disabled spinner)", () => {
+    const { subs } = installFakeBridge();
+    render(<InitWizard />);
+    const input = screen.getByLabelText(/elevenlabs api key/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "x".repeat(40) } });
+    fireEvent.click(screen.getByTestId("init-wizard-next"));
+    act(() => {
+      for (const cb of subs.apiKeyResult) cb({ accepted: true });
+    });
+    fireEvent.click(screen.getByTestId("init-wizard-request-mic"));
+    act(() => {
+      for (const cb of subs.micPermissionResult)
+        cb({ status: "not-determined" });
+    });
+    const retry = screen.getByTestId("init-wizard-retry-mic") as HTMLButtonElement;
+    expect(retry.disabled).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
 // U8
 // ─────────────────────────────────────────────────────────────────────
 

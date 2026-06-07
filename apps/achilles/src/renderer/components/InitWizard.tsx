@@ -92,7 +92,12 @@ interface ApiKeyState {
 interface MicPermissionState {
   step: "mic-permission";
   warning: string | null;
-  status: "idle" | "requesting" | "granted" | "denied";
+  // CR-02 fix: 'dismissed' is the post-not-determined state. Distinct
+  // from 'idle' (fresh, user has never tried) so the renderer can show
+  // the Skip + Open Settings affordances after the user dismissed the
+  // OS prompt without choosing (macOS only fires the system prompt the
+  // FIRST time askForMediaAccess is called per app lifetime).
+  status: "idle" | "requesting" | "granted" | "denied" | "dismissed";
 }
 interface SmokeTestState {
   step: "smoke-test";
@@ -112,6 +117,7 @@ type Action =
   | { type: "MIC_REQUESTED" }
   | { type: "MIC_GRANTED" }
   | { type: "MIC_DENIED" }
+  | { type: "MIC_PROMPT_DISMISSED" }
   | { type: "MIC_SKIP" }
   | { type: "SMOKE_STARTED" }
   | { type: "SMOKE_OK"; spokenPhrase: string }
@@ -145,6 +151,17 @@ function reducer(state: State, action: Action): State {
     case "MIC_DENIED":
       if (state.step !== "mic-permission") return state;
       return { ...state, status: "denied" };
+    case "MIC_PROMPT_DISMISSED":
+      // CR-02 fix: when the OS reports 'not-determined' (typically
+      // because the user dismissed the system prompt without choosing),
+      // flip the status to 'dismissed' so the Request button is
+      // re-enabled AND the Skip + Open Settings affordances render.
+      // Without this branch the user would be stuck on a "requesting"
+      // spinner forever because macOS only fires the system prompt the
+      // FIRST time askForMediaAccess is called for a given app — every
+      // subsequent retry returns the cached not-determined status.
+      if (state.step !== "mic-permission") return state;
+      return { ...state, status: "dismissed" };
     case "MIC_SKIP":
       if (state.step !== "mic-permission") return state;
       return { step: "smoke-test", status: "idle" };
@@ -237,11 +254,24 @@ export function InitWizard(): ReactElement {
     const unsubscribeMic = bridge.onInitWizardMicPermissionResult((result) => {
       if (result.status === "granted") {
         dispatch({ type: "MIC_GRANTED" });
-      } else if (result.status === "denied") {
+      } else if (result.status === "denied" || result.status === "restricted") {
+        // CR-02 fix: treat 'restricted' (MDM-managed devices that block
+        // mic globally) as 'denied'-equivalent so the Skip / Open
+        // Settings affordances render. On 'restricted' the deep-link to
+        // System Settings is still useful as a diagnostic — the admin
+        // policy panel is reachable from there.
         dispatch({ type: "MIC_DENIED" });
+      } else {
+        // 'not-determined' — the user dismissed the system prompt
+        // without choosing. Re-enable the Request button so the user
+        // can retry, and surface the Skip affordance via the standard
+        // idle-state path. macOS only fires the system prompt the
+        // FIRST time askForMediaAccess is called per app lifetime;
+        // subsequent retries just return the cached status, so without
+        // this branch the user would be stuck on a "requesting"
+        // spinner indefinitely.
+        dispatch({ type: "MIC_PROMPT_DISMISSED" });
       }
-      // For 'not-determined' / 'restricted' the user can retry; the
-      // reducer keeps the state on Step 2 with status "requesting".
     });
     const unsubscribeSmoke = bridge.onInitWizardSmokeResult((result) => {
       if (result.status === "ok") {
@@ -411,7 +441,7 @@ function ApiKeyStep(props: ApiKeyStepProps): ReactElement {
 
 interface MicPermissionStepProps {
   warning: string | null;
-  status: "idle" | "requesting" | "granted" | "denied";
+  status: "idle" | "requesting" | "granted" | "denied" | "dismissed";
   onRequest: () => void;
   onOpenSettings: () => void;
   onSkip: () => void;
@@ -419,6 +449,12 @@ interface MicPermissionStepProps {
 
 function MicPermissionStep(props: MicPermissionStepProps): ReactElement {
   const { warning, status, onRequest, onOpenSettings, onSkip } = props;
+  // CR-02 fix: render the remediation surface (Skip + Open Settings +
+  // Retry) for BOTH 'denied' and 'dismissed' states. 'dismissed' is the
+  // post-not-determined / post-restricted state — without this branch
+  // the user would land on Step 2 with a spinner showing "requesting"
+  // forever and no Skip button reachable.
+  const showRemediation = status === "denied" || status === "dismissed";
   return (
     <section className="init-wizard-step init-wizard-step-mic">
       <h2 className="init-wizard-step-heading">{HEADING_MIC}</h2>
@@ -431,7 +467,7 @@ function MicPermissionStep(props: MicPermissionStepProps): ReactElement {
           {warning}
         </p>
       ) : null}
-      {status === "denied" ? (
+      {showRemediation ? (
         <>
           <p
             data-testid="init-wizard-mic-denied-copy"
