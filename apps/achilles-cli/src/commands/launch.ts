@@ -37,11 +37,18 @@ import { ElectronBinaryMissingError } from "../electron-binary-locator.js";
  * touches. The spawned Electron child is detached + ignored stdio; we
  * never read stdout/stderr from it and we never wait on its exit.
  *
+ * WR-07 fix: extended with `on('error', ...)` so an async spawn error
+ * (the binary became inaccessible between resolve and spawn, or
+ * permissions changed) surfaces a typed diagnostic instead of an
+ * unhandled rejection. The synchronous failure path is handled by a
+ * try/catch around the spawn() call itself.
+ *
  * @public
  */
 export interface DetachableChild {
   readonly pid?: number;
   unref(): void;
+  on(event: "error", cb: (err: Error) => void): void;
 }
 
 /**
@@ -135,10 +142,38 @@ export function launchCommand(deps: LaunchDeps): void {
     processExitImpl(1);
     return;
   }
-  const child = spawn(binaryPath, [], {
-    detached: true,
-    stdio: "ignore",
-    env,
+  // WR-07 fix: wrap spawn() in try/catch so a non-executable binary,
+  // a path that resolves to a directory, or an invalid options shape
+  // surfaces a typed `[achilles] failed to spawn ...` line instead of
+  // an unhandled exception. The synchronous throw path bites because
+  // Node spawn raises EACCES / EISDIR / ENOENT on the binary itself
+  // synchronously.
+  let child: DetachableChild;
+  try {
+    child = spawn(binaryPath, [], {
+      detached: true,
+      stdio: "ignore",
+      env,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    stderr.write(
+      `[achilles] failed to spawn Electron binary at ${binaryPath}: ${detail}\n`,
+    );
+    processExitImpl(1);
+    return;
+  }
+  // WR-07 fix: wire an async 'error' listener for the case where spawn
+  // returns a child that subsequently fails (e.g. the binary
+  // disappears between spawn return and exec). The listener surfaces a
+  // diagnostic; processExitImpl is not invoked here because the
+  // detached launch contract is "exit cleanly even if the child died
+  // later" — but if the child errors BEFORE we unref, the listener
+  // gives the operator a breadcrumb.
+  child.on("error", (err: Error) => {
+    stderr.write(
+      `[achilles] launch process error: ${err.message}\n`,
+    );
   });
   child.unref();
 }

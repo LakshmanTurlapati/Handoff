@@ -36,11 +36,17 @@ import { ElectronBinaryMissingError } from "../electron-binary-locator.js";
  * console output from the wizard; the CLI process waits on the exit
  * event before invoking processExitImpl with the propagated code.
  *
+ * WR-07 fix: extended with `on('error', ...)` so async spawn errors
+ * (the binary became inaccessible between resolve and spawn, or
+ * permissions changed) surface a typed `[achilles] failed to spawn ...`
+ * diagnostic instead of an unhandled promise rejection.
+ *
  * @public
  */
 export interface AttachedChild {
   readonly pid?: number;
   on(event: "exit", cb: (code: number | null) => void): void;
+  on(event: "error", cb: (err: Error) => void): void;
 }
 
 /**
@@ -150,10 +156,37 @@ export function initCommand(deps: InitDeps): void {
     ACHILLES_MODE: "init",
   };
 
-  const child = spawn(binaryPath, [], {
-    detached: false,
-    stdio: "inherit",
-    env: childEnv,
+  // WR-07 fix: wrap spawn() in try/catch so a non-executable binary,
+  // a path that resolves to a directory, or an invalid options shape
+  // surfaces a typed `[achilles] failed to spawn ...` line instead of
+  // an unhandled exception. The synchronous throw path is what bites
+  // here — spawn does NOT defer the EACCES / EISDIR / ENOENT on the
+  // binary itself; those raise synchronously on Node.
+  let child: AttachedChild;
+  try {
+    child = spawn(binaryPath, [], {
+      detached: false,
+      stdio: "inherit",
+      env: childEnv,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    stderr.write(
+      `[achilles] failed to spawn Electron binary at ${binaryPath}: ${detail}\n`,
+    );
+    processExitImpl(1);
+    return;
+  }
+
+  // WR-07 fix: also wire an async 'error' listener for the case where
+  // spawn returns a ChildProcess that subsequently fails (e.g. the
+  // binary disappears between resolve and spawn). The listener fires
+  // before or instead of 'exit'; surface the diagnostic and exit 1.
+  child.on("error", (err: Error) => {
+    stderr.write(
+      `[achilles] init wizard process error: ${err.message}\n`,
+    );
+    processExitImpl(1);
   });
 
   // Propagate the wizard's exit code. The contract is: CLI exits with

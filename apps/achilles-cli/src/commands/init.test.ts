@@ -33,11 +33,14 @@ type SpawnCall = {
 interface AttachedChild {
   readonly pid: number;
   on(event: "exit", cb: (code: number | null) => void): void;
+  on(event: "error", cb: (err: Error) => void): void;
   /** Test seam — synthesises the spawned child's exit event. */
   fireExit(code: number | null): void;
+  /** Test seam — synthesises the spawned child's async 'error' event (WR-07). */
+  fireError(err: Error): void;
 }
 
-const makeSpawnSpy = () => {
+const makeSpawnSpy = (options?: { throwOnSpawn?: Error }) => {
   const calls: SpawnCall[] = [];
   const children: AttachedChild[] = [];
   const spawn = (
@@ -46,16 +49,25 @@ const makeSpawnSpy = () => {
     opts: Record<string, unknown>,
   ): AttachedChild => {
     calls.push({ cmd, args, opts });
+    if (options?.throwOnSpawn) {
+      throw options.throwOnSpawn;
+    }
     const exitListeners: Array<(code: number | null) => void> = [];
+    const errorListeners: Array<(err: Error) => void> = [];
     const child: AttachedChild = {
       pid: 4242,
-      on(event, cb): void {
+      on(event: "exit" | "error", cb: (arg: unknown) => void): void {
         if (event === "exit") {
-          exitListeners.push(cb);
+          exitListeners.push(cb as (code: number | null) => void);
+        } else if (event === "error") {
+          errorListeners.push(cb as (err: Error) => void);
         }
       },
       fireExit(code): void {
         for (const cb of exitListeners) cb(code);
+      },
+      fireError(err): void {
+        for (const cb of errorListeners) cb(err);
       },
     };
     children.push(child);
@@ -240,6 +252,76 @@ describe("initCommand", () => {
     const afterKeys = Object.keys(env).sort();
     expect(afterKeys).toEqual(beforeKeys);
     expect(env.ACHILLES_MODE).toBeUndefined();
+  });
+
+  it("WR-07: spawn() throws synchronously (binary non-executable) — surfaces '[achilles] failed to spawn ...' and exits 1 without an unhandled exception", () => {
+    const binaryPath = "/pkg/dist/Achilles.app/Contents/MacOS/Achilles";
+    const locate = () => binaryPath;
+    const throwErr = new Error("EACCES: permission denied");
+    (throwErr as unknown as { code: string }).code = "EACCES";
+    const { calls, spawn } = makeSpawnSpy({ throwOnSpawn: throwErr });
+    let exitCode: number | null = null;
+    const processExitImpl = (code: number) => {
+      exitCode = code;
+    };
+    const stderrWrites: string[] = [];
+    const stderr = {
+      write: (chunk: string) => {
+        stderrWrites.push(chunk);
+        return true;
+      },
+    };
+
+    expect(() =>
+      initCommand({
+        locate,
+        spawn,
+        processExitImpl,
+        stderr,
+        env: {},
+      }),
+    ).not.toThrow();
+
+    expect(exitCode).toBe(1);
+    const combined = stderrWrites.join("");
+    expect(combined).toContain("[achilles] failed to spawn Electron binary");
+    expect(combined).toContain(binaryPath);
+    expect(combined).toContain("EACCES");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("WR-07: async child 'error' event surfaces '[achilles] init wizard process error:' and exits 1", () => {
+    const binaryPath = "/pkg/dist/Achilles.app/Contents/MacOS/Achilles";
+    const locate = () => binaryPath;
+    const { children, spawn } = makeSpawnSpy();
+    let exitCode: number | null = null;
+    const processExitImpl = (code: number) => {
+      exitCode = code;
+    };
+    const stderrWrites: string[] = [];
+    const stderr = {
+      write: (chunk: string) => {
+        stderrWrites.push(chunk);
+        return true;
+      },
+    };
+
+    initCommand({
+      locate,
+      spawn,
+      processExitImpl,
+      stderr,
+      env: {},
+    });
+
+    // Fire the async error event AFTER spawn returned.
+    expect(children).toHaveLength(1);
+    const asyncErr = new Error("EPIPE: broken pipe");
+    children[0]!.fireError(asyncErr);
+    expect(exitCode).toBe(1);
+    const combined = stderrWrites.join("");
+    expect(combined).toContain("[achilles] init wizard process error:");
+    expect(combined).toContain("EPIPE");
   });
 
   it("WR-02: locate throws a non-ElectronBinaryMissingError (e.g. unsupported platform) — surfaces '[achilles] init failed:' and exits 1 without an unhandled exception", () => {

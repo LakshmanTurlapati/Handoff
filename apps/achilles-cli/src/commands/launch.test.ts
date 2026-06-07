@@ -21,18 +21,44 @@ type SpawnCall = {
   opts: Record<string, unknown>;
 };
 
-const makeSpawnSpy = () => {
+interface FakeDetachableChild {
+  unref: () => void;
+  pid: number;
+  on(event: "error", cb: (err: Error) => void): void;
+  /** Test seam — synthesises the spawned child's async 'error' event (WR-07). */
+  fireError(err: Error): void;
+}
+
+const makeSpawnSpy = (options?: { throwOnSpawn?: Error }) => {
   const calls: SpawnCall[] = [];
   const unref = vi.fn();
+  const children: FakeDetachableChild[] = [];
   const spawn = (
     cmd: string,
     args: readonly string[],
     opts: Record<string, unknown>,
-  ): { unref: () => void; pid: number } => {
+  ): FakeDetachableChild => {
     calls.push({ cmd, args, opts });
-    return { unref, pid: 4242 };
+    if (options?.throwOnSpawn) {
+      throw options.throwOnSpawn;
+    }
+    const errorListeners: Array<(err: Error) => void> = [];
+    const child: FakeDetachableChild = {
+      unref,
+      pid: 4242,
+      on(event, cb): void {
+        if (event === "error") {
+          errorListeners.push(cb);
+        }
+      },
+      fireError(err): void {
+        for (const cb of errorListeners) cb(err);
+      },
+    };
+    children.push(child);
+    return child;
   };
-  return { calls, spawn, unref };
+  return { calls, spawn, unref, children };
 };
 
 describe("launchCommand", () => {
@@ -103,6 +129,81 @@ describe("launchCommand", () => {
     expect(combined).toContain("Electron binary not found");
     expect(combined).toContain(platform);
     expect(calls).toHaveLength(0);
+  });
+
+  it("WR-07: spawn() throws synchronously (binary non-executable) — surfaces '[achilles] failed to spawn ...' and exits 1 without an unhandled exception", () => {
+    const binaryPath = "/pkg/dist/Achilles.app/Contents/MacOS/Achilles";
+    const locate = () => binaryPath;
+    const throwErr = new Error("EACCES: permission denied");
+    (throwErr as unknown as { code: string }).code = "EACCES";
+    const { calls, spawn } = makeSpawnSpy({ throwOnSpawn: throwErr });
+    let exitCode: number | null = null;
+    const processExitImpl = (code: number) => {
+      exitCode = code;
+    };
+    const stderrWrites: string[] = [];
+    const stderr = {
+      write: (chunk: string) => {
+        stderrWrites.push(chunk);
+        return true;
+      },
+    };
+
+    expect(() =>
+      launchCommand({
+        locate,
+        spawn,
+        processExitImpl,
+        stderr,
+        env: {},
+      }),
+    ).not.toThrow();
+
+    expect(exitCode).toBe(1);
+    const combined = stderrWrites.join("");
+    expect(combined).toContain("[achilles] failed to spawn Electron binary");
+    expect(combined).toContain(binaryPath);
+    expect(combined).toContain("EACCES");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("WR-07: async child 'error' event surfaces '[achilles] launch process error:' diagnostic without aborting the unref+exit path", () => {
+    const binaryPath = "/pkg/dist/Achilles.app/Contents/MacOS/Achilles";
+    const locate = () => binaryPath;
+    const { children, spawn, unref } = makeSpawnSpy();
+    let exitCode: number | null = null;
+    const processExitImpl = (code: number) => {
+      exitCode = code;
+    };
+    const stderrWrites: string[] = [];
+    const stderr = {
+      write: (chunk: string) => {
+        stderrWrites.push(chunk);
+        return true;
+      },
+    };
+
+    launchCommand({
+      locate,
+      spawn,
+      processExitImpl,
+      stderr,
+      env: {},
+    });
+
+    // Confirm unref happened on the happy path.
+    expect(unref).toHaveBeenCalledTimes(1);
+    // Fire the async error event AFTER spawn returned.
+    expect(children).toHaveLength(1);
+    const asyncErr = new Error("EPIPE: broken pipe");
+    children[0]!.fireError(asyncErr);
+    const combined = stderrWrites.join("");
+    expect(combined).toContain("[achilles] launch process error:");
+    expect(combined).toContain("EPIPE");
+    // The detached launch contract is "exit cleanly even if the child
+    // dies later"; processExitImpl is NOT invoked from the error
+    // listener.
+    expect(exitCode).toBeNull();
   });
 
   it("WR-02: locate throws a non-ElectronBinaryMissingError (e.g. unsupported platform) — surfaces '[achilles] launch failed:' and exits 1 without an unhandled exception", () => {
