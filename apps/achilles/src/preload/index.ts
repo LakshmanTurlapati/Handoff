@@ -18,7 +18,15 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 import {
+  ACHILLES_MODE_INIT,
   IPC_ERROR,
+  IPC_INIT_API_KEY_RESULT,
+  IPC_INIT_API_KEY_SUBMIT,
+  IPC_INIT_MIC_PERMISSION_REQUEST,
+  IPC_INIT_MIC_PERMISSION_RESULT,
+  IPC_INIT_SMOKE_RESULT,
+  IPC_INIT_SMOKE_START,
+  IPC_INIT_WIZARD_DONE,
   IPC_MIC_AMPLITUDE,
   IPC_OPEN_SYSTEM_SETTINGS,
   IPC_PERMISSION_STATE,
@@ -68,7 +76,29 @@ function send(channel: string, payload: unknown): void {
   }
 }
 
+/**
+ * Init wizard routing flag. The CLI's `achilles init` command spawns
+ * the Electron binary with `ACHILLES_MODE=init` in the env; the preload
+ * reads this value at module load and exposes it as `window.achilles.mode`
+ * so the renderer's main.tsx can branch on it (InitWizard vs the regular
+ * floating UI).
+ *
+ * The default is 'launch' so a fresh boot without ACHILLES_MODE in the
+ * env routes to the floating shell as before (Plan 11/12 default).
+ */
+const mode: "init" | "launch" =
+  (process as { env: Record<string, string | undefined> }).env.ACHILLES_MODE ===
+  ACHILLES_MODE_INIT
+    ? "init"
+    : "launch";
+
 const api = {
+  /**
+   * Plan 13-03: routing flag for the renderer's main.tsx. Read once at
+   * preload load time from process.env.ACHILLES_MODE; the value never
+   * changes within a process lifetime.
+   */
+  mode,
   onStateChanged(cb: (s: AchillesState) => void): () => void {
     return subscribe<{ state: AchillesState }>(IPC_STATE_CHANGED, (p) =>
       cb(p.state),
@@ -115,6 +145,103 @@ const api = {
   },
   updateHotkeyConfig(cfg: { mode?: HotkeyMode; key?: string }): void {
     send(IPC_UPDATE_HOTKEY_CONFIG, cfg);
+  },
+  // ─── Plan 13-03 init wizard surface (DIST-04) ─────────────────────
+  /**
+   * Renderer → Main. Submit the user-typed ElevenLabs API key from
+   * Step 1 of the wizard. The bytes cross the trust boundary ONCE; the
+   * matching result subscription (onInitWizardApiKeyResult) NEVER echoes
+   * them back (T-13-13 mitigation pinned by the InitApiKeyResultPayloadSchema
+   * which has no `key` field).
+   */
+  sendInitWizardApiKeySubmit(key: string): void {
+    send(IPC_INIT_API_KEY_SUBMIT, { key });
+  },
+  /**
+   * Main → Renderer. Subscribe to the API-key validation result.
+   * Returns an unsubscribe function.
+   */
+  onInitWizardApiKeyResult(
+    cb: (
+      r:
+        | { accepted: true }
+        | { accepted: true; warning: "unexpected-prefix" }
+        | { accepted: false; reason: "too-short" },
+    ) => void,
+  ): () => void {
+    return subscribe<{
+      accepted: boolean;
+      reason?: "too-short";
+      warning?: "unexpected-prefix";
+    }>(IPC_INIT_API_KEY_RESULT, (p) => {
+      if (p.accepted === false) {
+        cb({ accepted: false, reason: p.reason ?? "too-short" });
+        return;
+      }
+      if (p.warning === "unexpected-prefix") {
+        cb({ accepted: true, warning: "unexpected-prefix" });
+        return;
+      }
+      cb({ accepted: true });
+    });
+  },
+  /**
+   * Renderer → Main. Empty signal — Step 2's "Request microphone
+   * access" button was clicked. Main responds by invoking the Plan
+   * 11-03 probePermission helper INSIDE the Electron host (Pitfall #3:
+   * macOS TCC attributes the prompt to Achilles, not the terminal).
+   */
+  sendInitWizardMicPermissionRequest(): void {
+    send(IPC_INIT_MIC_PERMISSION_REQUEST, {});
+  },
+  /**
+   * Main → Renderer. Subscribe to the mic permission result.
+   */
+  onInitWizardMicPermissionResult(
+    cb: (r: { status: PermissionState }) => void,
+  ): () => void {
+    return subscribe<{ status: PermissionState }>(
+      IPC_INIT_MIC_PERMISSION_RESULT,
+      (p) => cb({ status: p.status }),
+    );
+  },
+  /**
+   * Renderer → Main. Empty signal — Step 3's "Start smoke test" button
+   * was clicked.
+   */
+  sendInitWizardSmokeStart(): void {
+    send(IPC_INIT_SMOKE_START, {});
+  },
+  /**
+   * Main → Renderer. Subscribe to the smoke test outcome.
+   */
+  onInitWizardSmokeResult(
+    cb: (
+      r:
+        | { status: "ok"; spokenPhrase: string }
+        | { status: "timed-out" }
+        | { status: "error" },
+    ) => void,
+  ): () => void {
+    return subscribe<{
+      status: "ok" | "timed-out" | "error";
+      spokenPhrase?: string;
+    }>(IPC_INIT_SMOKE_RESULT, (p) => {
+      if (p.status === "ok") {
+        cb({ status: "ok", spokenPhrase: p.spokenPhrase ?? "" });
+      } else if (p.status === "timed-out") {
+        cb({ status: "timed-out" });
+      } else {
+        cb({ status: "error" });
+      }
+    });
+  },
+  /**
+   * Renderer → Main. Empty signal — Step 3's "Exit wizard" button was
+   * clicked. Main responds by calling app.quit().
+   */
+  sendInitWizardDone(): void {
+    send(IPC_INIT_WIZARD_DONE, {});
   },
 };
 

@@ -12,6 +12,12 @@ import type {
 } from "../shared/constants.js";
 
 export interface AchillesBridge {
+  /**
+   * Plan 13-03 routing flag. The renderer's main.tsx reads
+   * `window.achilles.mode` to decide whether to mount the InitWizard or
+   * the regular App tree. The mock-bridge path leaves this undefined.
+   */
+  readonly mode?: "init" | "launch";
   onStateChanged(cb: (s: AchillesState) => void): () => void;
   onTranscriptPartial(cb: (text: string) => void): () => void;
   onTranscriptCommitted(
@@ -28,6 +34,30 @@ export interface AchillesBridge {
     mode?: "toggle" | "pushToTalk";
     key?: string;
   }): void;
+  // ─── Plan 13-03 init wizard surface (DIST-04) ─────────────────────
+  sendInitWizardApiKeySubmit?(key: string): void;
+  onInitWizardApiKeyResult?(
+    cb: (
+      r:
+        | { accepted: true }
+        | { accepted: true; warning: "unexpected-prefix" }
+        | { accepted: false; reason: "too-short" },
+    ) => void,
+  ): () => void;
+  sendInitWizardMicPermissionRequest?(): void;
+  onInitWizardMicPermissionResult?(
+    cb: (r: { status: PermissionState }) => void,
+  ): () => void;
+  sendInitWizardSmokeStart?(): void;
+  onInitWizardSmokeResult?(
+    cb: (
+      r:
+        | { status: "ok"; spokenPhrase: string }
+        | { status: "timed-out" }
+        | { status: "error" },
+    ) => void,
+  ): () => void;
+  sendInitWizardDone?(): void;
 }
 
 interface MockBridgeShape {

@@ -19,6 +19,14 @@ import {
   ACHILLES_STATES,
   HOTKEY_MODES,
   IPC_ERROR,
+  IPC_INIT_API_KEY_RESULT,
+  IPC_INIT_API_KEY_SUBMIT,
+  IPC_INIT_MIC_PERMISSION_REQUEST,
+  IPC_INIT_MIC_PERMISSION_RESULT,
+  IPC_INIT_SMOKE_RESULT,
+  IPC_INIT_SMOKE_START,
+  IPC_INIT_WIZARD_DONE,
+  IPC_INIT_WIZARD_STEP,
   IPC_MIC_AMPLITUDE,
   IPC_MIC_FRAME,
   IPC_OPEN_SYSTEM_SETTINGS,
@@ -298,6 +306,127 @@ export const SttTokenPayloadSchema = z
 export type SttTokenPayload = z.infer<typeof SttTokenPayloadSchema>;
 
 // ─────────────────────────────────────────────────────────────────────
+// Phase 13 — init wizard (DIST-04) IPC schemas
+//
+// Eight schemas paired with the eight IPC_INIT_* channel constants in
+// constants.ts. Each is `.strict()` so unknown fields are rejected at
+// the boundary (defence in depth against a compromised renderer
+// smuggling fields across the trust boundary).
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Main → Renderer. Step-by-step lifecycle broadcast. The renderer
+ * mirrors this for UI affordances (progress indicator dots) when the
+ * main process needs to push step state without a request from the
+ * renderer (e.g., resume after partial completion in a future v1.3).
+ */
+export const InitWizardStepPayloadSchema = z
+  .object({
+    step: z.union([
+      z.literal("api-key"),
+      z.literal("mic-permission"),
+      z.literal("smoke-round-trip"),
+    ]),
+    state: z.union([
+      z.literal("pending"),
+      z.literal("in-progress"),
+      z.literal("success"),
+      z.literal("error"),
+    ]),
+  })
+  .strict();
+
+export type InitWizardStepPayload = z.infer<typeof InitWizardStepPayloadSchema>;
+
+/**
+ * Renderer → Main. Carries the user-typed ElevenLabs API key from
+ * Step 1. The key field is NEVER echoed back in the matching result
+ * payload (T-13-13 mitigation: the response schema lacks any key field).
+ */
+export const InitApiKeySubmitPayloadSchema = z
+  .object({
+    key: z.string().min(1),
+  })
+  .strict();
+
+export type InitApiKeySubmitPayload = z.infer<
+  typeof InitApiKeySubmitPayloadSchema
+>;
+
+/**
+ * Main → Renderer. The API-key validation result. CRITICAL: this schema
+ * has NO `key` field — the bytes never round-trip back to the renderer.
+ * The discriminated shape allows the renderer's reducer to branch on
+ * accepted plus optional reason / warning.
+ */
+export const InitApiKeyResultPayloadSchema = z
+  .object({
+    accepted: z.boolean(),
+    reason: z.literal("too-short").optional(),
+    warning: z.literal("unexpected-prefix").optional(),
+  })
+  .strict();
+
+export type InitApiKeyResultPayload = z.infer<
+  typeof InitApiKeyResultPayloadSchema
+>;
+
+/**
+ * Renderer → Main. Empty signal — the user clicked "Request microphone
+ * access".
+ */
+export const InitMicPermissionRequestPayloadSchema = z.object({}).strict();
+
+export type InitMicPermissionRequestPayload = z.infer<
+  typeof InitMicPermissionRequestPayloadSchema
+>;
+
+/**
+ * Main → Renderer. The probePermission outcome.
+ */
+export const InitMicPermissionResultPayloadSchema = z
+  .object({
+    status: z.enum(PERMISSION_STATES),
+  })
+  .strict();
+
+export type InitMicPermissionResultPayload = z.infer<
+  typeof InitMicPermissionResultPayloadSchema
+>;
+
+/**
+ * Renderer → Main. Empty signal — the user clicked "Start smoke test".
+ */
+export const InitSmokeStartPayloadSchema = z.object({}).strict();
+
+export type InitSmokeStartPayload = z.infer<typeof InitSmokeStartPayloadSchema>;
+
+/**
+ * Main → Renderer. Smoke test outcome. `spokenPhrase` is the literal
+ * SMOKE_TEST_CANNED_PHRASE; the renderer surfaces "You should now
+ * hear: <spokenPhrase>" on success.
+ */
+export const InitSmokeResultPayloadSchema = z
+  .object({
+    status: z.union([
+      z.literal("ok"),
+      z.literal("timed-out"),
+      z.literal("error"),
+    ]),
+    spokenPhrase: z.string().min(1).optional(),
+  })
+  .strict();
+
+export type InitSmokeResultPayload = z.infer<typeof InitSmokeResultPayloadSchema>;
+
+/**
+ * Renderer → Main. Empty signal — the user clicked "Exit wizard".
+ */
+export const InitWizardDonePayloadSchema = z.object({}).strict();
+
+export type InitWizardDonePayload = z.infer<typeof InitWizardDonePayloadSchema>;
+
+// ─────────────────────────────────────────────────────────────────────
 // Channel-keyed schema map + helpers
 // ─────────────────────────────────────────────────────────────────────
 
@@ -332,6 +461,17 @@ export const IPC_PAYLOAD_SCHEMAS: Record<string, z.ZodTypeAny> = {
   [IPC_MIC_FRAME]: MicFramePayloadSchema,
   [IPC_STT_TOKEN_REQUEST]: SttTokenRequestPayloadSchema,
   [IPC_STT_TOKEN]: SttTokenPayloadSchema,
+  // Phase 13 init wizard surface — APPENDED only; tests added by
+  // Plan 13-03 reference these channel constants. Schemas are
+  // strict() so a compromised renderer cannot smuggle extra fields.
+  [IPC_INIT_WIZARD_STEP]: InitWizardStepPayloadSchema,
+  [IPC_INIT_API_KEY_SUBMIT]: InitApiKeySubmitPayloadSchema,
+  [IPC_INIT_API_KEY_RESULT]: InitApiKeyResultPayloadSchema,
+  [IPC_INIT_MIC_PERMISSION_REQUEST]: InitMicPermissionRequestPayloadSchema,
+  [IPC_INIT_MIC_PERMISSION_RESULT]: InitMicPermissionResultPayloadSchema,
+  [IPC_INIT_SMOKE_START]: InitSmokeStartPayloadSchema,
+  [IPC_INIT_SMOKE_RESULT]: InitSmokeResultPayloadSchema,
+  [IPC_INIT_WIZARD_DONE]: InitWizardDonePayloadSchema,
 };
 
 /**

@@ -233,6 +233,12 @@ export default defineWorkspace([
         "apps/achilles/src/main/ipc-bridge.test.ts",
         // Plan 12-04 MOCK_LOOP=1 integration test (skips when env unset).
         "apps/achilles/test/integration/**/*.test.ts",
+        // Plan 13-03 (DIST-04) — main-side init wizard orchestrator
+        // (createInitWizardWindow + createInitWizardSession). Listed
+        // here under phase-12-unit because the dependencies
+        // (probePermission, AchillesStore, mock-loop-clients) all live
+        // in the phase-12 surface; the file lives at apps/achilles/src/main/.
+        "apps/achilles/src/main/init-wizard.test.ts",
       ],
       environment: "node",
       passWithNoTests: true,

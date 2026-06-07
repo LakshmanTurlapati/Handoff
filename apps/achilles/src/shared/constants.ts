@@ -202,3 +202,116 @@ export const ERROR_COPY: Record<AchillesErrorKind, string> = {
  * interpolate to 60 fps without jitter.
  */
 export const AMPLITUDE_TICK_MS = 50;
+
+// ─────────────────────────────────────────────────────────────────────
+// Init wizard (DIST-04)
+//
+// Plan 13-03 ships the first-run wizard surface. The CLI's `achilles
+// init` command spawns the Electron binary with ACHILLES_MODE=init in
+// the env; main/index.ts routes on the literal `ACHILLES_MODE_INIT`
+// constant to instantiate the InitWizard window instead of the floating
+// shell. The eight IPC channel constants follow the established
+// `achilles:` prefix convention; the validation + canned-phrase +
+// timeout constants are referenced by both the main-side session
+// orchestrator (init-wizard.ts) and the renderer-side InitWizard.tsx
+// component so a change is a single-edit propagation.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Locked value of the `ACHILLES_MODE` env var that routes
+ * main/index.ts's bootstrap to the InitWizard window. Read by the CLI
+ * (apps/achilles-cli/src/commands/init.ts) when composing the child
+ * env, and by the Electron main process when branching the bootstrap.
+ */
+export const ACHILLES_MODE_INIT = "init";
+
+/**
+ * Main → Renderer. Broadcasts the current init-wizard step lifecycle
+ * (which step is in-progress + its sub-state). Carries the discriminated
+ * step name and a state ∈ {pending, in-progress, success, error}.
+ */
+export const IPC_INIT_WIZARD_STEP = "achilles:init-wizard-step";
+
+/**
+ * Renderer → Main. Carries the user-typed ElevenLabs API key from
+ * Step 1 of the wizard. The payload's key field never round-trips
+ * back through the API key result channel (T-13-13 mitigation).
+ */
+export const IPC_INIT_API_KEY_SUBMIT = "achilles:init-api-key-submit";
+
+/**
+ * Main → Renderer. Acknowledges the API key submission with the
+ * shape `{ accepted: boolean; reason?: string; warning?: string }`.
+ * Crucially does NOT echo the submitted key bytes.
+ */
+export const IPC_INIT_API_KEY_RESULT = "achilles:init-api-key-result";
+
+/**
+ * Renderer → Main. Empty signal — the user clicked the "Request
+ * microphone access" button in Step 2. Main responds by invoking
+ * the Plan 11-03 probePermission helper inside the Electron host
+ * (Pitfall #3 mitigation: the prompt is attributed to Achilles, not
+ * to the launching terminal).
+ */
+export const IPC_INIT_MIC_PERMISSION_REQUEST =
+  "achilles:init-mic-permission-request";
+
+/**
+ * Main → Renderer. Carries the resolved PermissionState from the
+ * probePermission call. The renderer surfaces remediation copy on
+ * 'denied' and advances on 'granted'.
+ */
+export const IPC_INIT_MIC_PERMISSION_RESULT =
+  "achilles:init-mic-permission-result";
+
+/**
+ * Renderer → Main. Empty signal — the user clicked "Start smoke
+ * test" in Step 3. Main runs the smoke round-trip (mocked when
+ * MOCK_LOOP=1, real ElevenLabs/Claude otherwise).
+ */
+export const IPC_INIT_SMOKE_START = "achilles:init-smoke-start";
+
+/**
+ * Main → Renderer. Carries the smoke-test outcome. Status is one of
+ * 'ok' | 'timed-out' | 'error'; on 'ok' the spokenPhrase field carries
+ * the locked SMOKE_TEST_CANNED_PHRASE the user just heard.
+ */
+export const IPC_INIT_SMOKE_RESULT = "achilles:init-smoke-result";
+
+/**
+ * Renderer → Main. Empty signal — the user clicked "Exit wizard".
+ * Main responds by calling app.quit() with exit code 0.
+ */
+export const IPC_INIT_WIZARD_DONE = "achilles:init-wizard-done";
+
+/**
+ * Minimum acceptable length for an ElevenLabs API key per the Phase 09
+ * MIN_KEY_LENGTH contract referenced from CONTEXT.md. The wizard's
+ * Step 1 validates against this before persisting.
+ */
+export const MIN_ELEVENLABS_KEY_LENGTH = 32;
+
+/**
+ * Informational prefix for an ElevenLabs API key — keys lacking this
+ * prefix are STILL accepted (the validation is non-blocking), but the
+ * wizard surfaces a warning banner so the user can sanity-check that
+ * they pasted the right value.
+ */
+export const ELEVENLABS_KEY_PREFIX = "sk_";
+
+/**
+ * Locked canned phrase the smoke round-trip plays back. The phrase is
+ * mirrored in the Claude system prompt so the LLM's <spoken-summary>
+ * body matches the user's expectation; a drift between the constant
+ * and the prompt would show up as the smoke test "succeeding" with a
+ * different sentence.
+ */
+export const SMOKE_TEST_CANNED_PHRASE =
+  "Hello from Achilles, I am ready to help.";
+
+/**
+ * Locked Step 3 budget. The wizard races the createSmokeRoundTrip
+ * promise against this timer; on timeout the renderer offers a "Skip"
+ * exit path so the wizard never blocks the user indefinitely.
+ */
+export const SMOKE_TEST_TIMEOUT_MS = 60000;

@@ -184,8 +184,10 @@ describe("IPC_PAYLOAD_SCHEMAS + parseEnvelope (IPC6 discriminated map)", () => {
     const keys = Object.keys(IPC_PAYLOAD_SCHEMAS);
     // Plan 11-01 shipped 12 channels; Plan 12-03 appended 6 (TTS chunk,
     // playback-complete, utterance commit, mic frame, STT token
-    // request + response). Total = 18.
-    expect(keys.length).toBe(18);
+    // request + response); Plan 13-03 appended 8 (init wizard step,
+    // api-key submit/result, mic-permission request/result, smoke
+    // start/result, wizard done). Total = 26.
+    expect(keys.length).toBe(26);
     for (const k of keys) {
       expect(k.startsWith("achilles:")).toBe(true);
     }

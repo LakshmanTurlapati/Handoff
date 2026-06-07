@@ -257,8 +257,16 @@ if (invokedAsScript) {
       }),
     initCommand: () =>
       realInitCommand({
-        stdout: process.stdout,
+        locate: () =>
+          locateElectronBinary({
+            pkgRoot: resolve(HERE, ".."),
+            platform: process.platform,
+            fileExistsAt: existsSync,
+          }),
+        spawn: (cmd, args, opts) => nodeSpawn(cmd, [...args], opts),
         processExitImpl: (code) => process.exit(code),
+        stderr: process.stderr,
+        env: process.env,
       }),
     transcriptsCommand: (sub) =>
       realTranscriptsCommand(sub, {

@@ -33,15 +33,40 @@ import "./styles/tokens.css";
 import "./styles/components.css";
 
 import { App } from "./App.js";
+import { InitWizard } from "./components/InitWizard.js";
 import { AchillesStateProvider } from "./state/useAchillesState.js";
+
+/**
+ * Plan 13-03 routing: when the preload exposed `window.achilles.mode`
+ * equals 'init' (the CLI was invoked as `achilles init` and spawned
+ * Electron with ACHILLES_MODE=init in the env), the renderer mounts
+ * the InitWizard component INSTEAD of the AchillesStateProvider tree.
+ * The InitWizard has its own internal state and does NOT consume the
+ * Plan 11/12 state reducer.
+ *
+ * The default — mode === 'launch' OR window.achilles undefined (headless
+ * mock bridge path) — preserves the Plan 11-02/03 + 12-04 floating shell
+ * tree verbatim. No regression.
+ */
+const mode =
+  (window as { achilles?: { mode?: "init" | "launch" } }).achilles?.mode ??
+  "launch";
 
 const rootElement = document.getElementById("root");
 if (rootElement !== null) {
-  createRoot(rootElement).render(
-    <StrictMode>
-      <AchillesStateProvider>
-        <App />
-      </AchillesStateProvider>
-    </StrictMode>,
-  );
+  if (mode === "init") {
+    createRoot(rootElement).render(
+      <StrictMode>
+        <InitWizard />
+      </StrictMode>,
+    );
+  } else {
+    createRoot(rootElement).render(
+      <StrictMode>
+        <AchillesStateProvider>
+          <App />
+        </AchillesStateProvider>
+      </StrictMode>,
+    );
+  }
 }
