@@ -1,8 +1,14 @@
 /**
  * Tests for the macOS hardened-runtime entitlements plist.
  *
- * The plist must declare the three Electron-required entitlements:
+ * The plist must declare the four Electron-required entitlements:
  *   - com.apple.security.device.audio-input — mic access
+ *   - com.apple.security.network.client — outbound HTTPS for ElevenLabs
+ *     STT/TTS calls. Under hardenedRuntime=true (set in
+ *     electron-builder.json), macOS blocks every outbound TCP/UDP
+ *     connection unless this entitlement is explicitly granted, so the
+ *     signed DMG would otherwise fail every voice-loop network call
+ *     (CR-01 fix).
  *   - com.apple.security.cs.allow-jit — V8 JIT
  *   - com.apple.security.cs.allow-unsigned-executable-memory — V8 needs
  *     writable+executable memory pages
@@ -24,7 +30,7 @@ async function readText(relPath) {
   return readFile(resolve(HERE, relPath), "utf8");
 }
 
-test("ENT1: entitlements.mac.plist has the three Electron-required entitlements paired with <true/>", async () => {
+test("ENT1: entitlements.mac.plist has the four Electron-required entitlements paired with <true/>", async () => {
   const text = await readText("entitlements.mac.plist");
 
   // Validate XML preamble (loose: starts with the XML declaration and
@@ -47,6 +53,10 @@ test("ENT1: entitlements.mac.plist has the three Electron-required entitlements 
   // accept any whitespace between them.
   const requiredKeys = [
     "com.apple.security.device.audio-input",
+    // CR-01: without com.apple.security.network.client, hardened-runtime
+    // macOS blocks every outbound TCP/UDP connection so the signed DMG
+    // would fail every ElevenLabs STT/TTS call.
+    "com.apple.security.network.client",
     "com.apple.security.cs.allow-jit",
     "com.apple.security.cs.allow-unsigned-executable-memory",
   ];
