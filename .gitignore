@@ -1,3 +1,8 @@
 resources/
 !apps/bridge/resources/
 !apps/bridge/resources/**
+
+# Local credentials — never commit
+secrets/
+*.env
+!apps/**/*.env.example
