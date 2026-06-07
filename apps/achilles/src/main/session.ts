@@ -527,15 +527,31 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
   async function openTtsClient(): Promise<OrchestratorTtsClient> {
     if (currentTtsClient !== null) return currentTtsClient;
     const tts = deps.ttsFactory({ voiceId: deps.voiceId });
-    currentTtsClient = tts;
+    // WR-04: do NOT assign currentTtsClient until open() succeeds.
+    // Previously the orchestrator set currentTtsClient BEFORE await
+    // tts.open(); on a failed open the failed handle stayed
+    // referenced AND ttsOpenedForTurn stayed false, so dispose()'s
+    // guard `currentTtsClient !== null && ttsOpenedForTurn` skipped
+    // close() and the underlying WebSocket / pending fetch leaked.
     try {
       await tts.open();
     } catch (err) {
       log(
         `[achilles] tts open failed: ${(err as Error).message}`,
       );
+      // Best-effort close of the unopened handle so the factory's
+      // internal resources do not leak.
+      try {
+        const closed = tts.close();
+        if (closed instanceof Promise) {
+          closed.catch(() => undefined);
+        }
+      } catch {
+        // best-effort
+      }
       throw err;
     }
+    currentTtsClient = tts;
     ttsOpenedForTurn = true;
     // Spawn the chunk-fanout consumer. We do NOT await it — the
     // consumer runs until the TTS client signals 'complete' or close().
