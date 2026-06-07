@@ -223,6 +223,17 @@ export interface CreateInitWizardSessionOptions {
   /**
    * Test seams for the smoke-test timeout. Production falls through
    * to globalThis.setTimeout / clearTimeout.
+   *
+   * WR-06 fix: the token type is intentionally `unknown` rather than
+   * `ReturnType<typeof setTimeout>` because the test fakes return a
+   * numeric id while production returns a `NodeJS.Timeout` object. The
+   * critical contract is that whatever `setTimeoutImpl` returns is
+   * passed verbatim to `clearTimeoutImpl` — neither side ever inspects
+   * the token's shape, so the opaque `unknown` type captures the
+   * contract precisely. The previous code combined `unknown` with an
+   * unnecessary `as unknown` cast in the production fallback; the cast
+   * has been removed since the return type is already `unknown` and
+   * the double-cast obscured the intent.
    */
   setTimeoutImpl?: (cb: () => void, ms: number) => unknown;
   clearTimeoutImpl?: (token: unknown) => void;
@@ -242,14 +253,16 @@ export interface CreateInitWizardSessionOptions {
 export function createInitWizardSession(
   deps: CreateInitWizardSessionOptions,
 ): InitWizardSession {
-  const setT =
-    deps.setTimeoutImpl ??
-    ((cb: () => void, ms: number) =>
-      setTimeout(cb, ms) as unknown);
-  const clearT =
+  // WR-06 fix: drop the unnecessary `as unknown` cast on setTimeoutImpl
+  // — the seam's declared return type is already `unknown`, so casting
+  // again was redundant. The clearTimeoutImpl fallback still needs the
+  // narrowing cast to `ReturnType<typeof setTimeout>` because the
+  // global `clearTimeout` rejects `unknown`.
+  const setT: (cb: () => void, ms: number) => unknown =
+    deps.setTimeoutImpl ?? ((cb, ms) => setTimeout(cb, ms));
+  const clearT: (token: unknown) => void =
     deps.clearTimeoutImpl ??
-    ((token: unknown) =>
-      clearTimeout(token as ReturnType<typeof setTimeout>));
+    ((token) => clearTimeout(token as ReturnType<typeof setTimeout>));
   const log =
     deps.logger ??
     ((msg: string): void => {
