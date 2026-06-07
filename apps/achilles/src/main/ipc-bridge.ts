@@ -23,14 +23,22 @@
 import {
   ERROR_COPY,
   IPC_ERROR,
+  IPC_MIC_FRAME,
   IPC_OPEN_SYSTEM_SETTINGS,
   IPC_PERMISSION_STATE,
   IPC_REGISTER_HOTKEY,
   IPC_REQUEST_STATE,
+  IPC_STT_TOKEN_REQUEST,
+  IPC_TTS_PLAYBACK_COMPLETE,
   IPC_UPDATE_HOTKEY_CONFIG,
   IPC_UPDATE_WINDOW_POSITION,
+  IPC_UTTERANCE_COMMIT,
 } from "../shared/constants.js";
 import { parseEnvelope } from "../shared/ipc-schemas.js";
+import type {
+  MicFramePayload,
+  UtteranceCommitPayload,
+} from "../shared/ipc-schemas.js";
 import type {
   AchillesErrorKind,
   AchillesState,
@@ -44,6 +52,7 @@ import type {
   DragPersistClock,
   WireDragPersistenceHandle,
 } from "./drag-persist.js";
+import type { AchillesSession } from "./session.js";
 import type { MockStateController } from "./state-machine.js";
 import type { AchillesStore } from "./store.js";
 import type { AchillesBrowserWindow } from "./window.js";
@@ -116,6 +125,16 @@ export interface WireIpcBridgeOptions {
    * `console.warn`. Tests inject a recording stub.
    */
   logger?: (msg: string) => void;
+  /**
+   * Plan 12-04 session orchestrator. When provided, the bridge wires
+   * the four Phase 12 inbound channels (IPC_UTTERANCE_COMMIT,
+   * IPC_TTS_PLAYBACK_COMPLETE, IPC_MIC_FRAME, IPC_STT_TOKEN_REQUEST)
+   * to the session's per-utterance entry points. When omitted (the
+   * degraded-mode boot path when MissingApiKeyError fires), the
+   * Phase 12 handlers are NOT registered — the bridge surface
+   * collapses to the Phase 11 set.
+   */
+  session?: AchillesSession;
 }
 
 export interface IpcBridgeHandle {
@@ -316,6 +335,89 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
     }
   }));
 
+  // ─── Phase 12 inbound handlers (Plan 12-04) ──────────────────────
+  //
+  // Registered ONLY when opts.session is supplied — the degraded-mode
+  // boot (missing API key) constructs the bridge without a session so
+  // the Phase 11 surface remains intact.
+  if (opts.session !== undefined) {
+    const session = opts.session;
+    ipcMainRef.on(
+      IPC_UTTERANCE_COMMIT,
+      withSenderCheck(IPC_UTTERANCE_COMMIT, (_event, payload) => {
+        try {
+          const parsed = parseEnvelope(
+            IPC_UTTERANCE_COMMIT,
+            payload,
+          ) as UtteranceCommitPayload;
+          session.onUtteranceCommit(parsed);
+        } catch (err) {
+          log(
+            `[achilles] dropping invalid ${IPC_UTTERANCE_COMMIT} payload: ${
+              (err as Error).message
+            }`,
+          );
+        }
+      }),
+    );
+
+    ipcMainRef.on(
+      IPC_TTS_PLAYBACK_COMPLETE,
+      withSenderCheck(IPC_TTS_PLAYBACK_COMPLETE, (_event, payload) => {
+        try {
+          parseEnvelope(IPC_TTS_PLAYBACK_COMPLETE, payload);
+          session.onTtsPlaybackComplete();
+        } catch (err) {
+          log(
+            `[achilles] dropping invalid ${IPC_TTS_PLAYBACK_COMPLETE} payload: ${
+              (err as Error).message
+            }`,
+          );
+        }
+      }),
+    );
+
+    ipcMainRef.on(
+      IPC_MIC_FRAME,
+      withSenderCheck(IPC_MIC_FRAME, (_event, payload) => {
+        try {
+          const parsed = parseEnvelope(
+            IPC_MIC_FRAME,
+            payload,
+          ) as MicFramePayload;
+          session.onMicFrame(parsed);
+        } catch (err) {
+          log(
+            `[achilles] dropping invalid ${IPC_MIC_FRAME} payload: ${
+              (err as Error).message
+            }`,
+          );
+        }
+      }),
+    );
+
+    ipcMainRef.on(
+      IPC_STT_TOKEN_REQUEST,
+      withSenderCheck(IPC_STT_TOKEN_REQUEST, (_event, payload) => {
+        try {
+          parseEnvelope(IPC_STT_TOKEN_REQUEST, payload);
+          // The renderer asks for a token at start-of-listening; the
+          // orchestrator's onHotkeyPress is the canonical mint+broadcast
+          // entry. It is intentionally idempotent — calling it from
+          // STT_TOKEN_REQUEST when the state is already 'listening' is a
+          // no-op for the state machine but re-mints the token.
+          void session.onHotkeyPress();
+        } catch (err) {
+          log(
+            `[achilles] dropping invalid ${IPC_STT_TOKEN_REQUEST} payload: ${
+              (err as Error).message
+            }`,
+          );
+        }
+      }),
+    );
+  }
+
   // ─── Main → Renderer wiring ───────────────────────────────────────
   //
   // The broadcast plumbing lives in main/index.ts — callers wire the
@@ -333,6 +435,12 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
     ipcMainRef.removeAllListeners(IPC_OPEN_SYSTEM_SETTINGS);
     ipcMainRef.removeAllListeners(IPC_UPDATE_WINDOW_POSITION);
     ipcMainRef.removeAllListeners(IPC_UPDATE_HOTKEY_CONFIG);
+    // Plan 12-04 channels (no-op when session was not supplied — the
+    // handlers were never registered in that case).
+    ipcMainRef.removeAllListeners(IPC_UTTERANCE_COMMIT);
+    ipcMainRef.removeAllListeners(IPC_TTS_PLAYBACK_COMPLETE);
+    ipcMainRef.removeAllListeners(IPC_MIC_FRAME);
+    ipcMainRef.removeAllListeners(IPC_STT_TOKEN_REQUEST);
   }
 
   function broadcastPermissionState(state: PermissionState): void {

@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Achilles
-status: executing
-stopped_at: Completed 11-02-PLAN.md — reactive circle + waveform + transcript + 5-state visual treatments (UI-02 + UI-03 + UI-04 + LOOP-02); Wave 2 plan-02 of Phase 11 complete
-last_updated: "2026-06-06T21:51:53Z"
-last_activity: 2026-06-06 — Plan 11-02 delivered the 4 renderer components proving UI-02/03/04 + LOOP-02 against the headless Vite bundle
+status: "Plan 12-04 session orchestrator shipped — apps/achilles/src/main/session.ts composes Phase 09/10/11/12-01/12-02/12-03 deliverables into the per-utterance voice loop with SAFE-04 sandwich-defence wrapping, pre-TTS normalisation, half-duplex gating (mic paused on processing → speaking + 300 ms debounce after TTS playback drains), and the PROMPT-05 runtime override that emits 'I ran into a problem. <reason>' regardless of LLM narration whenever deriveOutcome returns failure. ElevenLabs API key surface single read point in main only (store-first + env fallback + MissingApiKeyError graceful degradation). Plan 11-01 mock-timer back-compat preserved via MOCK_* event tags. 200/200 phase-12-unit tests (4 EE tests skip cleanly without MOCK_LOOP=1; all 200 pass under MOCK_LOOP=1). 413/413 phase-11-unit pass (no regression). 302/302 phase-09 + phase-10 pass (no regression). Typecheck clean. CR-07 hygiene clean."
+stopped_at: Completed 12-04-PLAN.md — Wave 3 of Phase 12 (session orchestrator composing voice-stt + claude-bridge + voice-tts + sandwich-defence + normalisation + half-duplex + error override) shipped
+last_updated: "2026-06-06T18:55:00.000Z"
+last_activity: 2026-06-06 — Plan 12-04 delivered the per-utterance orchestrator at apps/achilles/src/main/session.ts wired into main/index.ts production composition root, the single-read-point ElevenLabs API key surface at apps/achilles/src/main/key-source.ts, the deterministic mock-loop-clients factories, and the MOCK_LOOP=1 integration test
 progress:
   total_phases: 10
-  completed_phases: 3
-  total_plans: 13
-  completed_plans: 13
-  percent: 30
+  completed_phases: 4
+  total_plans: 20
+  completed_plans: 18
+  percent: 45
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-06)
 
 ## Current Position
 
-Phase: 11 of 14 (Floating UI Shell) — Wave 2 plan-02 complete (11-03 runs in parallel)
-Plan: 02 complete (Wave 2 / plan-02); Plan 11-03 is the Wave-2 sibling
-Status: 4 renderer components shipped — FloatingShell (composition root), ReactiveCircle (96px SVG with per-state CSS classes + amplitude scaling), Waveform (32-bar Canvas2D visualizer), TranscriptOverlay (LOOP-02 partial/committed renderer with 15s auto-fade). useAchillesState reducer + provider + hook clamps amplitude to [0,1]. MockAnalyser AnalyserNode-shape testability seam (Phase 12 swaps in a real AnalyserNode). Design tokens declare the 5 state accents + motion durations at :root with reduced-motion override. 76/76 new unit tests + 8/8 new Playwright e2e specs pass against the headless Vite bundle (UI-02 + UI-03 + UI-04 + LOOP-02). Cumulative: 212/212 phase-11-unit tests + 26/26 achilles-renderer specs. NO Electron launch in CI.
-Last activity: 2026-06-06 — Plan 11-02 delivered the 4 renderer components proving UI-02 (5-state distinctness), UI-03 (amplitude-driven circle scaling), UI-04 (32-bar Canvas2D waveform), LOOP-02 (partial/committed transcript opacity + 15s auto-fade) against the headless Vite bundle
+Phase: 12 of 14 (End-to-End Integration & System Prompt) — Wave 3 plan-04 complete
+Plan: 04 complete (Wave 3 / plan-04); all 4 plans of Phase 12 shipped
+Status: Plan 12-04 session orchestrator shipped — apps/achilles/src/main/session.ts composes Phase 09/10/11/12-01/12-02/12-03 deliverables into the per-utterance voice loop. SAFE-04 sandwich-defence wraps every transcript before bridge.send. Pre-TTS normalisation strips ANSI/paths/secret-prefixes from both the ack AND the spoken-summary body. Half-duplex gating: micCapture.pauseFrameDelivery on processing → speaking + MIC_FRAME drop during speaking + 300 ms (SPEAKING_DEBOUNCE_MS) tail before transitioning to idle. PROMPT-05 runtime override: deriveOutcome failure → "I ran into a problem. <humanReason>" regardless of LLM body. ElevenLabs API key surface single read point in main only (apps/achilles/src/main/key-source.ts with store-first + env fallback + MissingApiKeyError graceful degradation). 4 new state-machine event tags (STT_COMMITTED, CLAUDE_RESULT_READY, TTS_PLAYBACK_DRAINED, CLAUDE_FAILURE_OVERRIDE) + 4 new ipc-bridge inbound handlers + apps/achilles/src/main/mock-loop-clients.ts deterministic fakes + apps/achilles/test/integration/end-to-end-loop.test.ts gated by MOCK_LOOP=1. Plan 11-01 MOCK_* back-compat preserved. Cumulative: 200/200 phase-12-unit tests + 413/413 phase-11-unit + 302/302 phase-09/10 (no regression). Typecheck clean.
+Last activity: 2026-06-06 — Plan 12-04 shipped the per-utterance orchestrator composing every Phase 09/10/11/12-01/12-02/12-03 deliverable with structural enforcement of LOOP-05 half-duplex + PROMPT-05 PITFALLS #17 runtime override + SAFE-01 API key isolation + SAFE-04 sandwich-defence
 
-Progress: [████████░░] 79%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Progress: [████████░░] 79%
 | Phase 10 P03 | 10 | 2 tasks | 5 files |
 | Phase 11 P01 | ~75 | 2 tasks | 30 files |
 | Phase 11 P02 | ~60 | 2 tasks | 17 files |
+| Phase 12 P04 | 30 | 3 tasks | 17 files (7 new + 10 modified) |
 
 ## Accumulated Context
 
@@ -95,6 +96,14 @@ Locked at v1.2 scoping (do not reopen during planning):
 - [Phase 11 P02]: MockAnalyser inlines the LCG generator instead of importing createMockAmplitudeStream from src/main — renderer / main process separation lock. Seed convention (42) + Numerical Recipes constants duplicated so streams pair up for fixture comparison without crossing the process boundary.
 - [Phase 11 P02]: Per-state accent via CSS custom property cascade — `[data-state='X']` selectors set `--circle-color-current` to `var(--achilles-X)`. The state-distinctness e2e reads the resolved property and asserts pairwise distinctness across all 5 states without hard-coding hex values.
 - [Phase 11 P02]: useAchillesState reducer clamps mic/TTS amplitude into [0,1] (T-11-08 defence in depth). ReactiveCircle has a second-line clamp in its inline --circle-scale calculation. Both defences cap the scaled circle at 1.4× the natural size.
+- [Phase 12 P04]: Plan 12-04 layers Plan 12-04 production state-machine tags ALONGSIDE the Phase 11 MOCK_* tags. The MOCK_* tags remain functional so the Phase 11 Playwright e2e specs run unchanged. The new tags (STT_COMMITTED, CLAUDE_RESULT_READY, TTS_PLAYBACK_DRAINED, CLAUDE_FAILURE_OVERRIDE) drive the same listening → processing → speaking → idle transitions; CLAUDE_FAILURE_OVERRIDE carries a `reason` payload the orchestrator inspects separately to know the spoken summary must be the PROMPT-05 override.
+- [Phase 12 P04]: createSessionStateController is a thin wrapper over createMockStateController with no-op timer scheduling. The reducer is the same in both modes; only the timer pump differs.
+- [Phase 12 P04]: session.ts captures the API key in a closure at construction time via deps.readApiKey(). It never logs, returns, or broadcasts the key. The SE13 logger-spy assertion pins this invariant: no log line ever contains the key bytes or raw transcript content.
+- [Phase 12 P04]: tsconfig.node.json overrides the path mappings to point at the workspace packages' dist/ .d.ts files (instead of src/ .ts). This keeps rootDir:src intact while letting session.ts import deriveOutcome/extractAck/etc as runtime values resolved via Node's package resolution. The vitest workspace alias still points at src/ for tests so the dev loop reads from source.
+- [Phase 12 P04]: The integration test (apps/achilles/test/integration/end-to-end-loop.test.ts) gates every it() via `process.env.MOCK_LOOP`. Without the env var the suite skips cleanly (4 skipped / 2 pass for the locked-constant invariants), satisfying the CLAUDE.md no-live-network default.
+- [Phase 12 P04]: DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM" is a locked v1.2 module-level constant in shared/constants.ts. main/index.ts reads process.env.ELEVENLABS_VOICE_ID with this constant as fallback (per REQUIREMENTS.md locked decisions — "One fixed default voice (env var override allowed)").
+- [Phase 12 P04]: FAILURE_OVERRIDE_PREFIX = "I ran into a problem." is the locked runtime constant in session.ts. The matching phrase is pinned in packages/achilles-skill/skill/prompts/companion.md (Plan 12-01). A drift between the two locations causes Plan 12-01 prompt-content.test.ts OR session.test.ts SE6/SE7 to fail.
+- [Phase 12 P04]: The IPC_STT_TOKEN_REQUEST handler forwards to session.onHotkeyPress so the renderer's STT bootstrap re-mints when the WebSocket needs a fresh token; the call is idempotent at the state-machine layer (HOTKEY_PRESS from idle → listening; from listening it commits the in-flight utterance which the orchestrator then drops if no transcript is pending).
 
 ### Pending Todos
 

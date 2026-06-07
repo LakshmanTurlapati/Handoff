@@ -113,6 +113,16 @@ export const IPC_MIC_FRAME = "achilles:mic-frame";
 export const IPC_STT_TOKEN_REQUEST = "achilles:stt-token-request";
 export const IPC_STT_TOKEN = "achilles:stt-token";
 
+/**
+ * Locked v1.2 default ElevenLabs voice id. Honoured when
+ * `process.env.ELEVENLABS_VOICE_ID` is unset (per REQUIREMENTS.md
+ * locked decisions — "One fixed default voice (env var override
+ * allowed)"). The string `21m00Tcm4TlvDq8ikWAM` is the public
+ * ElevenLabs voice id for "Rachel", documented as the demo voice on
+ * the Flash v2.5 model card.
+ */
+export const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
+
 // ─────────────────────────────────────────────────────────────────────
 // `as const` tuples — the single membership source for both the pure
 // state machine reducer and the Zod schemas.

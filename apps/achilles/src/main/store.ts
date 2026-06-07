@@ -28,6 +28,13 @@ import type { HotkeyMode } from "../shared/constants.js";
 const KEY_WINDOW_POSITION = "windowPosition";
 const KEY_HOTKEY_MODE = "hotkeyMode";
 const KEY_HOTKEY_KEY = "hotkeyKey";
+// Plan 12-04: ElevenLabs API key. Persisted via safeStorage on top of
+// the standard persist() path so the encrypted blob round-trips through
+// the existing __encrypted wrapper. When safeStorage is unavailable the
+// shared SAFE-01 plaintext-fallback warning fires once per process and
+// the key is persisted plain. Phase 13's first-run wizard owns the UX
+// for collecting the value.
+const KEY_ELEVENLABS_API_KEY = "elevenlabsApiKey";
 
 /**
  * Minimal contract a Store implementation must satisfy. Matches the
@@ -66,6 +73,23 @@ export interface AchillesStore {
   writeHotkeyMode(mode: HotkeyMode): void;
   readHotkeyKey(): string;
   writeHotkeyKey(accelerator: string): void;
+  /**
+   * Plan 12-04: returns the persisted ElevenLabs API key (decrypted via
+   * safeStorage when available) or null when no key was ever written
+   * AND when a persisted blob fails to decrypt (corrupted store).
+   * Callers route through {@link readApiKey} in key-source.ts so the
+   * env fallback semantics are uniform.
+   */
+  readElevenlabsApiKey(): string | null;
+  /**
+   * Plan 12-04: persists the ElevenLabs API key. When safeStorage is
+   * available the value is encrypted at rest; when unavailable the
+   * shared once-per-process SAFE-01 warning fires (inherited from the
+   * persist() helper) and the value is written plain.
+   *
+   * @throws Error when key is not a non-empty string.
+   */
+  writeElevenlabsApiKey(key: string): void;
   getEncryptionState(): "available" | "unavailable" | "unknown";
 }
 
@@ -175,6 +199,50 @@ export function createAchillesStore(
     return raw;
   }
 
+  /**
+   * Specialised loader for the API key — emits an [achilles] log line
+   * when decryption fails so the operator sees the fallback path. The
+   * log NEVER contains the encrypted bytes or any candidate key
+   * material; only the well-known prefix string is included.
+   *
+   * Returns the decrypted string or null when (a) no value persisted,
+   * (b) decryption failed, or (c) the persisted shape is unexpected.
+   */
+  function loadApiKey(key: string): string | null {
+    const raw = store.get(key);
+    if (raw === null || raw === undefined) {
+      return null;
+    }
+    if (
+      typeof raw === "object" &&
+      raw !== null &&
+      (raw as { __encrypted?: unknown }).__encrypted === true &&
+      typeof (raw as { payload?: unknown }).payload === "string" &&
+      safeStorage !== undefined
+    ) {
+      try {
+        const buf = Buffer.from(
+          (raw as { payload: string }).payload,
+          "base64",
+        );
+        const decrypted = JSON.parse(safeStorage.decryptString(buf));
+        if (typeof decrypted === "string" && decrypted.length > 0) {
+          return decrypted;
+        }
+        return null;
+      } catch {
+        logger(
+          "[achilles] elevenlabs key decryption failed; falling back to env",
+        );
+        return null;
+      }
+    }
+    if (typeof raw === "string" && raw.length > 0) {
+      return raw;
+    }
+    return null;
+  }
+
   return {
     readWindowPosition() {
       const raw = load(KEY_WINDOW_POSITION);
@@ -214,6 +282,15 @@ export function createAchillesStore(
         throw new Error("hotkeyKey must be a non-empty Electron accelerator");
       }
       persist(KEY_HOTKEY_KEY, accelerator);
+    },
+    readElevenlabsApiKey() {
+      return loadApiKey(KEY_ELEVENLABS_API_KEY);
+    },
+    writeElevenlabsApiKey(key) {
+      if (typeof key !== "string" || key.length === 0) {
+        throw new Error("elevenlabsApiKey must be a non-empty string");
+      }
+      persist(KEY_ELEVENLABS_API_KEY, key);
     },
     getEncryptionState() {
       return encryptionState;

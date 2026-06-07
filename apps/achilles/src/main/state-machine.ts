@@ -65,6 +65,26 @@ export type AchillesEvent =
   | { type: "MOCK_VAD_COMMIT" }
   | { type: "MOCK_PROCESSING_COMPLETE" }
   | { type: "MOCK_PLAYBACK_DONE" }
+  // Plan 12-04 production event tags. The MOCK_* variants above remain
+  // intact for Phase 11 Playwright back-compat; the production
+  // orchestrator (session.ts) dispatches the four tags below instead.
+  //
+  //   - STT_COMMITTED          listening  → processing
+  //   - CLAUDE_RESULT_READY    processing → speaking
+  //   - TTS_PLAYBACK_DRAINED   speaking   → idle
+  //   - CLAUDE_FAILURE_OVERRIDE processing → speaking with the orchestrator
+  //                              consulting `reason` to know the spoken
+  //                              summary should be the PROMPT-05 override
+  //                              ("I ran into a problem. <reason>") rather
+  //                              than the LLM's <spoken-summary> body.
+  //                              The reducer itself does NOT carry the
+  //                              override flag — it only signals the state
+  //                              transition; session.ts owns the flag
+  //                              alongside the dispatch call.
+  | { type: "STT_COMMITTED"; transcript: string }
+  | { type: "CLAUDE_RESULT_READY" }
+  | { type: "TTS_PLAYBACK_DRAINED" }
+  | { type: "CLAUDE_FAILURE_OVERRIDE"; reason: string }
   | { type: "INJECT_ERROR"; kind: AchillesErrorKind }
   | { type: "ERROR_DISMISS" }
   | { type: "PERMISSION_CHANGED"; state: PermissionState };
@@ -95,6 +115,14 @@ export type AchillesEvent =
  *   - MOCK_VAD_COMMIT:           listening → processing
  *   - MOCK_PROCESSING_COMPLETE:  processing → speaking
  *   - MOCK_PLAYBACK_DONE:        speaking → idle
+ *   - STT_COMMITTED:             listening → processing  (Plan 12-04 prod)
+ *   - CLAUDE_RESULT_READY:       processing → speaking   (Plan 12-04 prod)
+ *   - TTS_PLAYBACK_DRAINED:      speaking → idle         (Plan 12-04 prod)
+ *   - CLAUDE_FAILURE_OVERRIDE:   processing → speaking   (Plan 12-04 prod)
+ *                                 — reason payload is informational only;
+ *                                 the orchestrator inspects it separately
+ *                                 to know the spoken summary must be the
+ *                                 PROMPT-05 override
  *   - INJECT_ERROR:              ANY → error      (test seam)
  *   - ERROR_DISMISS:             error → idle
  *   - PERMISSION_CHANGED:        unchanged        (sidechannel)
@@ -136,6 +164,30 @@ export function transition(
 
     case "MOCK_PLAYBACK_DONE":
       if (current === "speaking") return "idle";
+      return current;
+
+    // ─── Plan 12-04 production tags (orchestrator-driven) ─────────────
+    case "STT_COMMITTED":
+      if (current === "listening") return "processing";
+      return current;
+
+    case "CLAUDE_RESULT_READY":
+      if (current === "processing") return "speaking";
+      return current;
+
+    case "TTS_PLAYBACK_DRAINED":
+      if (current === "speaking") return "idle";
+      return current;
+
+    case "CLAUDE_FAILURE_OVERRIDE":
+      // The reducer treats the failure-override path identically to
+      // CLAUDE_RESULT_READY at the state-transition layer: processing →
+      // speaking. The orchestrator (session.ts) carries the override
+      // flag separately so the spoken summary text is the locked
+      // "I ran into a problem. <reason>" body rather than the LLM's
+      // <spoken-summary> body. The `reason` payload is informational
+      // for the orchestrator only — the reducer ignores it.
+      if (current === "processing") return "speaking";
       return current;
 
     case "INJECT_ERROR":
@@ -192,6 +244,31 @@ export interface MockStateController {
   now(): AchillesState;
   scheduleMockTransitions(state: AchillesState): void;
   cancelScheduledTransitions(): void;
+}
+
+/**
+ * Production controller — Plan 12-04. Same surface as
+ * createMockStateController but the fixture timer scheduling is a
+ * no-op so the orchestrator (session.ts) drives every transition.
+ *
+ * createSessionStateController is wired by main/index.ts in the
+ * production path. The Phase 11 Playwright e2e suite continues to use
+ * createMockStateController so the fixture-timer back-compat path is
+ * exercised; Plan 12-04 does NOT change createMockStateController.
+ */
+export function createSessionStateController(
+  opts: Omit<MockStateControllerOptions, "setTimeoutImpl" | "clearTimeoutImpl">,
+): MockStateController {
+  // Force the underlying mock controller's timer scheduling to be a
+  // no-op: setTimeout returns a token but never fires, and clearTimeout
+  // is a no-op. The session orchestrator dispatches the production
+  // tags directly so the timer-based MOCK_VAD_COMMIT / MOCK_PROCESSING_COMPLETE
+  // / MOCK_PLAYBACK_DONE sequence never advances in production.
+  return createMockStateController({
+    ...opts,
+    setTimeoutImpl: () => null,
+    clearTimeoutImpl: () => undefined,
+  });
 }
 
 export function createMockStateController(

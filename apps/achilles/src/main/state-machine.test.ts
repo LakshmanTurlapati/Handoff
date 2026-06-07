@@ -114,6 +114,123 @@ describe("transition() — defensive coverage", () => {
   });
 });
 
+describe("transition() — Plan 12-04 production event tags", () => {
+  it("S1 (P12): STT_COMMITTED transitions listening → processing", () => {
+    expect(
+      transition(
+        "listening",
+        { type: "STT_COMMITTED", transcript: "hello world" },
+        "toggle",
+      ),
+    ).toBe("processing");
+  });
+
+  it("S1 (P12): STT_COMMITTED is a no-op from non-listening states", () => {
+    expect(
+      transition(
+        "idle",
+        { type: "STT_COMMITTED", transcript: "hello" },
+        "toggle",
+      ),
+    ).toBe("idle");
+    expect(
+      transition(
+        "processing",
+        { type: "STT_COMMITTED", transcript: "hello" },
+        "toggle",
+      ),
+    ).toBe("processing");
+    expect(
+      transition(
+        "speaking",
+        { type: "STT_COMMITTED", transcript: "hello" },
+        "toggle",
+      ),
+    ).toBe("speaking");
+  });
+
+  it("S2 (P12): CLAUDE_RESULT_READY transitions processing → speaking", () => {
+    expect(
+      transition("processing", { type: "CLAUDE_RESULT_READY" }, "toggle"),
+    ).toBe("speaking");
+  });
+
+  it("S2 (P12): CLAUDE_RESULT_READY is a no-op from non-processing states", () => {
+    expect(
+      transition("idle", { type: "CLAUDE_RESULT_READY" }, "toggle"),
+    ).toBe("idle");
+    expect(
+      transition("listening", { type: "CLAUDE_RESULT_READY" }, "toggle"),
+    ).toBe("listening");
+    expect(
+      transition("speaking", { type: "CLAUDE_RESULT_READY" }, "toggle"),
+    ).toBe("speaking");
+  });
+
+  it("S3 (P12): TTS_PLAYBACK_DRAINED transitions speaking → idle", () => {
+    expect(
+      transition("speaking", { type: "TTS_PLAYBACK_DRAINED" }, "toggle"),
+    ).toBe("idle");
+  });
+
+  it("S3 (P12): TTS_PLAYBACK_DRAINED is a no-op from non-speaking states", () => {
+    expect(
+      transition("idle", { type: "TTS_PLAYBACK_DRAINED" }, "toggle"),
+    ).toBe("idle");
+    expect(
+      transition("listening", { type: "TTS_PLAYBACK_DRAINED" }, "toggle"),
+    ).toBe("listening");
+    expect(
+      transition("processing", { type: "TTS_PLAYBACK_DRAINED" }, "toggle"),
+    ).toBe("processing");
+  });
+
+  it("S5 (P12): CLAUDE_FAILURE_OVERRIDE transitions processing → speaking with reason payload preserved", () => {
+    // The reducer's return type is AchillesState (a string literal); the
+    // failure-override signal travels in the EVENT PAYLOAD, which the
+    // orchestrator inspects separately (Plan 12-04 session.ts owns the
+    // "next spoken summary is the override" flag).
+    const next = transition(
+      "processing",
+      { type: "CLAUDE_FAILURE_OVERRIDE", reason: "exit_code" },
+      "toggle",
+    );
+    expect(next).toBe("speaking");
+  });
+
+  it("S5 (P12): CLAUDE_FAILURE_OVERRIDE is a no-op from non-processing states", () => {
+    expect(
+      transition(
+        "idle",
+        { type: "CLAUDE_FAILURE_OVERRIDE", reason: "exit_code" },
+        "toggle",
+      ),
+    ).toBe("idle");
+    expect(
+      transition(
+        "speaking",
+        { type: "CLAUDE_FAILURE_OVERRIDE", reason: "exit_code" },
+        "toggle",
+      ),
+    ).toBe("speaking");
+  });
+
+  it("S4 (P12): MOCK_* tags remain functional for back-compat", () => {
+    // The Phase 11 Playwright e2e specs drive the timeline through the
+    // MOCK_* tags. Plan 12-04 adds the production tags ALONGSIDE them
+    // without changing or deleting any MOCK_* behaviour.
+    expect(
+      transition("listening", { type: "MOCK_VAD_COMMIT" }, "toggle"),
+    ).toBe("processing");
+    expect(
+      transition("processing", { type: "MOCK_PROCESSING_COMPLETE" }, "toggle"),
+    ).toBe("speaking");
+    expect(
+      transition("speaking", { type: "MOCK_PLAYBACK_DONE" }, "toggle"),
+    ).toBe("idle");
+  });
+});
+
 describe("createMockStateController — CR-01 production broadcast hook auto-advances the timeline", () => {
   it("when the broadcast wires scheduleMockTransitions, listening -> processing -> speaking -> idle auto-fires (mirrors main/index.ts wiring)", () => {
     type TimerCb = () => void;

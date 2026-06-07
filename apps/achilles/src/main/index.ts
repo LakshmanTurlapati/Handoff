@@ -21,7 +21,12 @@
  * modules (window, store, hotkey, state-machine, mock-amplitude,
  * ipc-bridge) directly with injected stubs.
  */
+import { createClaudeSession } from "@achilles/claude-code-bridge";
+import { companionPromptPath } from "@achilles/achilles-skill";
+import { mintSttToken } from "@achilles/voice-stt/token-mint";
+import { createTtsStreamClient } from "@achilles/voice-tts";
 import {
+  DEFAULT_VOICE_ID,
   IPC_MIC_AMPLITUDE,
   IPC_STATE_CHANGED,
   IPC_TTS_AMPLITUDE,
@@ -29,13 +34,18 @@ import {
 import type { AchillesState, PermissionState } from "../shared/constants.js";
 import { registerAchillesHotkey, unregisterAchillesHotkey } from "./hotkey.js";
 import { wireIpcBridge } from "./ipc-bridge.js";
+import { readApiKey, MissingApiKeyError } from "./key-source.js";
 import { createMockAmplitudeStream } from "./mock-amplitude.js";
 import {
   openSystemSettings as openSystemSettingsHelper,
   probePermission,
   schedulePermissionPoll,
 } from "./permission.js";
-import { createMockStateController } from "./state-machine.js";
+import { createSession, type AchillesSession } from "./session.js";
+import {
+  createSessionStateController,
+  type MockStateController,
+} from "./state-machine.js";
 import { createAchillesStore } from "./store.js";
 import { createAchillesWindow } from "./window.js";
 
@@ -134,18 +144,24 @@ async function bootstrap(): Promise<void> {
     }
   }
 
-  // Declare the controller binding first so the broadcast closure
-  // can reference it; assigned below via createMockStateController.
-  // CR-01 fix: every committed transition schedules the next mock
-  // timer so listening -> processing -> speaking -> idle auto-advances
-  // in production (the unit tests drove this explicitly; the real
-  // composition root missed it).
-  let controller: ReturnType<typeof createMockStateController>;
-  controller = createMockStateController({
+  // State machine wiring (Plan 12-04). createSessionStateController
+  // replaces the Plan 11 createMockStateController surface in the
+  // production path. The underlying reducer is unchanged; the
+  // production controller's setTimeout is a no-op so the orchestrator
+  // (session.ts) drives every transition via the production tags
+  // (STT_COMMITTED / CLAUDE_RESULT_READY / TTS_PLAYBACK_DRAINED).
+  //
+  // The mock-amplitude streams are PRESERVED for now: until the
+  // renderer-side audio capture is wired into App.tsx (Plan 12-04 ships
+  // the orchestrator + renderer audio modules; the App composition
+  // root that feeds AnalyserNode into the Waveform lands as part of
+  // the renderer wiring done elsewhere in this plan or Phase 13), the
+  // visible amplitude in the UI still comes from the fixture streams.
+  let controller: MockStateController;
+  controller = createSessionStateController({
     broadcast: (state) => {
       window.webContents.send(IPC_STATE_CHANGED, { state });
       startAmplitudeForState(state);
-      controller.scheduleMockTransitions(state);
     },
     getMode: () => store.readHotkeyMode(),
   });
@@ -153,6 +169,75 @@ async function bootstrap(): Promise<void> {
   // Track latest permission state so the first-hotkey-press flow can
   // decide whether to call systemPreferences.askForMediaAccess.
   let currentPermissionState: PermissionState = "granted";
+
+  // ─── Plan 12-04 session orchestrator construction ────────────────
+  //
+  // Read the ElevenLabs API key via the single read point. On
+  // MissingApiKeyError we proceed in degraded mode: the session is
+  // null, the bridge is constructed without the Phase 12 handlers,
+  // and the renderer's mic + TTS surfaces will surface an STT auth
+  // error path. Phase 13's first-run wizard owns the UX for resolving
+  // the missing key state.
+  let session: AchillesSession | null = null;
+  let apiKey: string | null = null;
+  try {
+    apiKey = readApiKey({ store, env: process.env });
+  } catch (err) {
+    if (err instanceof MissingApiKeyError) {
+      // eslint-disable-next-line no-console
+      console.error(`[achilles] ${err.message}`);
+    } else {
+      throw err;
+    }
+  }
+  if (apiKey !== null) {
+    // The mic-capture handle lives in the renderer (Phase 09 design).
+    // The orchestrator gates the renderer-side mic by toggling state
+    // via the IPC_STATE_CHANGED broadcast: the renderer's mic-capture
+    // module subscribes and applies pauseFrameDelivery on 'speaking'.
+    // The closure here is a no-op pair so the orchestrator's
+    // deterministic behaviour mirrors the renderer mode without
+    // re-implementing the gate.
+    const micCaptureProxy = {
+      pauseFrameDelivery: (): void => {
+        // State-driven: the IPC_STATE_CHANGED broadcast above already
+        // signals 'speaking' so the renderer's mic-capture pauses.
+      },
+      resumeFrameDelivery: (): void => {
+        // Same: the state broadcast back to 'idle' resumes the
+        // renderer's mic-capture.
+      },
+    };
+    const capturedApiKey = apiKey;
+    session = createSession({
+      stateController: controller,
+      claudeFactory: (opts) =>
+        createClaudeSession({
+          systemPromptFile: opts.systemPromptFile,
+          resumeSessionId: opts.resumeSessionId,
+        }),
+      ttsFactory: (opts) =>
+        createTtsStreamClient({
+          keySource: async () => capturedApiKey,
+          voiceId: opts.voiceId,
+        }) as never,
+      mintSttToken: async () => {
+        const minted = await mintSttToken({ apiKey: capturedApiKey });
+        return { token: minted.token, expiresAt: minted.expiresAt };
+      },
+      micCapture: micCaptureProxy,
+      sendIpc: (channel, payload) => {
+        window.webContents.send(channel, payload);
+      },
+      readApiKey: () => capturedApiKey,
+      voiceId: process.env.ELEVENLABS_VOICE_ID ?? DEFAULT_VOICE_ID,
+      systemPromptFile: companionPromptPath,
+      logger: (msg) => {
+        // eslint-disable-next-line no-console
+        console.error(msg);
+      },
+    });
+  }
 
   // Adapter that exposes the underlying BrowserWindow's 'move' /
   // 'moved' events to wireDragPersistence. The createAchillesWindow
@@ -183,6 +268,12 @@ async function bootstrap(): Promise<void> {
     ipcMainRef: ipcMain as never,
     dragWindowAdapter,
     screenRef: screen as never,
+    // Plan 12-04: pass the session orchestrator so the bridge wires
+    // the Phase 12 inbound handlers (utterance-commit, mic-frame,
+    // tts-playback-complete, stt-token-request). When session is null
+    // (MissingApiKeyError graceful-degradation path) the handlers are
+    // NOT registered — the bridge collapses to the Phase 11 surface.
+    ...(session !== null ? { session } : {}),
     resetWindowPosition: (pos) => {
       window.setPosition(pos.x, pos.y);
     },
@@ -244,7 +335,16 @@ async function bootstrap(): Promise<void> {
         bridgeHandle?.broadcastPermissionState(asked);
         if (asked !== "granted") return;
       }
-      controller.dispatch({ type: "HOTKEY_PRESS" });
+      // Plan 12-04 production path: dispatch via session.onHotkeyPress
+      // so the orchestrator owns the per-utterance lifecycle (token
+      // mint + IPC_STT_TOKEN broadcast + state transitions). When the
+      // session is null (degraded mode), fall back to the Phase 11
+      // controller dispatch so the visual state still advances.
+      if (session !== null) {
+        await session.onHotkeyPress();
+      } else {
+        controller.dispatch({ type: "HOTKEY_PRESS" });
+      }
     },
     () => controller.dispatch({ type: "HOTKEY_RELEASE" }),
     {
@@ -286,6 +386,7 @@ async function bootstrap(): Promise<void> {
     unregisterAchillesHotkey({ globalShortcutRef: globalShortcut as never });
     cancelPermissionPoll();
     bridgeHandle?.dispose();
+    session?.dispose();
     if (activeAmplitudeStop !== null) {
       activeAmplitudeStop();
       activeAmplitudeStop = null;

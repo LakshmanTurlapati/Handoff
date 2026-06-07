@@ -220,6 +220,19 @@ export default defineWorkspace([
         "apps/achilles/src/main/normalisation.test.ts",
         "apps/achilles/src/main/session.test.ts",
         "apps/achilles/src/renderer/audio/**/*.test.ts",
+        // Plan 12-04 additions: key-source, mock-loop-clients, and the
+        // Plan 11 modules extended by 12-04 (store + state-machine +
+        // ipc-bridge). The Phase 11 patterns already pick these last
+        // three up — Plan 12-04's explicit listing here keeps the
+        // verification command (which targets the file by path)
+        // unambiguous about which project owns them.
+        "apps/achilles/src/main/key-source.test.ts",
+        "apps/achilles/src/main/mock-loop-clients.test.ts",
+        "apps/achilles/src/main/store.test.ts",
+        "apps/achilles/src/main/state-machine.test.ts",
+        "apps/achilles/src/main/ipc-bridge.test.ts",
+        // Plan 12-04 MOCK_LOOP=1 integration test (skips when env unset).
+        "apps/achilles/test/integration/**/*.test.ts",
       ],
       environment: "node",
       passWithNoTests: true,

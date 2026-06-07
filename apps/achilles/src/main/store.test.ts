@@ -164,3 +164,98 @@ describe("createAchillesStore — initial defaults", () => {
     expect(store.readWindowPosition()).toBeNull();
   });
 });
+
+describe("createAchillesStore — Plan 12-04 ElevenLabs API key surface", () => {
+  it("ST1: readElevenlabsApiKey returns null when the key has never been written", () => {
+    const store = createAchillesStore({
+      storeCtor: InMemoryStore as never,
+    });
+    expect(store.readElevenlabsApiKey()).toBeNull();
+  });
+
+  it("ST2: writeElevenlabsApiKey + readElevenlabsApiKey round-trips via safeStorage encryption", () => {
+    const store = createAchillesStore({
+      storeCtor: InMemoryStore as never,
+      safeStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (s: string) => Buffer.from(s, "utf-8"),
+        decryptString: (buf: Buffer) => buf.toString("utf-8"),
+      },
+    });
+    store.writeElevenlabsApiKey("xi-test-12345-abcdef");
+    expect(store.readElevenlabsApiKey()).toBe("xi-test-12345-abcdef");
+  });
+
+  it("ST2: round-trip also works under the plaintext fallback (safeStorage unavailable)", () => {
+    const store = createAchillesStore({
+      storeCtor: InMemoryStore as never,
+      safeStorage: {
+        isEncryptionAvailable: () => false,
+        encryptString: () => Buffer.from(""),
+        decryptString: () => "",
+      },
+      logger: () => undefined,
+    });
+    store.writeElevenlabsApiKey("xi-plaintext-fallback-key");
+    expect(store.readElevenlabsApiKey()).toBe("xi-plaintext-fallback-key");
+  });
+
+  it("ST3: safeStorage-unavailable warning fires exactly once per process across BOTH api-key + window-position writes", () => {
+    // The shared once-per-process gate from Plan 11-01 is reused. The
+    // first persistence write (regardless of which value) triggers the
+    // warning; subsequent writes (including the api-key write) do not
+    // re-emit it.
+    const logs: string[] = [];
+    const store = createAchillesStore({
+      storeCtor: InMemoryStore as never,
+      safeStorage: {
+        isEncryptionAvailable: () => false,
+        encryptString: () => Buffer.from(""),
+        decryptString: () => "",
+      },
+      logger: (msg) => logs.push(msg),
+    });
+    store.writeElevenlabsApiKey("first-key");
+    store.writeWindowPosition({ x: 1, y: 2 });
+    store.writeElevenlabsApiKey("second-key");
+    const warnings = logs.filter((msg) => msg.includes("SAFE-01"));
+    expect(warnings.length).toBe(1);
+  });
+
+  it("ST4: readElevenlabsApiKey returns null and logs when safeStorage.decryptString throws (corrupted blob)", () => {
+    // Build a store whose safeStorage encrypts fine on write but throws
+    // on read. The persisted value is therefore unreadable; the wrapper
+    // returns null so the orchestrator falls back to env per K2 path.
+    const logs: string[] = [];
+    let decryptCalls = 0;
+    const store = createAchillesStore({
+      storeCtor: InMemoryStore as never,
+      safeStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (s: string) => Buffer.from(s, "utf-8"),
+        decryptString: () => {
+          decryptCalls++;
+          throw new Error("simulated corrupted blob");
+        },
+      },
+      logger: (msg) => logs.push(msg),
+    });
+    store.writeElevenlabsApiKey("some-key");
+    expect(store.readElevenlabsApiKey()).toBeNull();
+    expect(decryptCalls).toBeGreaterThan(0);
+    // The decryption-failure log line is emitted with the [achilles]
+    // prefix and never includes the key bytes themselves.
+    const decryptFail = logs.find((msg) =>
+      msg.includes("elevenlabs key decryption failed"),
+    );
+    expect(decryptFail).toBeDefined();
+    expect(decryptFail).not.toContain("some-key");
+  });
+
+  it("writeElevenlabsApiKey rejects an empty string", () => {
+    const store = createAchillesStore({
+      storeCtor: InMemoryStore as never,
+    });
+    expect(() => store.writeElevenlabsApiKey("")).toThrow();
+  });
+});
