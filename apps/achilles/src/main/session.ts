@@ -654,6 +654,16 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
   // resetTurnLocals() so a stale prior summary cannot bleed into the
   // next turn's incident payload.
   let cachedSummaryText = "";
+  // CR-04 fix: PITFALLS #18 "cache MOST RECENT completion text locally"
+  // invariant. cachedSummaryText is per-turn and gets reset by
+  // resetTurnLocals() at the start of every turn — but if the TTS circuit
+  // opens BEFORE the new turn's summary has been computed (e.g. the ack
+  // path's openTtsClient call fails on circuit-exhausted), the
+  // IPC_INCIDENT_TTS_FAIL payload would carry "" and the user would lose
+  // the last summary they actually completed. lastSuccessfulSummary
+  // survives across turns and is updated only when a NEW summary is
+  // successfully spoken; it acts as the fallback for the empty-cache case.
+  let lastSuccessfulSummary = "";
   // Mirror of the controller's current state — accessed in the hot
   // path of onMicFrame to gate frames without round-tripping through
   // controller.now() every frame. Updated on every dispatch.
@@ -832,9 +842,19 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
             // surfaces the affordance even if the catch below logs the
             // failure and best-effort-closes the handle.
             const kind: ClassifiedErrorKind = outcome.error.kind;
+            // CR-04 fix: prefer the current turn's cached summary, but
+            // fall back to the LAST successfully completed summary when
+            // the current turn cleared it (e.g. circuit opens during the
+            // ack path before the summary is computed). PITFALLS #18:
+            // "cache MOST RECENT completion text locally so the user can
+            // re-read it if TTS dropped".
+            const fallbackSummary =
+              cachedSummaryText.length > 0
+                ? cachedSummaryText
+                : lastSuccessfulSummary;
             deps.sendIpc(IPC_INCIDENT_TTS_FAIL, {
               kind,
-              summaryText: cachedSummaryText,
+              summaryText: fallbackSummary,
               attemptCount: outcome.attemptCount,
             });
             broadcastIncidentStatus();
@@ -1057,6 +1077,13 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
         // index.ts sendIpc tap). PITFALLS #18 "cache most recent
         // completion text locally" invariant.
         cachedSummaryText = norm.normalised;
+        // CR-04 fix: also retain the summary across turns so a subsequent
+        // turn whose TTS circuit opens before its own summary is computed
+        // can still surface the previous completion text. Updated only on
+        // a successfully computed summary; survives resetTurnLocals().
+        if (norm.normalised.length > 0) {
+          lastSuccessfulSummary = norm.normalised;
+        }
         // Plan 14-02 SAFE-02: persist the assistant summary body —
         // the post-normalisation, post-PROMPT-05-override text the
         // user actually hears. We use summaryBody (NOT norm.normalised)

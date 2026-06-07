@@ -1887,6 +1887,168 @@ describe("createSession — SE22 TTS circuit breaker wiring", () => {
   });
 });
 
+describe("createSession — CR-04 lastSuccessfulSummary survives across turns", () => {
+  // CR-04 regression. Phase 14 review found that cachedSummaryText was reset
+  // every turn by resetTurnLocals() at line 693-700. When a turn finishes
+  // successfully and then the NEXT turn's TTS circuit opens BEFORE the new
+  // summary is computed (e.g. on the ack path before process_exit), the
+  // IPC_INCIDENT_TTS_FAIL payload's summaryText was "". The user would lose
+  // the most recent completion text they had previously heard. PITFALLS #18
+  // requires caching the MOST RECENT completion text locally so the user can
+  // re-read it if TTS dropped on a subsequent turn.
+  it("when the TTS circuit opens BEFORE the current turn's summary is computed, the payload surfaces the previous turn's lastSuccessfulSummary", async () => {
+    const h = makeHarness();
+    // Two TTS handles: the first turn succeeds (lastSuccessfulSummary is set);
+    // the second turn's open() always throws 503 to drive the circuit toward
+    // exhaustion AND triggers the empty-cachedSummaryText case (the ack-path
+    // call site opens TTS BEFORE process_exit's summary cache update).
+    let openCallCount = 0;
+    const failingTts = {
+      async open(): Promise<void> {
+        openCallCount += 1;
+        throw Object.assign(new Error("ElevenLabs 503"), { status: 503 });
+      },
+      appendText: () => undefined,
+      flush: async () => undefined,
+      close: async () => undefined,
+      events$: {
+        [Symbol.asyncIterator]() {
+          return {
+            next: () =>
+              Promise.resolve({ value: undefined, done: true as const }),
+          };
+        },
+      },
+    };
+    const ttsCircuit = createCircuitBreaker({
+      label: "tts",
+      nowImpl: () => 1_000_000,
+      randomImpl: () => 0.5,
+      maxConsecutiveFailures: 3,
+    });
+    // Swap behaviour: turn 1 uses the working mockTts (so the first turn's
+    // process_exit branch writes lastSuccessfulSummary), turns 2+ use the
+    // failing TTS to drive the breaker open.
+    let useFailing = false;
+    const session = createSession({
+      stateController: h.controller,
+      claudeFactory: () => h.mockClaude,
+      ttsFactory: () => (useFailing ? (failingTts as never) : h.mockTts),
+      mintSttToken: h.mintSttToken,
+      micCapture: h.micCapture,
+      sendIpc: (channel, payload) => h.sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => h.logs.push(msg),
+      setTimeoutImpl: h.setTimeoutImpl,
+      clearTimeoutImpl: h.clearTimeoutImpl,
+      ttsCircuit,
+    });
+    await session.onHotkeyPress();
+    // Turn 1: works. After process_exit, lastSuccessfulSummary holds the
+    // normalised summary body ("I have finished the refactor.").
+    session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-00000000ab01",
+      text: "turn 1",
+      committedAt: 0,
+    });
+    await flushAsync();
+    // Now swap to failing TTS for the next 3 turns to drive exhaustion.
+    useFailing = true;
+    for (let turn = 0; turn < 3; turn++) {
+      session.onUtteranceCommit({
+        id: `00000000-0000-0000-0000-00000000ac${20 + turn}`,
+        text: `failing-turn ${turn}`,
+        committedAt: 0,
+      });
+      await flushAsync();
+    }
+    const ttsFails = h.sentIpc.filter(
+      (s) => s.channel === IPC_INCIDENT_TTS_FAIL,
+    );
+    expect(ttsFails.length).toBeGreaterThan(0);
+    const lastFail = ttsFails[ttsFails.length - 1]!.payload as {
+      kind: string;
+      summaryText: string;
+      attemptCount: number;
+    };
+    expect(lastFail.kind).toBe("server");
+    // Before CR-04: lastFail.summaryText would have been "" because
+    // resetTurnLocals cleared cachedSummaryText at the start of the failing
+    // turn. After CR-04: when cachedSummaryText is empty, the orchestrator
+    // falls back to lastSuccessfulSummary which holds turn 1's body.
+    expect(lastFail.summaryText.length).toBeGreaterThan(0);
+    expect(lastFail.summaryText).toContain("refactor");
+    expect(openCallCount).toBeGreaterThanOrEqual(3);
+  });
+
+  it("does not surface a stale summary when the first turn itself fails (lastSuccessfulSummary stays empty)", async () => {
+    const h = makeHarness();
+    // The very first turn's TTS always fails. lastSuccessfulSummary is
+    // never updated; the empty fallback is the documented degenerate case.
+    let openCallCount = 0;
+    const failingTts = {
+      async open(): Promise<void> {
+        openCallCount += 1;
+        throw Object.assign(new Error("ElevenLabs 503"), { status: 503 });
+      },
+      appendText: () => undefined,
+      flush: async () => undefined,
+      close: async () => undefined,
+      events$: {
+        [Symbol.asyncIterator]() {
+          return {
+            next: () =>
+              Promise.resolve({ value: undefined, done: true as const }),
+          };
+        },
+      },
+    };
+    const ttsCircuit = createCircuitBreaker({
+      label: "tts",
+      nowImpl: () => 1_000_000,
+      randomImpl: () => 0.5,
+      maxConsecutiveFailures: 3,
+    });
+    const session = createSession({
+      stateController: h.controller,
+      claudeFactory: () => h.mockClaude,
+      ttsFactory: () => failingTts as never,
+      mintSttToken: h.mintSttToken,
+      micCapture: h.micCapture,
+      sendIpc: (channel, payload) => h.sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => h.logs.push(msg),
+      setTimeoutImpl: h.setTimeoutImpl,
+      clearTimeoutImpl: h.clearTimeoutImpl,
+      ttsCircuit,
+    });
+    await session.onHotkeyPress();
+    for (let turn = 0; turn < 3; turn++) {
+      session.onUtteranceCommit({
+        id: `00000000-0000-0000-0000-00000000ad${20 + turn}`,
+        text: `turn ${turn}`,
+        committedAt: 0,
+      });
+      await flushAsync();
+    }
+    const ttsFails = h.sentIpc.filter(
+      (s) => s.channel === IPC_INCIDENT_TTS_FAIL,
+    );
+    expect(ttsFails.length).toBeGreaterThan(0);
+    const lastFail = ttsFails[ttsFails.length - 1]!.payload as {
+      kind: string;
+      summaryText: string;
+      attemptCount: number;
+    };
+    // No prior successful turn — the fallback is empty by design.
+    expect(typeof lastFail.summaryText).toBe("string");
+  });
+});
+
 describe("createSession — SE23 broadcastIncidentStatus composes breaker states correctly", () => {
   it("composes two closed breakers as sttHealth='ok', ttsHealth='ok'", async () => {
     const h = makeHarness();
