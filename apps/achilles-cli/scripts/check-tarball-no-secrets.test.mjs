@@ -190,7 +190,10 @@ test("TNS5: defensive scan covers all seven concrete patterns", async () => {
     "elevenlabs-xi-api-key",
     "elevenlabs-xi_api_key-assignment",
     "elevenlabs-env-assignment",
-    "anthropic-sk-",
+    // CR-03 fix: renamed from 'anthropic-sk-' (which produced false
+    // positives on bare `sk-` prefixes) to 'anthropic-sk-ant' (anchored
+    // on the real Anthropic key prefix).
+    "anthropic-sk-ant",
     "github-pat",
     "github-fine-grained-pat",
   ]) {
@@ -210,8 +213,10 @@ test("TNS5: defensive scan covers all seven concrete patterns", async () => {
       "xi_api_key=0123456789abcdef",
     "elevenlabs-env-assignment":
       'ELEVENLABS_API_KEY="abcdefghijklmnop12345"',
-    "anthropic-sk-":
-      "sk-abcdefghijklmnopqrstuvwxyz123456789ABCDEF",
+    // CR-03 fix: the sample now uses the real Anthropic key shape
+    // (sk-ant-... ≥37 chars total, well over the {30,} body requirement).
+    "anthropic-sk-ant":
+      "sk-ant-api03-abcdefghijklmnopqrstuvwxyz123456789ABCDEF",
     "github-pat":
       "ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD",
     "github-fine-grained-pat":
@@ -277,6 +282,88 @@ test("TNS6: live skill files (SKILL.md + companion.md) pass the scanner — self
     exits,
     [0],
     `live skill files unexpectedly flagged; stderr=${ebuf.text()}`,
+  );
+});
+
+test("TNS8: CR-03 — anthropic-sk-ant pattern rejects bare sk- kebab-case strings and accepts the real sk-ant- prefix", async () => {
+  // Locate the anthropic regex by pattern name.
+  const anthropic = KEY_PATTERNS.find((p) => p.name === "anthropic-sk-ant");
+  assert.ok(
+    anthropic !== undefined,
+    `expected KEY_PATTERNS to include 'anthropic-sk-ant'; got names: ${KEY_PATTERNS.map((p) => p.name).join(",")}`,
+  );
+
+  // Negative samples — bare kebab-case strings that begin with `sk-`
+  // but are NOT Anthropic keys. The previous bare-`sk-` pattern would
+  // have flagged each of these as a SECRET LEAK DETECTED, blocking
+  // legitimate publishes with a false positive.
+  const negativeSamples = [
+    "sk-foo-bar-baz",
+    "sk-overlay-component-positioning-fixed",
+    "sk-ipped-because-this-is-just-a-test",
+    "sk-button-primary-disabled-hover",
+    // 'sk-' followed by a long kebab-case run that would have matched
+    // the old {29,} body length is also rejected by the new pattern.
+    "sk-some-very-long-class-name-here-1234567890",
+  ];
+  for (const sample of negativeSamples) {
+    anthropic.regex.lastIndex = 0;
+    const matched = sample.match(anthropic.regex);
+    assert.equal(
+      matched,
+      null,
+      `expected '${sample}' NOT to match anthropic-sk-ant pattern, but got: ${matched?.join(",") ?? "null"}`,
+    );
+  }
+
+  // Positive samples — real Anthropic key shapes (`sk-ant-...`) MUST
+  // match. The body length is anchored at {30,} so the test values are
+  // each 30+ chars after the `sk-ant-` prefix.
+  const positiveSamples = [
+    "sk-ant-1234567890abcdefghij1234567890ab",
+    "sk-ant-api03-abcdefghijklmnopqrstuvwxyz123456789ABCDEF",
+  ];
+  for (const sample of positiveSamples) {
+    anthropic.regex.lastIndex = 0;
+    const matched = sample.match(anthropic.regex);
+    assert.ok(
+      Array.isArray(matched) && matched.length > 0,
+      `expected '${sample}' to match anthropic-sk-ant pattern, but got null`,
+    );
+  }
+
+  // Defence-in-depth: also exercise the full scanner with a
+  // mixed-content file containing both a false positive and a real
+  // key. The runner must flag the real key and ignore the kebab-case
+  // identifier.
+  const buf = buildBuffer();
+  const ebuf = buildBuffer();
+  const exits = [];
+  const scanner = buildScannerSeam({
+    "package/styles.css":
+      ".sk-overlay-component-positioning-fixed { display: none; }\n",
+    "package/dist/leak.js":
+      'const k = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567";\n',
+  });
+  await runTarballSecretScan({
+    scanner,
+    stdout: buf,
+    stderr: ebuf,
+    processExitImpl: (code) => exits.push(code),
+  });
+  assert.deepEqual(exits, [1]);
+  const err = ebuf.text();
+  assert.ok(
+    err.includes("anthropic-sk-ant"),
+    `expected 'anthropic-sk-ant' pattern-name in stderr, got: ${err}`,
+  );
+  assert.ok(
+    err.includes("package/dist/leak.js"),
+    `expected the leak file path in stderr, got: ${err}`,
+  );
+  assert.ok(
+    !err.includes("package/styles.css"),
+    `expected the kebab-case CSS file to NOT trigger a false positive, got: ${err}`,
   );
 });
 

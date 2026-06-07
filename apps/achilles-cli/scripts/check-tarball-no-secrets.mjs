@@ -12,9 +12,17 @@
  *   - elevenlabs-xi-api-key           `xi-api-key:\s*[A-Za-z0-9_-]+`
  *   - elevenlabs-xi_api_key-assignment `xi_api_key\s*=\s*[A-Za-z0-9_-]+`
  *   - elevenlabs-env-assignment       `ELEVENLABS_API_KEY\s*=\s*["']?[A-Za-z0-9_-]{16,}["']?`
- *   - anthropic-sk-                   `sk-[A-Za-z0-9_-]{29,}`
+ *   - anthropic-sk-ant                 `sk-ant-[A-Za-z0-9_-]{30,}` (CR-03 — see note below)
  *   - github-pat                      `ghp_[A-Za-z0-9_-]{36,}`
  *   - github-fine-grained-pat         `github_pat_[A-Za-z0-9_]+`
+ *
+ * CR-03 note: the anthropic-sk pattern is anchored on the literal
+ * `sk-ant-` prefix (the real Anthropic key shape `sk-ant-api03-...`)
+ * rather than the bare `sk-` prefix. The previous `/sk-[A-Za-z0-9_-]{29,}/`
+ * pattern produced false positives on any kebab-case identifier starting
+ * with `sk-` and running for 29+ chars (CSS class names, component
+ * identifiers, design-system tokens), which would have blocked
+ * legitimate publishes with a misleading SECRET LEAK DETECTED message.
  *
  * Allowlist policy: the bare env-var NAME `ELEVENLABS_API_KEY` is allowed
  * in README documentation (the README mentions it as the var to set in
@@ -67,8 +75,14 @@ export const KEY_PATTERNS = Object.freeze([
     regex: /ELEVENLABS_API_KEY\s*=\s*["']?[A-Za-z0-9_-]{16,}["']?/g,
   },
   {
-    name: "anthropic-sk-",
-    regex: /sk-[A-Za-z0-9_-]{29,}/g,
+    // CR-03 fix: tightened from `/sk-[A-Za-z0-9_-]{29,}/` to the actual
+    // Anthropic key prefix `sk-ant-`. The previous bare-`sk-` pattern
+    // matched any kebab-case identifier of 32+ chars (e.g. CSS class
+    // names like `sk-overlay-component-positioning-fixed`), producing
+    // false positives that blocked legitimate publishes with a
+    // misleading SECRET LEAK DETECTED diagnostic.
+    name: "anthropic-sk-ant",
+    regex: /sk-ant-[A-Za-z0-9_-]{30,}/g,
   },
   {
     name: "github-pat",
