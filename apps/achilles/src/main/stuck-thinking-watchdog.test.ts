@@ -363,6 +363,68 @@ describe("createStuckThinkingWatchdog — SW6 dispose cancels + zeroes onTimeout
   });
 });
 
+describe("createStuckThinkingWatchdog — CR-01 bootstrap will-quit dispose contract", () => {
+  it("dispose() invoked from the bootstrap will-quit sequence drops a leftover sessionRef closure AND clears the in-flight timer token", () => {
+    // CR-01 regression. Phase 14 review found that index.ts constructed the
+    // watchdog inside `if (apiKey !== null) { ... }` and the will-quit handler
+    // never called stuckThinkingWatchdog.dispose(). The captured `sessionRef`
+    // closure (the disposed AchillesSession) stayed reachable through
+    // onTimeoutRef AND the in-flight setTimeout token survived host teardown.
+    //
+    // This test simulates the bootstrap shape: an outer-scope sessionRef + a
+    // watchdog whose onTimeout closure captures it. We assert that after
+    // dispose() (the will-quit call) the captured ref is dropped (onTimeout is
+    // not invoked even if the host scheduler fires the captured cb) AND no
+    // timer token is left pending.
+    let sessionRef: { announceStuckThinking: ReturnType<typeof vi.fn> } | null = {
+      announceStuckThinking: vi.fn(),
+    };
+    let capturedCb: (() => void) | null = null;
+    const watchdog = createStuckThinkingWatchdog({
+      onTimeout: ({ waitedMs }): void => {
+        sessionRef?.announceStuckThinking({ waitedMs });
+      },
+      timeoutMs: 60_000,
+      setTimeoutImpl: (cb: () => void) => {
+        capturedCb = cb;
+        return 1;
+      },
+      clearTimeoutImpl: () => undefined,
+    });
+    // Bootstrap-shaped lifecycle: arm at start of a turn, then simulate
+    // a will-quit before the timer fires.
+    watchdog.armForTurn();
+    expect(capturedCb).not.toBeNull();
+
+    // Drop the bootstrap-scoped sessionRef (simulates session.dispose()).
+    const announceSpy = sessionRef.announceStuckThinking;
+    sessionRef = null;
+
+    // Now the will-quit handler calls watchdog.dispose() — without the CR-01
+    // fix, the captured cb still resolves the (now-stale) onTimeoutRef and
+    // would invoke session.announceStuckThinking on a disposed session.
+    watchdog.dispose();
+    capturedCb!();
+    // No announcement was made on the (already-cleared) session ref:
+    // dispose() zeroed onTimeoutRef so the captured cb is a no-op.
+    expect(announceSpy).not.toHaveBeenCalled();
+  });
+
+  it("dispose() is safe to call when no timer was armed (bootstrap exits before any utterance)", () => {
+    const t = makeFakeTimers();
+    const onTimeout = vi.fn();
+    const watchdog = createStuckThinkingWatchdog({
+      onTimeout,
+      setTimeoutImpl: t.setTimeoutImpl,
+      clearTimeoutImpl: t.clearTimeoutImpl,
+    });
+    // No armForTurn — the bootstrap quit before any utterance.
+    expect(() => watchdog.dispose()).not.toThrow();
+    expect(t.pending.size).toBe(0);
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
+});
+
 describe("createStuckThinkingWatchdog — SW7 idempotency", () => {
   it("dispose() twice does not throw and stays in the disposed state", () => {
     const t = makeFakeTimers();

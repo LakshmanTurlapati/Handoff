@@ -379,6 +379,14 @@ async function bootstrap(): Promise<void> {
   // the missing key state.
   let session: AchillesSession | null = null;
   let apiKey: string | null = null;
+  // CR-01 fix: hoist stuckThinkingWatchdog to the outer bootstrap scope so the
+  // will-quit handler can reach it. Previously the watchdog was declared inside
+  // the `if (apiKey !== null)` branch and was never disposed at app teardown,
+  // leaking the captured sessionRef closure and any in-flight setTimeout token
+  // (Phase 11 WR-04 invariant).
+  let stuckThinkingWatchdogRef: ReturnType<
+    typeof createStuckThinkingWatchdog
+  > | null = null;
   try {
     apiKey = readApiKey({ store, env: process.env });
   } catch (err) {
@@ -605,6 +613,10 @@ async function bootstrap(): Promise<void> {
         console.error(msg);
       },
     });
+    // CR-01 fix: hold the watchdog handle in the outer-scope ref so the
+    // will-quit handler can dispose it. Without this hoist the watchdog stayed
+    // alive after the orchestrator disposed (sessionRef + onTimeoutRef leaked).
+    stuckThinkingWatchdogRef = stuckThinkingWatchdog;
     session = createSession({
       stateController: controller,
       claudeFactory: (opts) =>
@@ -834,6 +846,12 @@ async function bootstrap(): Promise<void> {
     // global Electron event bus does not hold a reference to the
     // session that just disposed. Idempotent.
     suspendResumeHandle.dispose();
+    // CR-01 fix: dispose the stuck-thinking watchdog so any in-flight
+    // setTimeout token is cleared and the captured sessionRef closure is
+    // dropped. Without this, the orchestrator's disposed AchillesSession
+    // is reachable through the watchdog's onTimeoutRef and the timer
+    // token survives until the host eventually clears it.
+    stuckThinkingWatchdogRef?.dispose();
     if (activeAmplitudeStop !== null) {
       activeAmplitudeStop();
       activeAmplitudeStop = null;
