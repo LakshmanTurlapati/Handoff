@@ -206,6 +206,15 @@ export interface LatencyProbeDeps {
    */
   readonly writeFileImpl?: LatencyWriteFileImpl;
   /**
+   * WR-07 fix: rename-file seam paired with writeFileImpl for the
+   * atomic temp+rename write pattern. Production binds to
+   * `node:fs.renameSync`; tests inject a spy. When omitted, the probe
+   * falls back to the non-atomic direct-write pattern (matches the
+   * pre-WR-07 behaviour for callers that have not opted into the
+   * atomic seam).
+   */
+  readonly renameFileImpl?: (from: string, to: string) => void;
+  /**
    * Rolling-window capacity. Defaults to 20 (CONTEXT.md decision).
    * The window is a fixed-capacity FIFO; samples beyond the capacity
    * evict the oldest sample.
@@ -350,6 +359,10 @@ export function createLatencyProbe(deps: LatencyProbeDeps = {}): LatencyProbe {
   const writeSampleFile = deps.writeSampleFile ?? false;
   const sampleFilePath = deps.sampleFilePath;
   let writeFileImpl = deps.writeFileImpl;
+  // WR-07 fix: rename-file seam used by the atomic temp+rename write
+  // pattern. Held in a mutable cell so dispose() can drop the reference
+  // alongside writeFileImpl (preserving GC-friendliness).
+  let renameFileImpl = deps.renameFileImpl;
   const maxWindow = Math.max(1, deps.maxWindow ?? 20);
 
   /**
@@ -449,7 +462,24 @@ export function createLatencyProbe(deps: LatencyProbeDeps = {}): LatencyProbe {
       updatedAt: new Date().toISOString(),
     };
     try {
-      writeFileImpl(sampleFilePath, JSON.stringify(payload));
+      // WR-07 fix: when the renameFileImpl seam is supplied, use the
+      // atomic temp-file + rename pattern so a concurrent
+      // `achilles latency --report` reader never sees a torn write.
+      // Node's writeFileSync is NOT atomic on Windows (and not strictly
+      // guaranteed atomic on macOS APFS for large payloads); the
+      // truncate-then-write pattern leaves a window where the reader
+      // sees zero bytes. The rename pattern (write to .tmp, then rename
+      // over the live file) closes that window on every reasonable
+      // POSIX-like filesystem. When the rename seam is absent (callers
+      // that have not opted in), fall back to the direct write path
+      // for backwards compatibility with the pre-WR-07 behaviour.
+      if (renameFileImpl !== undefined) {
+        const tmpPath = `${sampleFilePath}.tmp`;
+        writeFileImpl(tmpPath, JSON.stringify(payload));
+        renameFileImpl(tmpPath, sampleFilePath);
+      } else {
+        writeFileImpl(sampleFilePath, JSON.stringify(payload));
+      }
     } catch (err) {
       // Best-effort. A write failure must NOT crash the orchestrator;
       // the rolling window in memory is still authoritative for the
@@ -530,9 +560,11 @@ export function createLatencyProbe(deps: LatencyProbeDeps = {}): LatencyProbe {
     disposed = true;
     window = [];
     inFlight = null;
-    // Drop the writeFileImpl reference so the GC can collect any
-    // closure the production wiring captured.
+    // Drop the writeFileImpl + renameFileImpl references so the GC
+    // can collect any closure the production wiring captured. WR-07
+    // adds the renameFileImpl drop.
     writeFileImpl = undefined;
+    renameFileImpl = undefined;
   }
 
   return {

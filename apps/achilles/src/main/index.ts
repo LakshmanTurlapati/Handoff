@@ -415,7 +415,7 @@ async function bootstrap(): Promise<void> {
   // permission error masking a missing-dir condition.
   let latencyProbe: LatencyProbe | undefined;
   if (process.env.ACHILLES_DEBUG === "1") {
-    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const { mkdirSync, renameSync, writeFileSync } = await import("node:fs");
     const { homedir } = await import("node:os");
     const { join: pathJoin } = await import("node:path");
     const sampleFilePath = pathJoin(
@@ -436,6 +436,14 @@ async function bootstrap(): Promise<void> {
       sampleFilePath,
       writeFileImpl: (path, contents) => {
         writeFileSync(path, contents);
+      },
+      // WR-07 fix: bind the renameFileImpl seam to fs.renameSync so
+      // the rolling-window write uses the atomic temp+rename pattern.
+      // Without this seam a concurrent `achilles latency --report`
+      // could read a torn write on Windows (and not strictly atomic
+      // on macOS APFS for large payloads).
+      renameFileImpl: (from, to) => {
+        renameSync(from, to);
       },
       // The default logger writes to console.log — we keep that for
       // production so the operator sees `[achilles-latency]` lines on

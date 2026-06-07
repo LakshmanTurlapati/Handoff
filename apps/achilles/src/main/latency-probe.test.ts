@@ -472,6 +472,93 @@ describe("createLatencyProbe — LP7 writeSampleFile JSON export", () => {
     );
     expect(writeErrorLines.length).toBe(1);
   });
+
+  // WR-07 regression. Without the atomic temp+rename pattern, a concurrent
+  // `achilles latency --report` reader could read a torn write on Windows
+  // (and not strictly atomic on macOS APFS for larger payloads). The
+  // renameFileImpl seam was added so the production wiring uses
+  // fs.writeFileSync(tmp) + fs.renameSync(tmp, final).
+
+  it("WR-07: when renameFileImpl is supplied, writes go to .tmp and are renamed to the final path", () => {
+    const writes: Array<{ path: string; contents: string }> = [];
+    const renames: Array<{ from: string; to: string }> = [];
+    const probe = createLatencyProbe({
+      nowImpl: () => 0,
+      writeSampleFile: true,
+      sampleFilePath: "/tmp/test/latency-samples.json",
+      writeFileImpl: (path, contents) => {
+        writes.push({ path, contents });
+      },
+      renameFileImpl: (from, to) => {
+        renames.push({ from, to });
+      },
+    });
+    recordHappyPath(probe, 0, "u1", {
+      stt: 50,
+      claudeDelta: 100,
+      claudeDone: 200,
+      ttsFirst: 250,
+      playbackStart: 300,
+      playbackComplete: 1100,
+    });
+    expect(writes.length).toBe(1);
+    expect(writes[0]!.path).toBe("/tmp/test/latency-samples.json.tmp");
+    expect(renames.length).toBe(1);
+    expect(renames[0]!.from).toBe("/tmp/test/latency-samples.json.tmp");
+    expect(renames[0]!.to).toBe("/tmp/test/latency-samples.json");
+  });
+
+  it("WR-07: without renameFileImpl, falls back to the direct-write pattern (back-compat)", () => {
+    const writes: Array<{ path: string; contents: string }> = [];
+    const probe = createLatencyProbe({
+      nowImpl: () => 0,
+      writeSampleFile: true,
+      sampleFilePath: "/tmp/test/latency-samples.json",
+      writeFileImpl: (path, contents) => {
+        writes.push({ path, contents });
+      },
+      // No renameFileImpl: callers that have not opted in continue to
+      // see the pre-WR-07 direct-write behaviour.
+    });
+    recordHappyPath(probe, 0, "u1", {
+      stt: 50,
+      claudeDelta: 100,
+      claudeDone: 200,
+      ttsFirst: 250,
+      playbackStart: 300,
+      playbackComplete: 1100,
+    });
+    expect(writes.length).toBe(1);
+    expect(writes[0]!.path).toBe("/tmp/test/latency-samples.json");
+  });
+
+  it("WR-07: rename failure is logged and does not crash the probe", () => {
+    const logs: string[] = [];
+    const probe = createLatencyProbe({
+      nowImpl: () => 0,
+      writeSampleFile: true,
+      sampleFilePath: "/tmp/test/latency-samples.json",
+      writeFileImpl: () => undefined,
+      renameFileImpl: () => {
+        throw new Error("EBUSY: simulated rename failure");
+      },
+      logger: (msg) => logs.push(msg),
+    });
+    expect(() => {
+      recordHappyPath(probe, 0, "u1", {
+        stt: 50,
+        claudeDelta: 100,
+        claudeDone: 200,
+        ttsFirst: 250,
+        playbackStart: 300,
+        playbackComplete: 1100,
+      });
+    }).not.toThrow();
+    const writeErrorLines = logs.filter((l) =>
+      l.includes("sample write failed"),
+    );
+    expect(writeErrorLines.length).toBe(1);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────
