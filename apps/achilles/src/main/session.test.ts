@@ -37,7 +37,13 @@ import {
   SPEAKING_DEBOUNCE_MS,
   type AchillesSession,
   type AchillesSessionDeps,
+  type ClaudeBridgeLike,
 } from "./session.js";
+import type {
+  ClaudeBridgeEvent,
+  ClaudeOutcome,
+  ProcessExitEvent,
+} from "@achilles/claude-code-bridge";
 
 function makeStateController(): MockStateController {
   return createMockStateController({
@@ -647,5 +653,296 @@ describe("createSession — SE14 dispose() idempotency", () => {
 describe("createSession — locked constants", () => {
   it("SPEAKING_DEBOUNCE_MS is exactly 300", () => {
     expect(SPEAKING_DEBOUNCE_MS).toBe(300);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Defective-bridge helper for CR-01 / CR-04 — emits a synthetic event
+// stream that does NOT contain a parseable ack (no sentence terminator
+// in any assistant_text_delta).
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Builds a mock claude bridge that exposes a fully controllable event
+ * stream. The caller pushes events; the orchestrator consumes them via
+ * `events$`. Unlike createMockClaude, this fixture does NOT auto-emit
+ * deltas — the test scripts the exact sequence.
+ *
+ * Used by CR-01 / CR-04 tests to drive the null-ack code paths that
+ * the production mock does not naturally exercise.
+ */
+function makeScriptedClaudeBridge(opts: {
+  outcome: ClaudeOutcome | null;
+  sessionId?: string;
+  lastTurnText?: string;
+}): {
+  bridge: ClaudeBridgeLike;
+  push: (ev: ClaudeBridgeEvent) => void;
+  endStream: () => void;
+  capturedSends: string[];
+} {
+  const queue: ClaudeBridgeEvent[] = [];
+  const waiters: Array<(r: IteratorResult<ClaudeBridgeEvent>) => void> = [];
+  let streamEnded = false;
+  const captured: string[] = [];
+
+  function push(ev: ClaudeBridgeEvent): void {
+    if (waiters.length > 0) {
+      const next = waiters.shift();
+      if (next !== undefined) {
+        next({ value: ev, done: false });
+        return;
+      }
+    }
+    queue.push(ev);
+  }
+
+  function endStream(): void {
+    if (streamEnded) return;
+    streamEnded = true;
+    while (waiters.length > 0) {
+      const next = waiters.shift();
+      if (next !== undefined) {
+        next({ value: undefined, done: true });
+      }
+    }
+  }
+
+  const events$: AsyncIterable<ClaudeBridgeEvent> = {
+    [Symbol.asyncIterator](): AsyncIterator<ClaudeBridgeEvent> {
+      return {
+        next(): Promise<IteratorResult<ClaudeBridgeEvent>> {
+          if (queue.length > 0) {
+            const value = queue.shift() as ClaudeBridgeEvent;
+            return Promise.resolve({ value, done: false });
+          }
+          if (streamEnded) {
+            return Promise.resolve({ value: undefined, done: true });
+          }
+          return new Promise((resolve) => {
+            waiters.push(resolve);
+          });
+        },
+        return(): Promise<IteratorResult<ClaudeBridgeEvent>> {
+          return Promise.resolve({ value: undefined, done: true });
+        },
+      };
+    },
+  };
+
+  const bridge: ClaudeBridgeLike = {
+    get sessionId(): string | null {
+      return opts.sessionId ?? null;
+    },
+    get lastTurnText(): string {
+      return opts.lastTurnText ?? "";
+    },
+    get outcome(): ClaudeOutcome | null {
+      return opts.outcome;
+    },
+    events$,
+    send(text: string): void {
+      captured.push(text);
+    },
+    cancel(): Promise<ProcessExitEvent> {
+      const exitEvent: ProcessExitEvent = {
+        type: "process_exit",
+        exit_code: null,
+        signal: "SIGINT",
+      };
+      if (!streamEnded) {
+        push(exitEvent);
+        endStream();
+      }
+      return Promise.resolve(exitEvent);
+    },
+    close(): Promise<void> {
+      endStream();
+      return Promise.resolve();
+    },
+  };
+
+  return { bridge, push, endStream, capturedSends: captured };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// CR-01: null-ack + process_exit success — speaking transition must
+// still fire so the success summary can play through TTS into a gated
+// mic. Without the fix, state stays pinned in `processing`, the mic
+// gate never engages, and PITFALLS #2 echo loop is wide open.
+// ─────────────────────────────────────────────────────────────────────
+
+describe("createSession — CR-01 null-ack + process_exit success path", () => {
+  it("synthesises processing → speaking and pauses mic even when no delta carried a sentence terminator", async () => {
+    const controller = makeStateController();
+    const sentIpc: Array<{ channel: string; payload: unknown }> = [];
+    const logs: string[] = [];
+    const micCapture = makeMicCapture();
+    const mockTts = createMockTts({ chunksPerSegment: 2 });
+    const mintSttToken = vi.fn(async () => ({
+      token: "test-token-cr01a",
+      expiresAt: "2026-12-31T23:59:59.000Z",
+    }));
+
+    // Outcome is success (kind=success), but no delta ever emitted a
+    // sentence terminator — extractAck will return null on every delta.
+    const scripted = makeScriptedClaudeBridge({
+      outcome: { kind: "success" },
+      sessionId: "cr01-sid-a",
+      lastTurnText: "ok",
+    });
+
+    let nextToken = 1;
+    const timers = new Map<number, () => void>();
+    const setTimeoutImpl = (cb: () => void, _ms: number): unknown => {
+      const t = nextToken++;
+      timers.set(t, cb);
+      return t;
+    };
+    const clearTimeoutImpl = (token: unknown): void => {
+      timers.delete(token as number);
+    };
+
+    const deps: AchillesSessionDeps = {
+      stateController: controller,
+      claudeFactory: () => scripted.bridge,
+      ttsFactory: () => mockTts,
+      mintSttToken,
+      micCapture,
+      sendIpc: (channel, payload) => sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => logs.push(msg),
+      setTimeoutImpl,
+      clearTimeoutImpl,
+    };
+    const session = createSession(deps);
+
+    await session.onHotkeyPress();
+    expect(controller.now()).toBe("listening");
+
+    session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-0000000000c1",
+      text: "do the work",
+      committedAt: 0,
+    });
+    expect(controller.now()).toBe("processing");
+
+    // Script the defective stream: session_init, ONE delta with no
+    // terminator, then process_exit. No '.' '?' '!' anywhere.
+    scripted.push({
+      type: "session_init",
+      session_id: "cr01-sid-a",
+      model: "mock-claude-code",
+      claude_code_version: "9.9.9",
+    });
+    scripted.push({ type: "assistant_text_delta", text: "ok" });
+    scripted.push({
+      type: "process_exit",
+      exit_code: 0,
+      signal: null,
+    });
+    scripted.endStream();
+
+    await flushAsync();
+
+    // CR-01 invariant: state must have advanced to speaking even
+    // though extractAck returned null on every delta.
+    expect(controller.now()).toBe("speaking");
+    // The mic was gated as part of the speaking transition.
+    expect(micCapture.pauseFrameDelivery).toHaveBeenCalled();
+
+    // Onward: simulating playback complete + the debounce timer fires
+    // must drive speaking → idle and resume the mic.
+    session.onTtsPlaybackComplete();
+    // Fire the scheduled debounce timer.
+    const entries = [...timers.entries()];
+    if (entries.length > 0) {
+      const [token, cb] = entries[0]!;
+      timers.delete(token);
+      cb();
+    }
+    expect(controller.now()).toBe("idle");
+    expect(micCapture.resumeFrameDelivery).toHaveBeenCalled();
+  });
+
+  it("synthesises processing → speaking and plays the failure-override when outcome is failure on null-ack path", async () => {
+    const controller = makeStateController();
+    const sentIpc: Array<{ channel: string; payload: unknown }> = [];
+    const logs: string[] = [];
+    const micCapture = makeMicCapture();
+    const mockTts = createMockTts({ chunksPerSegment: 2 });
+    const mintSttToken = vi.fn(async () => ({
+      token: "test-token-cr01b",
+      expiresAt: "2026-12-31T23:59:59.000Z",
+    }));
+
+    const scripted = makeScriptedClaudeBridge({
+      outcome: { kind: "failure", reason: "exit_code", exitCode: 1 },
+      sessionId: "cr01-sid-b",
+      lastTurnText: "",
+    });
+
+    let nextToken = 1;
+    const timers = new Map<number, () => void>();
+    const setTimeoutImpl = (cb: () => void, _ms: number): unknown => {
+      const t = nextToken++;
+      timers.set(t, cb);
+      return t;
+    };
+    const clearTimeoutImpl = (token: unknown): void => {
+      timers.delete(token as number);
+    };
+
+    const deps: AchillesSessionDeps = {
+      stateController: controller,
+      claudeFactory: () => scripted.bridge,
+      ttsFactory: () => mockTts,
+      mintSttToken,
+      micCapture,
+      sendIpc: (channel, payload) => sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => logs.push(msg),
+      setTimeoutImpl,
+      clearTimeoutImpl,
+    };
+    const session = createSession(deps);
+
+    await session.onHotkeyPress();
+    session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-0000000000c2",
+      text: "fix the bug",
+      committedAt: 0,
+    });
+
+    // Script: session_init then immediate process_exit with no deltas
+    // at all. extractAck has nothing to extract.
+    scripted.push({
+      type: "session_init",
+      session_id: "cr01-sid-b",
+      model: "mock-claude-code",
+      claude_code_version: "9.9.9",
+    });
+    scripted.push({
+      type: "process_exit",
+      exit_code: 1,
+      signal: null,
+    });
+    scripted.endStream();
+
+    await flushAsync();
+
+    // State must have advanced to speaking.
+    expect(controller.now()).toBe("speaking");
+    // The mic was gated.
+    expect(micCapture.pauseFrameDelivery).toHaveBeenCalled();
+    // The PROMPT-05 override phrase must have been routed to TTS.
+    const overrideAppends = mockTts.appendedTexts.filter((t) =>
+      t.startsWith("I ran into a problem"),
+    );
+    expect(overrideAppends.length).toBeGreaterThan(0);
   });
 });

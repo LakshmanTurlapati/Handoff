@@ -406,6 +406,13 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
   // current utterance. The ack is the FIRST thing routed to TTS;
   // subsequent extractAck() calls are no-ops for the rest of the turn.
   let ackEmitted = false;
+  // CR-01 guard: whether the orchestrator has already transitioned
+  // processing → speaking for the current turn. process_exit must
+  // synthesise the transition when the ack path never fired (e.g. the
+  // bridge emitted no delta with a sentence terminator before exit).
+  // Without this, state stays pinned in `processing` forever and the
+  // mic gate is never engaged — PITFALLS #2 echo loop opens wide.
+  let speakingEnteredForTurn = false;
   // Flag tracking whether the orchestrator opened TTS for this turn.
   // Used to gate the close() in onCancel + dispose().
   let ttsOpenedForTurn = false;
@@ -443,6 +450,27 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     accumulatedText = "";
     ackEmitted = false;
     ttsOpenedForTurn = false;
+    speakingEnteredForTurn = false;
+  }
+
+  /**
+   * CR-01 helper: ensure the orchestrator has transitioned
+   * processing → speaking AND gated the mic before TTS playback begins
+   * for this turn. Both the happy-path ack branch and the defensive
+   * process_exit branch route through this so the half-duplex contract
+   * is honoured even when the ack is missing / malformed.
+   *
+   * Idempotent — repeated calls within a single turn are no-ops.
+   */
+  function enterSpeakingForTurn(): void {
+    if (speakingEnteredForTurn) return;
+    if (mirroredState === "speaking") {
+      speakingEnteredForTurn = true;
+      return;
+    }
+    speakingEnteredForTurn = true;
+    deps.micCapture.pauseFrameDelivery();
+    dispatch({ type: "CLAUDE_RESULT_READY" });
   }
 
   function buildFailureSummary(outcome: ClaudeOutcome): string {
@@ -545,11 +573,12 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
             // appends to the same stream.
             await openTtsClient();
             // The mic gate fires on the first ack — half-duplex
-            // entry per PITFALLS #2. We then dispatch
-            // CLAUDE_RESULT_READY (processing → speaking).
-            deps.micCapture.pauseFrameDelivery();
+            // entry per PITFALLS #2. enterSpeakingForTurn() dispatches
+            // CLAUDE_RESULT_READY (processing → speaking) AND pauses
+            // the mic; CR-01 routes the same helper through the
+            // process_exit branch for the null-ack path.
+            enterSpeakingForTurn();
             currentTtsClient!.appendText(norm.normalised);
-            dispatch({ type: "CLAUDE_RESULT_READY" });
             log(
               `[achilles] tts normalisation report ack: ` +
                 `ansi=${norm.report.ansi.count}, ` +
@@ -590,6 +619,13 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
         // Ensure TTS is open — defensive, since extractAck may have
         // missed the marker for a defective stream.
         await openTtsClient();
+        // CR-01: synthesise the speaking transition if the ack path
+        // never fired. Without this, state stays pinned in `processing`
+        // forever and the mic gate is never engaged — the failure
+        // summary then plays through TTS into a live mic (PITFALLS #2).
+        // enterSpeakingForTurn() is idempotent so the happy-path ack
+        // branch above is unaffected.
+        enterSpeakingForTurn();
         currentTtsClient!.appendText(norm.normalised);
         log(
           `[achilles] tts normalisation report summary: ` +
