@@ -70,13 +70,65 @@ export interface MicCaptureOptions {
    * AMPLITUDE_TICK_MS (50 ms / 20 fps per UI-SPEC §1).
    */
   amplitudeTickMs?: number;
+  /**
+   * Plan 14-04 SAFE-06 — injection seam for the mediaDevices reference
+   * the renderer subscribes to for the devicechange event. Defaults to
+   * `navigator.mediaDevices`. Tests pass a fake matching the
+   * `addEventListener('devicechange', ...)` shape so the worklet can
+   * verify the subscription is registered without requiring jsdom to
+   * expose the real MediaDevices.
+   */
+  mediaDevicesRef?: {
+    addEventListener(
+      event: "devicechange",
+      listener: () => void,
+    ): void;
+    removeEventListener(
+      event: "devicechange",
+      listener: () => void,
+    ): void;
+  };
 }
+
+/**
+ * Plan 14-04 SAFE-06 — device-change notification kind reported to
+ * the onDeviceChange callback. 'device-switch' is the default; the
+ * orchestrator routes to a soft re-acquire (pause + resume the
+ * worklet). 'hfp-downgrade' is informational — the renderer logs a
+ * warning but the orchestrator's re-acquire path is identical.
+ */
+export type MicDeviceChangeKind = "device-switch" | "hfp-downgrade";
 
 export interface MicCaptureHandle {
   start(): Promise<void>;
   stop(): void;
   pauseFrameDelivery(): void;
   resumeFrameDelivery(): void;
+  /**
+   * Plan 14-04 SAFE-06 (MC4) — re-acquire the underlying mic stream
+   * against the OS-reported default device. The method stops the
+   * existing capture (closes the MediaStream tracks, destroys the
+   * worklet, clears the analyser source) and starts a fresh one
+   * (getUserMedia with the same constraints, new worklet, new
+   * analyser source binding). The handle's surface is preserved —
+   * consumers do not need to swap references.
+   *
+   * Idempotent — re-acquiring while errored is a no-op (the cached
+   * rejection from a denied getUserMedia is preserved); the caller
+   * must call stop() before reacquireStream() if a clean restart is
+   * required.
+   */
+  reacquireStream(): Promise<void>;
+  /**
+   * Plan 14-04 SAFE-06 (MC5) — subscribe to the
+   * navigator.mediaDevices.ondevicechange event. The callback receives
+   * a payload describing the change kind. The handle returns the
+   * unsubscribe function so callers can detach the listener at app
+   * teardown.
+   */
+  onDeviceChange(
+    callback: (event: { kind: MicDeviceChangeKind }) => void,
+  ): () => void;
   readonly state: MicCaptureState;
 }
 
@@ -209,11 +261,72 @@ export function createMicCapture(opts: MicCaptureOptions): MicCaptureHandle {
     status = "running";
   }
 
+  /**
+   * Plan 14-04 SAFE-06 (MC4): tear down the existing capture and
+   * re-acquire from the OS-reported default device. The method
+   * preserves the MicCaptureHandle surface — consumers do not swap
+   * references — but the underlying MediaStream, worklet, and
+   * analyser source are all replaced.
+   */
+  async function reacquireStream(): Promise<void> {
+    if (cachedRejection !== null) {
+      // Errored state — do NOT attempt to re-acquire. The caller must
+      // call stop() first to clear the cached rejection.
+      return;
+    }
+    // Stop the existing capture cleanly. We do NOT touch
+    // cachedRejection here — a successful prior start has it as null,
+    // and a clean stop drops everything else.
+    stop();
+    // start() re-runs the full acquisition pipeline (getUserMedia +
+    // worklet + analyser binding) against the OS-reported default
+    // device. The MediaStream the OS returns reflects the new default;
+    // we do NOT pin to a specific deviceId because Chromium's
+    // getUserMedia honours the OS preference when no deviceId
+    // constraint is supplied.
+    await start();
+  }
+
+  /**
+   * Plan 14-04 SAFE-06 (MC5): subscribe to the
+   * navigator.mediaDevices.ondevicechange event. Returns the
+   * unsubscribe function so callers can detach the listener at app
+   * teardown.
+   */
+  function onDeviceChange(
+    callback: (event: { kind: MicDeviceChangeKind }) => void,
+  ): () => void {
+    const ref =
+      opts.mediaDevicesRef ??
+      (typeof navigator !== "undefined"
+        ? (navigator as Navigator).mediaDevices
+        : undefined);
+    if (ref === undefined) {
+      // No mediaDevices surface available (e.g., the test environment
+      // lacks navigator); the subscription is a no-op and the
+      // unsubscribe is also a no-op.
+      return () => undefined;
+    }
+    const listener = (): void => {
+      // The renderer does not classify HFP vs device-switch here — the
+      // main-side device-change-handler handles the classification with
+      // the device labels. We always report 'device-switch' from the
+      // renderer; the orchestrator's response is identical.
+      callback({ kind: "device-switch" });
+    };
+    ref.addEventListener("devicechange", listener);
+    return (): void => {
+      ref.removeEventListener("devicechange", listener);
+    };
+  }
+
   return {
     start,
     stop,
     pauseFrameDelivery,
     resumeFrameDelivery,
+    reacquireStream,
+    onDeviceChange,
     get state(): MicCaptureState {
       return status;
     },

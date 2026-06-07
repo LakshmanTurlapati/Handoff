@@ -284,4 +284,98 @@ describe("mic-capture (M1..M7)", () => {
     await expect(handle.start()).rejects.toBe(denial);
     expect(getUserMediaImpl).toHaveBeenCalledTimes(1);
   });
+
+  it("M4 (Plan 14-04 SAFE-06): reacquireStream tears down the existing capture + restarts against new device", async () => {
+    const { ctx } = makeMockAudioContext();
+    const binding = createAnalyserBinding({ audioContext: ctx });
+    const firstStream = makeMockStream();
+    const secondStream = makeMockStream();
+    // Build a getUserMedia spy that returns firstStream then
+    // secondStream on the second call — simulating a device switch.
+    const getUserMediaImpl = vi
+      .fn()
+      .mockResolvedValueOnce(firstStream)
+      .mockResolvedValueOnce(secondStream);
+    const firstWorklet = makeMockWorklet();
+    const secondWorklet = makeMockWorklet();
+    const createWorkletImpl = vi
+      .fn()
+      .mockResolvedValueOnce(firstWorklet.handle)
+      .mockResolvedValueOnce(secondWorklet.handle);
+    const handle = createMicCapture({
+      audioContext: ctx,
+      analyserBinding: binding,
+      onFrame: vi.fn(),
+      onAmplitude: vi.fn(),
+      getUserMediaImpl,
+      createWorkletImpl,
+    });
+    await handle.start();
+    expect(getUserMediaImpl).toHaveBeenCalledTimes(1);
+    expect(firstWorklet.destroy).not.toHaveBeenCalled();
+
+    // Trigger the re-acquisition (device change).
+    await handle.reacquireStream();
+
+    // The first worklet was destroyed; the second worklet replaced it.
+    expect(firstWorklet.destroy).toHaveBeenCalledTimes(1);
+    // getUserMedia was called a second time (with the same locked
+    // constraints — Chromium honours the OS-reported default device).
+    expect(getUserMediaImpl).toHaveBeenCalledTimes(2);
+    // The first stream's track was closed.
+    const firstTrack = firstStream.getTracks()[0]!;
+    expect(firstTrack.stop).toHaveBeenCalledTimes(1);
+    // The handle is back in 'running' state.
+    expect(handle.state).toBe("running");
+  });
+
+  it("M5 (Plan 14-04 SAFE-06): onDeviceChange subscribes to navigator.mediaDevices.ondevicechange and returns an unsubscribe handle", async () => {
+    const { ctx } = makeMockAudioContext();
+    const binding = createAnalyserBinding({ audioContext: ctx });
+    const stream = makeMockStream();
+    const worklet = makeMockWorklet();
+    // Fake mediaDevices: add/remove listeners we can verify by count.
+    const listeners: Array<() => void> = [];
+    const mediaDevicesRef = {
+      addEventListener: vi.fn(
+        (_event: "devicechange", listener: () => void): void => {
+          listeners.push(listener);
+        },
+      ),
+      removeEventListener: vi.fn(
+        (_event: "devicechange", listener: () => void): void => {
+          const idx = listeners.indexOf(listener);
+          if (idx >= 0) listeners.splice(idx, 1);
+        },
+      ),
+    };
+    const handle = createMicCapture({
+      audioContext: ctx,
+      analyserBinding: binding,
+      onFrame: vi.fn(),
+      onAmplitude: vi.fn(),
+      getUserMediaImpl: () => Promise.resolve(stream),
+      createWorkletImpl: () => Promise.resolve(worklet.handle),
+      mediaDevicesRef,
+    });
+    await handle.start();
+
+    const onDeviceChangeCb = vi.fn();
+    const unsubscribe = handle.onDeviceChange(onDeviceChangeCb);
+    expect(mediaDevicesRef.addEventListener).toHaveBeenCalledTimes(1);
+    expect(listeners.length).toBe(1);
+
+    // Fire the listener manually — simulating a devicechange event.
+    listeners[0]!();
+    expect(onDeviceChangeCb).toHaveBeenCalledTimes(1);
+    const payload = onDeviceChangeCb.mock.calls[0]![0] as {
+      kind: "device-switch" | "hfp-downgrade";
+    };
+    expect(payload.kind).toBe("device-switch");
+
+    // Unsubscribe removes the listener.
+    unsubscribe();
+    expect(mediaDevicesRef.removeEventListener).toHaveBeenCalledTimes(1);
+    expect(listeners.length).toBe(0);
+  });
 });

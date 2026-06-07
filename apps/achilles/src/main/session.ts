@@ -75,6 +75,7 @@ import {
   IPC_INCIDENT_STT_FAIL,
   IPC_INCIDENT_TTS_FAIL,
   IPC_STT_TOKEN,
+  IPC_STUCK_THINKING_ANNOUNCE,
   IPC_TTS_CHUNK,
 } from "../shared/constants.js";
 import type {
@@ -96,6 +97,10 @@ import {
 import type { LatencyProbe } from "./latency-probe.js";
 import { normaliseForTts } from "./normalisation.js";
 import type { AchillesEvent } from "./state-machine.js";
+import {
+  STUCK_THINKING_ANNOUNCEMENT,
+  type StuckThinkingWatchdog,
+} from "./stuck-thinking-watchdog.js";
 import type { TranscriptStoreLike } from "./transcript-store.js";
 
 /**
@@ -384,6 +389,23 @@ export interface AchillesSessionDeps {
    * pre-14-03 surface.
    */
   ttsCircuit?: CircuitBreaker;
+  /**
+   * Plan 14-04 — optional SAFE-06 stuck-thinking watchdog. When
+   * provided, consumeClaudeEvents calls watchdog.armForTurn() at the
+   * start of the loop, watchdog.observeProgress() on every progress
+   * event (assistant_text_delta / tool_use / tool_result /
+   * session_init), and watchdog.clearForTurn() on process_exit. When
+   * the timer fires (no progress for the configured timeoutMs window —
+   * default 60 s), the orchestrator broadcasts
+   * IPC_STUCK_THINKING_ANNOUNCE AND routes the locked
+   * STUCK_THINKING_ANNOUNCEMENT through normaliseForTts +
+   * appendText so the user hears the affordance. The state machine
+   * does NOT transition (Claude is still working); the user must
+   * still press the hotkey to cancel. When undefined, the
+   * orchestrator's behaviour is bit-for-bit identical to its
+   * pre-14-04 surface.
+   */
+  stuckThinkingWatchdog?: StuckThinkingWatchdog;
 }
 
 /**
@@ -467,6 +489,89 @@ export interface AchillesSession {
    * stt_committed recorded immediately).
    */
   handleTypedPrompt(text: string): void;
+  /**
+   * Plan 14-04 SAFE-06 — stuck-thinking watchdog onTimeout callback.
+   * The dep-boundary wiring (index.ts constructs the watchdog with
+   * `onTimeout: ({waitedMs}) => session.announceStuckThinking({waitedMs})`)
+   * routes the timer fire here so the orchestrator owns the TTS +
+   * IPC fan-out side effects, not the pure watchdog module.
+   *
+   * Behaviour: open (or REUSE) the existing TTS stream, normalise
+   * STUCK_THINKING_ANNOUNCEMENT via normaliseForTts (PITFALLS #16 +
+   * #21 still apply), call tts.appendText(normalised), AND broadcast
+   * IPC_STUCK_THINKING_ANNOUNCE({text: STUCK_THINKING_ANNOUNCEMENT,
+   * waitedMs}) so the renderer's TranscriptOverlay shows the same
+   * text. The state machine does NOT transition (Claude is still
+   * working). The user can still cancel via the existing hotkey /
+   * onCancel path; SE26 asserts no CIRCLE_CLICK / HOTKEY_PRESS is
+   * dispatched here.
+   */
+  announceStuckThinking(event: { waitedMs: number }): void;
+  /**
+   * Plan 14-04 SAFE-06 — OS suspend handler.
+   *
+   * Fires BEFORE the OS suspends (Electron's powerMonitor 'suspend'
+   * event, wired via wireSuspendResume at index.ts). The orchestrator:
+   *
+   *   - Cancels any pending debounce timer (clearDebounce).
+   *   - Cancels the in-flight Claude bridge if any (best-effort; we
+   *     do NOT throw because the session is about to be suspended).
+   *   - Closes the TTS client if any so the AudioContext is released.
+   *   - Calls deps.micCapture.pauseFrameDelivery so the renderer's
+   *     worklet drops any frames the OS may flush during the
+   *     suspend boundary.
+   *   - Dispatches CIRCLE_CLICK to drive the state machine back to
+   *     idle. From `idle` this is a no-op; from `listening` /
+   *     `processing` / `speaking` the reducer drives back to idle so
+   *     the next hotkey press starts a fresh utterance.
+   *   - Logs `[achilles] suspend: state -> idle`.
+   *
+   * onSuspend during state == 'idle' is a no-op aside from the
+   * defensive clearDebounce + pauseFrameDelivery + log. SE28 verifies
+   * this via spy.
+   */
+  onSuspend(): void;
+  /**
+   * Plan 14-04 SAFE-06 — OS resume handler.
+   *
+   * Fires AFTER the OS resumes (Electron's powerMonitor 'resume'
+   * event, wired via wireSuspendResume at index.ts). The orchestrator:
+   *
+   *   - Logs `[achilles] resume: ready for next utterance`.
+   *   - Does NOT dispatch any state event. The state machine is
+   *     already at idle (onSuspend drove it there); the next hotkey
+   *     press starts a fresh utterance with the next --resume sid.
+   *
+   * The renderer-side audio context is re-acquired by the
+   * device-change-handler when the OS reports the default device
+   * (per CONTEXT.md "On resume: re-acquire the default audio device").
+   * Plan 14-04 does NOT re-open the bridge or TTS client here — those
+   * are per-utterance and are constructed lazily on the next hotkey
+   * press.
+   */
+  onResume(): void;
+  /**
+   * Plan 14-04 SAFE-06 — device-change handler. The renderer's
+   * mic-capture module subscribes to navigator.mediaDevices.ondevicechange
+   * and notifies main via the existing bridge surface; main routes the
+   * notification into this method.
+   *
+   * Behaviour:
+   *   - log `[achilles] device change: deviceId=<id> kind=<kind>`
+   *   - when `mirroredState === 'listening'`: trigger a soft re-acquire
+   *     by calling deps.micCapture.pauseFrameDelivery() then
+   *     setTimeout(resumeFrameDelivery, 0) via the injected setTimeoutImpl
+   *     (allows the renderer's worklet to restart)
+   *   - when `mirroredState !== 'listening'`: the method is a no-op
+   *     beyond the log
+   *
+   * The kind 'hfp-downgrade' is informational — the orchestrator logs
+   * a warning but the response is identical to 'device-switch'.
+   */
+  onDeviceChange(event: {
+    deviceId?: string;
+    kind?: "hfp-downgrade" | "device-switch";
+  }): void;
   readonly metrics: AchillesSessionMetrics;
 }
 
@@ -812,13 +917,30 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
    * extraction, spoken-summary extraction, outcome derivation, and TTS
    * routing. Returns when the bridge emits process_exit and the spoken
    * summary has been queued.
+   *
+   * Plan 14-04 SAFE-06: armForTurn at the start of the loop;
+   * observeProgress on every progress event (assistant_text_delta /
+   * tool_use / tool_result / session_init); clearForTurn on
+   * process_exit so a turn that completes does not produce a stale
+   * stuck-thinking announcement. The watchdog's onTimeout (wired at
+   * createSession boundary) opens TTS + appendText
+   * (STUCK_THINKING_ANNOUNCEMENT) + broadcasts
+   * IPC_STUCK_THINKING_ANNOUNCE.
    */
   async function consumeClaudeEvents(
     session: ClaudeBridgeLike,
   ): Promise<void> {
+    // Plan 14-04 SAFE-06: arm the watchdog at the start of each
+    // utterance turn. The watchdog factory is idempotent on re-arm so
+    // a leftover token from a prior cancelled turn is automatically
+    // cleared.
+    deps.stuckThinkingWatchdog?.armForTurn();
     for await (const ev of session.events$) {
       if (disposed) break;
       if (ev.type === "assistant_text_delta") {
+        // Plan 14-04 SAFE-06: assistant_text_delta is the canonical
+        // heartbeat path — every observed delta resets the watchdog.
+        deps.stuckThinkingWatchdog?.observeProgress();
         accumulatedText += ev.text;
         // Try to emit the ack on every delta until we've succeeded.
         if (!ackEmitted) {
@@ -853,13 +975,29 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
             );
           }
         }
-      } else if (ev.type === "tool_result" && ev.is_error === true) {
-        // WR-01 side-channel: accumulate tool_use_ids so the fallback
-        // deriveOutcome below sees the real tool-error list when
-        // session.outcome is unexpectedly null. The accumulator is
-        // scoped to this turn via resetTurnLocals().
-        observedToolErrors.push(ev.tool_use_id);
+      } else if (ev.type === "tool_use") {
+        // Plan 14-04 SAFE-06: tool_use is a progress event — every
+        // tool invocation resets the watchdog. The orchestrator does
+        // not otherwise act on tool_use (we trust Claude Code to
+        // decide tool routing); the heartbeat is the only side effect.
+        deps.stuckThinkingWatchdog?.observeProgress();
+      } else if (ev.type === "tool_result") {
+        // Plan 14-04 SAFE-06: tool_result is also a progress event —
+        // a tool returned, the watchdog resets. This runs ahead of
+        // the is_error branch so even an errored tool_result counts
+        // as progress.
+        deps.stuckThinkingWatchdog?.observeProgress();
+        if (ev.is_error === true) {
+          // WR-01 side-channel: accumulate tool_use_ids so the
+          // fallback deriveOutcome below sees the real tool-error
+          // list when session.outcome is unexpectedly null. The
+          // accumulator is scoped to this turn via resetTurnLocals().
+          observedToolErrors.push(ev.tool_use_id);
+        }
       } else if (ev.type === "session_init") {
+        // Plan 14-04 SAFE-06: session_init is a progress event — the
+        // bridge has confirmed the child is alive and has a sid.
+        deps.stuckThinkingWatchdog?.observeProgress();
         // Capture sessionId for the next turn's --resume.
         lastSessionId = ev.session_id;
       } else if (ev.type === "process_exit") {
@@ -868,6 +1006,11 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
         // measure the claude-side end-to-end portion of the LOOP-06
         // budget.
         deps.latencyProbe?.recordStage("claude_assistant_done");
+        // Plan 14-04 SAFE-06: clear the watchdog at process_exit so
+        // a turn that completes does NOT produce a spurious
+        // stuck-thinking announcement after the fact. Idempotent —
+        // if the timer already fired, clearForTurn is a no-op.
+        deps.stuckThinkingWatchdog?.clearForTurn();
         // End of the bridge stream. session.outcome is now populated
         // (the bridge computes it synchronously inside the exit
         // listener). Determine the spoken summary body.
@@ -1393,6 +1536,175 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     currentTtsClient = null;
   }
 
+  /**
+   * Plan 14-04 SAFE-06: OS suspend handler. See AchillesSession.onSuspend
+   * docstring for the full contract; the implementation runs the
+   * tear-down list (debounce, bridge cancel, TTS close, mic pause,
+   * CIRCLE_CLICK dispatch) in the order documented there. Idempotent —
+   * subsequent suspends from a stuck powerMonitor are safe because
+   * each tear-down step guards on its own state.
+   */
+  function onSuspend(): void {
+    if (disposed) return;
+    clearDebounce();
+    // Best-effort cancel the in-flight bridge. We do NOT throw because
+    // the session is about to be suspended; a stuck bridge handle here
+    // is exactly the case where we want to drop it on the floor.
+    if (currentClaudeSession !== null) {
+      try {
+        void currentClaudeSession.cancel();
+      } catch (err) {
+        log(`[achilles] suspend bridge cancel error: ${(err as Error).message}`);
+      }
+    }
+    // Close TTS so the AudioContext is released back to the OS during
+    // suspend. The renderer's playback queue will see a closed stream
+    // on resume; PITFALLS #25 calls this out explicitly.
+    if (currentTtsClient !== null) {
+      try {
+        const closed = currentTtsClient.close();
+        if (closed instanceof Promise) {
+          closed.catch((err) => {
+            log(`[achilles] suspend tts close error: ${(err as Error).message}`);
+          });
+        }
+      } catch (err) {
+        log(`[achilles] suspend tts close error: ${(err as Error).message}`);
+      }
+    }
+    // Pause the renderer's mic worklet so any frames the OS flushes
+    // through the suspend boundary are dropped.
+    try {
+      deps.micCapture.pauseFrameDelivery();
+    } catch (err) {
+      log(`[achilles] suspend mic pause error: ${(err as Error).message}`);
+    }
+    // CIRCLE_CLICK drives processing/speaking/listening → idle. The
+    // reducer's CIRCLE_CLICK from idle would advance idle → listening
+    // (the user-action pointer-click semantics), which is the WRONG
+    // direction for suspend. Guard the dispatch on non-idle states so
+    // the suspend path is a true no-op when already idle (SE28
+    // invariant) and a tear-down driver when in listening / processing
+    // / speaking (SE27 invariant).
+    if (mirroredState !== "idle") {
+      dispatch({ type: "CIRCLE_CLICK" });
+    }
+    log(`[achilles] suspend: state -> idle`);
+    resetTurnLocals();
+    currentClaudeSession = null;
+    currentTtsClient = null;
+  }
+
+  /**
+   * Plan 14-04 SAFE-06: OS resume handler. See AchillesSession.onResume
+   * docstring for the full contract; the implementation only logs and
+   * trusts the renderer-side device-change-handler to re-acquire the
+   * mic stream when the OS reports the default device. The next
+   * hotkey press starts a fresh utterance with the next --resume sid.
+   */
+  function onResume(): void {
+    if (disposed) return;
+    log(`[achilles] resume: ready for next utterance`);
+  }
+
+  /**
+   * Plan 14-04 SAFE-06: device-change handler. See
+   * AchillesSession.onDeviceChange docstring for the full contract;
+   * the implementation logs the event + (when state === 'listening')
+   * triggers a soft re-acquire via pauseFrameDelivery +
+   * setTimeout(resumeFrameDelivery, 0). When the state is not
+   * 'listening', the method is a no-op beyond the log — there is no
+   * active capture to gate.
+   */
+  function onDeviceChange(event: {
+    deviceId?: string;
+    kind?: "hfp-downgrade" | "device-switch";
+  }): void {
+    if (disposed) return;
+    const deviceId = event.deviceId ?? "unknown";
+    const kind = event.kind ?? "device-switch";
+    log(`[achilles] device change: deviceId=${deviceId} kind=${kind}`);
+    if (mirroredState !== "listening") {
+      // No active capture to soft-re-acquire — the device change will
+      // be picked up by getUserMedia the next time the user presses
+      // the hotkey.
+      return;
+    }
+    // Soft re-acquire: pause the worklet, then resume on the next tick
+    // so the renderer's worklet has a chance to detach + reattach.
+    // We use the injected setTimeoutImpl so tests can drive the
+    // re-acquire deterministically without vi.useFakeTimers.
+    try {
+      deps.micCapture.pauseFrameDelivery();
+    } catch (err) {
+      log(`[achilles] device change pause error: ${(err as Error).message}`);
+    }
+    setT(() => {
+      if (disposed) return;
+      try {
+        deps.micCapture.resumeFrameDelivery();
+      } catch (err) {
+        log(`[achilles] device change resume error: ${(err as Error).message}`);
+      }
+    }, 0);
+  }
+
+  /**
+   * Plan 14-04 SAFE-06: handle the stuck-thinking watchdog onTimeout
+   * event. The dep-boundary wiring (index.ts) constructs the watchdog
+   * with `onTimeout: ({waitedMs}) => session.announceStuckThinking(...)`
+   * so the orchestrator owns the side effects (TTS append + IPC
+   * broadcast) and the watchdog stays a pure timer module.
+   *
+   * Behaviour:
+   *   - normalise STUCK_THINKING_ANNOUNCEMENT via normaliseForTts
+   *     (PITFALLS #16 + #21 still apply — the announcement is short
+   *     plaintext so the normaliser is largely a no-op, but we go
+   *     through the same path uniformly)
+   *   - open (or REUSE) the TTS stream and appendText(normalised);
+   *     swallow any open() failure so the broadcast still fires
+   *     (the renderer's TranscriptOverlay is the no-audio backstop)
+   *   - broadcast IPC_STUCK_THINKING_ANNOUNCE so the renderer surfaces
+   *     the text visibly
+   *   - log the [achilles] line carrying waitedMs only — no transcript
+   *     fragments
+   *
+   * The state machine does NOT transition (Claude is still working;
+   * we are only narrating). The next progress event or process_exit
+   * drives state transitions as normal. SE26 verifies no
+   * CIRCLE_CLICK / HOTKEY_PRESS is dispatched as a side effect.
+   */
+  function announceStuckThinking(event: { waitedMs: number }): void {
+    if (disposed) return;
+    const norm = normaliseForTts(STUCK_THINKING_ANNOUNCEMENT);
+    log(`[achilles] stuck-thinking announce: waitedMs=${event.waitedMs}`);
+    // Open / reuse TTS — swallow failures so the IPC broadcast still
+    // fires. The TTS path is best-effort here; the renderer's
+    // TranscriptOverlay is the no-audio backstop.
+    void (async (): Promise<void> => {
+      try {
+        const tts = await openTtsClient();
+        tts.appendText(norm.normalised);
+      } catch (err) {
+        log(
+          `[achilles] stuck-thinking tts append failed: ${(err as Error).message}`,
+        );
+      }
+    })();
+    // Broadcast the announcement to the renderer so the
+    // TranscriptOverlay shows the same text visibly. The payload
+    // carries the locked STUCK_THINKING_ANNOUNCEMENT constant — never
+    // a transcript fragment (T-14-20 mitigation).
+    deps.sendIpc(IPC_STUCK_THINKING_ANNOUNCE, {
+      text: STUCK_THINKING_ANNOUNCEMENT,
+      waitedMs: event.waitedMs,
+    });
+    // SE26: the state machine does NOT transition here. The orchestrator
+    // must NOT dispatch CIRCLE_CLICK / HOTKEY_PRESS as a side effect
+    // of the watchdog firing. The user must still press the hotkey to
+    // cancel. This invariant is verified by SE26's spy assertion.
+  }
+
   function dispose(): void {
     if (disposed) return;
     disposed = true;
@@ -1452,6 +1764,10 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     onCancel,
     dispose,
     handleTypedPrompt,
+    announceStuckThinking,
+    onSuspend,
+    onResume,
+    onDeviceChange,
     metrics,
   };
 }

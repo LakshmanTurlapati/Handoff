@@ -39,6 +39,7 @@ import {
   IPC_STATE_CHANGED,
   IPC_STT_TOKEN,
   IPC_STT_TOKEN_REQUEST,
+  IPC_STUCK_THINKING_ANNOUNCE,
   IPC_TRANSCRIPT_COMMITTED,
   IPC_TRANSCRIPT_PARTIAL,
   IPC_TRANSCRIPT_PERSISTENCE_STATE,
@@ -558,6 +559,40 @@ export type TypedFallbackSubmitPayload = z.infer<
 >;
 
 // ─────────────────────────────────────────────────────────────────────
+// Phase 14-04 — SAFE-06 stuck-thinking watchdog announcement
+//
+// One schema paired with IPC_STUCK_THINKING_ANNOUNCE. The payload
+// carries the locked module-scoped STUCK_THINKING_ANNOUNCEMENT text +
+// the elapsed waitedMs window. `.strict()` rejects unknown fields so
+// a future field addition is a deliberate schema bump.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Main → Renderer. Carries the locked stuck-thinking announcement text
+ * + the elapsed waitedMs window. The renderer's TranscriptOverlay
+ * surfaces the text visibly so a user with a failed TTS surface still
+ * sees the affordance.
+ *
+ * `text` is always the locked module-scoped STUCK_THINKING_ANNOUNCEMENT
+ * constant from stuck-thinking-watchdog.ts — never a user transcript
+ * fragment (T-14-20 mitigation).
+ *
+ * `waitedMs` is the configured timeout the watchdog used (default
+ * 60_000). int + nonnegative — a negative or float waitedMs at the
+ * boundary is a contract violation.
+ */
+export const StuckThinkingAnnouncePayloadSchema = z
+  .object({
+    text: z.string().min(1),
+    waitedMs: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type StuckThinkingAnnouncePayload = z.infer<
+  typeof StuckThinkingAnnouncePayloadSchema
+>;
+
+// ─────────────────────────────────────────────────────────────────────
 // Channel-keyed schema map + helpers
 // ─────────────────────────────────────────────────────────────────────
 
@@ -612,6 +647,8 @@ export const IPC_PAYLOAD_SCHEMAS: Record<string, z.ZodTypeAny> = {
   [IPC_INCIDENT_TTS_FAIL]: IncidentTtsFailPayloadSchema,
   [IPC_INCIDENT_STATUS]: IncidentStatusPayloadSchema,
   [IPC_TYPED_FALLBACK_SUBMIT]: TypedFallbackSubmitPayloadSchema,
+  // Phase 14-04 SAFE-06 stuck-thinking watchdog announcement broadcast.
+  [IPC_STUCK_THINKING_ANNOUNCE]: StuckThinkingAnnouncePayloadSchema,
 };
 
 /**

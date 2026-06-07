@@ -23,9 +23,11 @@ import {
   IPC_INCIDENT_STT_FAIL,
   IPC_INCIDENT_TTS_FAIL,
   IPC_STT_TOKEN,
+  IPC_STUCK_THINKING_ANNOUNCE,
   IPC_TTS_CHUNK,
 } from "../shared/constants.js";
 import { createCircuitBreaker } from "./incident-detection.js";
+import { STUCK_THINKING_ANNOUNCEMENT } from "./stuck-thinking-watchdog.js";
 import {
   createMockClaude,
   createMockTts,
@@ -1968,6 +1970,345 @@ describe("createSession — SE23 broadcastIncidentStatus composes breaker states
     );
     // No SAFE-05 broadcasts fire on the legacy path.
     expect(incidentBroadcasts.length).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Plan 14-04 SE24..SE26 — SAFE-06 stuck-thinking watchdog wiring
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Lightweight StuckThinkingWatchdog spy that records every armForTurn /
+ * observeProgress / clearForTurn / dispose call. The spy satisfies the
+ * optional `deps.stuckThinkingWatchdog` field shape and lets the test
+ * assert the orchestrator's arm/observe/clear lifecycle without
+ * exercising the real watchdog's timer mechanics (those are covered
+ * by stuck-thinking-watchdog.test.ts SW1..SW8).
+ */
+interface WatchdogSpyHandle {
+  armForTurn: ReturnType<typeof vi.fn>;
+  observeProgress: ReturnType<typeof vi.fn>;
+  clearForTurn: ReturnType<typeof vi.fn>;
+  dispose: ReturnType<typeof vi.fn>;
+}
+
+function makeWatchdogSpy(): WatchdogSpyHandle {
+  return {
+    armForTurn: vi.fn(),
+    observeProgress: vi.fn(),
+    clearForTurn: vi.fn(),
+    dispose: vi.fn(),
+  };
+}
+
+describe("createSession — SE24 stuck-thinking watchdog arm/observe/clear lifecycle through a turn", () => {
+  it("consumeClaudeEvents armForTurn at start, observeProgress on every progress event, clearForTurn on process_exit", async () => {
+    const h = makeHarness();
+    const spy = makeWatchdogSpy();
+    const session: AchillesSession = createSession({
+      stateController: h.controller,
+      claudeFactory: () => h.mockClaude,
+      ttsFactory: () => h.mockTts,
+      mintSttToken: h.mintSttToken,
+      micCapture: h.micCapture,
+      sendIpc: (channel, payload) => h.sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => h.logs.push(msg),
+      setTimeoutImpl: h.setTimeoutImpl,
+      clearTimeoutImpl: h.clearTimeoutImpl,
+      stuckThinkingWatchdog: spy as never,
+    });
+    await session.onHotkeyPress();
+    session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-00000000ab50",
+      text: "refactor it",
+      committedAt: 0,
+    });
+    await flushAsync();
+
+    // armForTurn fired exactly once at the start of consumeClaudeEvents.
+    expect(spy.armForTurn).toHaveBeenCalledTimes(1);
+    // observeProgress fired at least once: at minimum on the first
+    // assistant_text_delta. The mock claude fixture emits session_init
+    // + assistant_text_delta + assistant_text_done + process_exit so
+    // we expect >= 1 observeProgress calls.
+    expect(spy.observeProgress.mock.calls.length).toBeGreaterThanOrEqual(1);
+    // clearForTurn fired exactly once at process_exit.
+    expect(spy.clearForTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("when stuckThinkingWatchdog is undefined, session behaviour is bit-for-bit identical (SAFE-06 default-off invariant)", async () => {
+    // Baseline: no watchdog dep. The session runs through a turn and
+    // the IPC channel sequence is captured.
+    const baseline = makeHarness();
+    await baseline.session.onHotkeyPress();
+    baseline.session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-00000000ab51",
+      text: "do the work",
+      committedAt: 0,
+    });
+    await flushAsync();
+    baseline.session.onTtsPlaybackComplete();
+    baseline.fireTimer();
+
+    // With watchdog: a spy is attached but the orchestrator's IPC fan-
+    // out must NOT diverge from the baseline.
+    const withWatchdog = makeHarness();
+    const spy = makeWatchdogSpy();
+    const session: AchillesSession = createSession({
+      stateController: withWatchdog.controller,
+      claudeFactory: () => withWatchdog.mockClaude,
+      ttsFactory: () => withWatchdog.mockTts,
+      mintSttToken: withWatchdog.mintSttToken,
+      micCapture: withWatchdog.micCapture,
+      sendIpc: (channel, payload) =>
+        withWatchdog.sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => withWatchdog.logs.push(msg),
+      setTimeoutImpl: withWatchdog.setTimeoutImpl,
+      clearTimeoutImpl: withWatchdog.clearTimeoutImpl,
+      stuckThinkingWatchdog: spy as never,
+    });
+    await session.onHotkeyPress();
+    session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-00000000ab52",
+      text: "do the work",
+      committedAt: 0,
+    });
+    await flushAsync();
+    session.onTtsPlaybackComplete();
+    withWatchdog.fireTimer();
+
+    const baselineChannels = baseline.sentIpc.map((p) => p.channel);
+    const withWatchdogChannels = withWatchdog.sentIpc.map((p) => p.channel);
+    // The watchdog spy does NOT fire any onTimeout in this turn so the
+    // IPC sequence is identical.
+    expect(withWatchdogChannels).toEqual(baselineChannels);
+    // The watchdog DID receive lifecycle calls — proving the wiring is
+    // present.
+    expect(spy.armForTurn).toHaveBeenCalled();
+    expect(spy.clearForTurn).toHaveBeenCalled();
+  });
+});
+
+describe("createSession — SE25 announceStuckThinking opens TTS + appendText + broadcasts IPC", () => {
+  it("announceStuckThinking({waitedMs}) opens / reuses TTS, appends STUCK_THINKING_ANNOUNCEMENT, and broadcasts IPC_STUCK_THINKING_ANNOUNCE", async () => {
+    const h = makeHarness();
+    await h.session.onHotkeyPress();
+    // Simulate the watchdog firing mid-turn — call announceStuckThinking
+    // directly. The session opens / reuses TTS and broadcasts the IPC.
+    h.session.announceStuckThinking({ waitedMs: 60_000 });
+    await flushAsync();
+
+    // IPC broadcast captured with the locked text + waitedMs.
+    const announceBroadcasts = h.sentIpc.filter(
+      (s) => s.channel === IPC_STUCK_THINKING_ANNOUNCE,
+    );
+    expect(announceBroadcasts.length).toBe(1);
+    expect(announceBroadcasts[0]!.payload).toEqual({
+      text: STUCK_THINKING_ANNOUNCEMENT,
+      waitedMs: 60_000,
+    });
+
+    // The TTS handle received the appendText call with the normalised
+    // announcement. The announcement contains no paths/secrets so the
+    // normalised form equals the original.
+    const appended = h.mockTts.appendedTexts.find((t) =>
+      t.includes("Claude is still working"),
+    );
+    expect(appended).toBeDefined();
+  });
+
+  it("announceStuckThinking does NOT transition the state machine (state remains as-is)", async () => {
+    const h = makeHarness();
+    await h.session.onHotkeyPress();
+    h.session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-00000000ab53",
+      text: "do it",
+      committedAt: 0,
+    });
+    // We assert the state is `processing` (post-commit). The
+    // announcement fires from inside the turn — state must NOT
+    // transition.
+    const stateBefore = h.controller.now();
+    h.session.announceStuckThinking({ waitedMs: 60_000 });
+    // Synchronous announce; state should be unchanged.
+    expect(h.controller.now()).toBe(stateBefore);
+  });
+
+  it("logger emits the [achilles] stuck-thinking line with waitedMs only — no transcript", async () => {
+    const h = makeHarness();
+    await h.session.onHotkeyPress();
+    h.session.announceStuckThinking({ waitedMs: 60_000 });
+    await flushAsync();
+    const stuckLogs = h.logs.filter((l) =>
+      l.includes("stuck-thinking"),
+    );
+    expect(stuckLogs.length).toBeGreaterThan(0);
+    // Defence-in-depth: no transcript / no key bytes.
+    for (const line of stuckLogs) {
+      expect(line).not.toContain("payload.text");
+      expect(line).not.toContain("xi-mock-api-key");
+      expect(line).not.toContain("sk_");
+    }
+  });
+});
+
+describe("createSession — SE26 announceStuckThinking does NOT dispatch CIRCLE_CLICK / HOTKEY_PRESS", () => {
+  it("the watchdog firing does NOT auto-cancel — no CIRCLE_CLICK or HOTKEY_PRESS event is dispatched as a side effect", async () => {
+    const h = makeHarness();
+    await h.session.onHotkeyPress();
+    h.session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-00000000ab54",
+      text: "do it",
+      committedAt: 0,
+    });
+    await flushAsync();
+    // Spy on the controller's dispatch so we can verify no
+    // CIRCLE_CLICK / HOTKEY_PRESS is dispatched by announceStuckThinking.
+    const dispatchSpy = vi.spyOn(h.controller, "dispatch");
+    h.session.announceStuckThinking({ waitedMs: 60_000 });
+    await flushAsync();
+    // No CIRCLE_CLICK; no HOTKEY_PRESS. The user must explicitly cancel
+    // via the hotkey or onCancel; the announcement is informational.
+    for (const call of dispatchSpy.mock.calls) {
+      const ev = call[0] as { type: string };
+      expect(ev.type).not.toBe("CIRCLE_CLICK");
+      expect(ev.type).not.toBe("HOTKEY_PRESS");
+    }
+  });
+});
+
+describe("createSession — SE27 onSuspend tears down bridge + TTS + mic + drives to idle", () => {
+  it("onSuspend during 'speaking' cancels bridge, closes TTS, pauses mic, dispatches CIRCLE_CLICK, drives state to idle, and logs", async () => {
+    const h = makeHarness();
+    await h.session.onHotkeyPress();
+    h.session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-00000000ab60",
+      text: "do the work",
+      committedAt: 0,
+    });
+    await flushAsync();
+    expect(h.controller.now()).toBe("speaking");
+    const cancelSpy = vi.spyOn(h.mockClaude, "cancel");
+    const closeSpy = vi.spyOn(h.mockTts, "close");
+    h.session.onSuspend();
+    // Bridge cancel was invoked.
+    expect(cancelSpy).toHaveBeenCalled();
+    // TTS close was invoked.
+    expect(closeSpy).toHaveBeenCalled();
+    // Mic pause was invoked (defensive — already paused during
+    // speaking, but onSuspend re-pauses).
+    expect(h.micCapture.pauseFrameDelivery).toHaveBeenCalled();
+    // State machine was driven back to idle.
+    expect(h.controller.now()).toBe("idle");
+    // The log line was emitted.
+    const suspendLogs = h.logs.filter((l) => l.includes("suspend: state -> idle"));
+    expect(suspendLogs.length).toBe(1);
+  });
+
+  it("onResume logs '[achilles] resume: ready for next utterance' and does NOT dispatch any state event", async () => {
+    const h = makeHarness();
+    await h.session.onHotkeyPress();
+    h.session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-00000000ab61",
+      text: "do the work",
+      committedAt: 0,
+    });
+    await flushAsync();
+    h.session.onSuspend();
+    expect(h.controller.now()).toBe("idle");
+
+    const dispatchSpy = vi.spyOn(h.controller, "dispatch");
+    h.session.onResume();
+    // No dispatch fires on resume.
+    expect(dispatchSpy).not.toHaveBeenCalled();
+    // The log line was emitted.
+    const resumeLogs = h.logs.filter((l) =>
+      l.includes("resume: ready for next utterance"),
+    );
+    expect(resumeLogs.length).toBe(1);
+  });
+});
+
+describe("createSession — SE28 onSuspend during state 'idle' is a no-op (no in-flight bridge / TTS to tear down)", () => {
+  it("onSuspend during state 'idle' does NOT throw and dispatches CIRCLE_CLICK as a no-op", () => {
+    const h = makeHarness();
+    expect(h.controller.now()).toBe("idle");
+    // No bridge, no TTS, no debounce — onSuspend should be a clean no-op
+    // beyond the defensive log + pauseFrameDelivery.
+    const cancelSpy = vi.spyOn(h.mockClaude, "cancel");
+    const closeSpy = vi.spyOn(h.mockTts, "close");
+    expect(() => h.session.onSuspend()).not.toThrow();
+    expect(cancelSpy).not.toHaveBeenCalled();
+    expect(closeSpy).not.toHaveBeenCalled();
+    // micCapture.pauseFrameDelivery is called defensively.
+    expect(h.micCapture.pauseFrameDelivery).toHaveBeenCalled();
+    // State stays at idle.
+    expect(h.controller.now()).toBe("idle");
+    // The log line was emitted even in the no-op case.
+    const suspendLogs = h.logs.filter((l) => l.includes("suspend: state -> idle"));
+    expect(suspendLogs.length).toBe(1);
+  });
+});
+
+describe("createSession — SE29 onDeviceChange logs + soft re-acquire during listening", () => {
+  it("onDeviceChange during 'listening' calls pauseFrameDelivery then setTimeoutImpl(resume, 0)", async () => {
+    const h = makeHarness();
+    await h.session.onHotkeyPress();
+    expect(h.controller.now()).toBe("listening");
+    // Reset the pause/resume call counts since onHotkeyPress already
+    // touched the gate.
+    h.micCapture.pauseFrameDelivery.mockClear();
+    h.micCapture.resumeFrameDelivery.mockClear();
+
+    h.session.onDeviceChange({ deviceId: "dev-001", kind: "device-switch" });
+
+    // Pause was invoked synchronously.
+    expect(h.micCapture.pauseFrameDelivery).toHaveBeenCalledTimes(1);
+    // Resume is scheduled via setTimeoutImpl (0 ms tick) — not yet
+    // fired until we tick the timer.
+    expect(h.micCapture.resumeFrameDelivery).not.toHaveBeenCalled();
+
+    // Fire the scheduled re-acquire timer.
+    h.fireTimer();
+    expect(h.micCapture.resumeFrameDelivery).toHaveBeenCalledTimes(1);
+
+    // The log line was emitted.
+    const deviceLogs = h.logs.filter((l) =>
+      l.includes("device change: deviceId=dev-001"),
+    );
+    expect(deviceLogs.length).toBe(1);
+  });
+
+  it("onDeviceChange during 'idle' is a no-op beyond the log", () => {
+    const h = makeHarness();
+    expect(h.controller.now()).toBe("idle");
+    h.micCapture.pauseFrameDelivery.mockClear();
+    h.micCapture.resumeFrameDelivery.mockClear();
+    h.session.onDeviceChange({ deviceId: "dev-002", kind: "hfp-downgrade" });
+    expect(h.micCapture.pauseFrameDelivery).not.toHaveBeenCalled();
+    expect(h.micCapture.resumeFrameDelivery).not.toHaveBeenCalled();
+    const deviceLogs = h.logs.filter((l) =>
+      l.includes("device change: deviceId=dev-002"),
+    );
+    expect(deviceLogs.length).toBe(1);
+    // The state stayed at idle.
+    expect(h.controller.now()).toBe("idle");
+  });
+
+  it("onDeviceChange with missing deviceId logs 'unknown' and missing kind defaults to 'device-switch'", () => {
+    const h = makeHarness();
+    h.session.onDeviceChange({});
+    const deviceLogs = h.logs.filter((l) =>
+      l.includes("device change: deviceId=unknown"),
+    );
+    expect(deviceLogs.length).toBe(1);
+    expect(deviceLogs[0]).toContain("kind=device-switch");
   });
 });
 

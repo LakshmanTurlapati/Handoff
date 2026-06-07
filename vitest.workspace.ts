@@ -301,6 +301,14 @@ export default defineWorkspace([
         "apps/achilles/src/main/incident-detection.test.ts",
         "apps/achilles/src/renderer/components/TypedFallback.test.tsx",
         "apps/achilles/src/renderer/components/IncidentStatus.test.tsx",
+        // Plan 14-04 additions: SAFE-06 stuck-thinking watchdog +
+        // suspend-resume handler + device-change handler. These three
+        // pure modules use injected setTimeoutImpl / powerMonitorRef /
+        // navigatorRef seams so tests run without any real Electron
+        // launch or OS suspend or Bluetooth audio device.
+        "apps/achilles/src/main/stuck-thinking-watchdog.test.ts",
+        "apps/achilles/src/main/suspend-resume-handler.test.ts",
+        "apps/achilles/src/main/device-change-handler.test.ts",
       ],
       environment: "node",
       passWithNoTests: true,

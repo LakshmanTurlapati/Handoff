@@ -72,6 +72,11 @@ import {
 } from "./state-machine.js";
 import { createAchillesStore } from "./store.js";
 import {
+  createStuckThinkingWatchdog,
+  STUCK_THINKING_DEFAULT_TIMEOUT_MS,
+} from "./stuck-thinking-watchdog.js";
+import { wireSuspendResume } from "./suspend-resume-handler.js";
+import {
   createTranscriptStore,
   DEFAULT_RETENTION_DAYS,
   type TranscriptStore,
@@ -576,6 +581,30 @@ async function bootstrap(): Promise<void> {
         }
       }
     };
+    // Plan 14-04 SAFE-06 stuck-thinking watchdog construction. The
+    // onTimeout callback routes into session.announceStuckThinking
+    // which owns the TTS appendText + IPC_STUCK_THINKING_ANNOUNCE
+    // fan-out. The watchdog itself is a pure timer module. The
+    // timeoutMs reads from ACHILLES_STUCK_TIMEOUT_MS if set; otherwise
+    // defaults to STUCK_THINKING_DEFAULT_TIMEOUT_MS (60_000).
+    let sessionRef: AchillesSession | null = null;
+    const stuckTimeoutRaw = process.env.ACHILLES_STUCK_TIMEOUT_MS;
+    const stuckTimeoutMs =
+      stuckTimeoutRaw !== undefined && stuckTimeoutRaw.length > 0
+        ? Number.parseInt(stuckTimeoutRaw, 10)
+        : STUCK_THINKING_DEFAULT_TIMEOUT_MS;
+    const stuckThinkingWatchdog = createStuckThinkingWatchdog({
+      timeoutMs: Number.isFinite(stuckTimeoutMs)
+        ? stuckTimeoutMs
+        : STUCK_THINKING_DEFAULT_TIMEOUT_MS,
+      onTimeout: ({ waitedMs }): void => {
+        sessionRef?.announceStuckThinking({ waitedMs });
+      },
+      logger: (msg) => {
+        // eslint-disable-next-line no-console
+        console.error(msg);
+      },
+    });
     session = createSession({
       stateController: controller,
       claudeFactory: (opts) =>
@@ -616,8 +645,35 @@ async function bootstrap(): Promise<void> {
       // summary to the launching terminal.
       sttCircuit,
       ttsCircuit,
+      // Plan 14-04 SAFE-06: pass the stuck-thinking watchdog. The
+      // orchestrator wires arm/observe/clear at the consumeClaudeEvents
+      // boundaries; the watchdog's onTimeout routes back here via
+      // sessionRef.announceStuckThinking.
+      stuckThinkingWatchdog,
     });
+    sessionRef = session;
   }
+  // Plan 14-04 SAFE-06 — wire the powerMonitor 'suspend' / 'resume'
+  // events to the session orchestrator. The handler module owns the
+  // listener registration + dispose round-trip; we route the callbacks
+  // into session.onSuspend() and session.onResume() so the session
+  // tears down bridge + TTS + mic on suspend and logs on resume. The
+  // dispose handle is added to the will-quit cleanup below. When
+  // session is null (degraded mode), the handler is still wired so the
+  // log lines surface power-event activity for post-mortem debugging.
+  const suspendResumeHandle = wireSuspendResume({
+    powerMonitorRef: electron.powerMonitor as never,
+    onSuspend: (): void => {
+      session?.onSuspend();
+    },
+    onResume: (): void => {
+      session?.onResume();
+    },
+    logger: (msg) => {
+      // eslint-disable-next-line no-console
+      console.error(msg);
+    },
+  });
 
   // Adapter that exposes the underlying BrowserWindow's 'move' /
   // 'moved' events to wireDragPersistence. The createAchillesWindow
@@ -774,6 +830,10 @@ async function bootstrap(): Promise<void> {
     // references are released. Subsequent appendTurn calls after
     // dispose are safe no-ops (disposed guard).
     transcriptStore.dispose();
+    // Plan 14-04 SAFE-06: remove the powerMonitor listeners so the
+    // global Electron event bus does not hold a reference to the
+    // session that just disposed. Idempotent.
+    suspendResumeHandle.dispose();
     if (activeAmplitudeStop !== null) {
       activeAmplitudeStop();
       activeAmplitudeStop = null;

@@ -430,3 +430,36 @@ export const IPC_INCIDENT_STATUS = "achilles:incident-status";
  * prompt is indistinguishable to the LLM from a voice utterance.
  */
 export const IPC_TYPED_FALLBACK_SUBMIT = "achilles:typed-fallback-submit";
+
+// ─────────────────────────────────────────────────────────────────────
+// Phase 14-04 — SAFE-06 stuck-thinking watchdog announcement
+//
+// One Main → Renderer broadcast channel signals that the stuck-thinking
+// watchdog timer has fired because Claude has emitted no progress
+// events (assistant_text_delta / tool_use / tool_result) for the
+// configured timeout window (default 60 s). The orchestrator also
+// audibly announces the stall via the existing TTS stream so the user
+// hears "Claude is still working — I'll let you know when it's done."
+// The renderer's TranscriptOverlay subscribes to this channel and
+// surfaces the same text visibly so a user with TTS disabled (or a
+// failed TTS surface) still sees the affordance.
+//
+// Direction:
+//   Main → Renderer: stuck-thinking-announce
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Main → Renderer. Broadcasts the locked STUCK_THINKING_ANNOUNCEMENT
+ * text + the elapsed waitedMs window when the watchdog timer fires.
+ * Payload shape:
+ *
+ *   { text: string, waitedMs: number }
+ *
+ * `text` is always the locked STUCK_THINKING_ANNOUNCEMENT constant
+ * from stuck-thinking-watchdog.ts — never a user transcript fragment.
+ * `waitedMs` is the configured timeout (default 60_000). The
+ * renderer surfaces the text in TranscriptOverlay as a passive
+ * affordance; the user can still cancel via the existing hotkey or
+ * onCancel path. SAFE-06 invariant.
+ */
+export const IPC_STUCK_THINKING_ANNOUNCE = "achilles:stuck-thinking-announce";

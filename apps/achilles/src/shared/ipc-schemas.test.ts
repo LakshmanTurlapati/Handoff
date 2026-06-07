@@ -189,8 +189,9 @@ describe("IPC_PAYLOAD_SCHEMAS + parseEnvelope (IPC6 discriminated map)", () => {
     // start/result, wizard done); Plan 14-02 appended 1 (transcript
     // persistence state for the RecordingIndicator); Plan 14-03 appended
     // 4 (incident-stt-fail, incident-tts-fail, incident-status, typed-
-    // fallback-submit). Total = 31.
-    expect(keys.length).toBe(31);
+    // fallback-submit); Plan 14-04 appended 1 (stuck-thinking-announce
+    // for the SAFE-06 watchdog announcement broadcast). Total = 32.
+    expect(keys.length).toBe(32);
     for (const k of keys) {
       expect(k.startsWith("achilles:")).toBe(true);
     }
