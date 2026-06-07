@@ -381,3 +381,63 @@ app.on("will-quit", () => {
 _Reviewed: 2026-06-06_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+
+---
+
+## FIX LOG
+
+**Fixed at:** 2026-06-06
+**Scope applied:** ALL critical (4) + ALL warning (9). Info findings (6) deferred.
+**Iteration:** 1
+**Branch worktree:** `gsd-reviewfix/13-28318` (fast-forwarded into `Achilles`)
+
+### Counts
+- Findings in scope: 13
+- Fixed: 13
+- Skipped: 0
+- Info findings deferred (out of scope per fix request): 6
+
+### Critical fixes
+
+- **CR-01 — Missing `com.apple.security.network.client` entitlement**: Added the key to `apps/achilles/build/entitlements.mac.plist` and extended `ENT1` in `entitlements.mac.test.mjs` to assert all four hardened-runtime keys are paired with `<true/>`. Commit: `fix(13): CR-01 add network.client entitlement for signed macOS DMG`.
+- **CR-02 — InitWizard stalls on `not-determined` / `restricted`**: Added a new `dismissed` status + `MIC_PROMPT_DISMISSED` action to the InitWizard reducer; treated `restricted` as denied-equivalent; surfaced the Skip + Open Settings + Retry buttons for both new states. Three new U7b tests cover all three mic-permission outcomes. Files: `apps/achilles/src/renderer/components/InitWizard.tsx`, `InitWizard.test.tsx`. Commit: `fix(13): CR-02 InitWizard surfaces Skip on not-determined and restricted`.
+- **CR-03 — Anthropic regex false positives**: Tightened `/sk-[A-Za-z0-9_-]{29,}/` to `/sk-ant-[A-Za-z0-9_-]{30,}/` and renamed the pattern entry from `anthropic-sk-` to `anthropic-sk-ant`. New `TNS8` asserts the kebab-case sample (`sk-overlay-component-positioning-fixed` and four others) does NOT match while real Anthropic shapes (`sk-ant-1234...`) DO match. Files: `apps/achilles-cli/scripts/check-tarball-no-secrets.mjs`, `check-tarball-no-secrets.test.mjs`. Commit: `fix(13): CR-03 tighten anthropic regex to sk-ant- prefix`.
+- **CR-04 — `mkdir -p` not portable to Windows**: Replaced `execFileSync("mkdir", ["-p", ...])` with `mkdirSync(path, { recursive: true })` in both `check-source-of-truth.mjs` and `check-tarball-no-secrets.mjs`. New `SOT6` / `TNS9` structural tests assert the source imports `mkdirSync` from `node:fs`, uses `recursive: true`, and contains NO leftover `execFileSync('mkdir', ...)` shell-outs (comments stripped before pattern-matching so the CR-04-fix explanatory block comment does not trip the negative assertion). Commit: `fix(13): CR-04 replace POSIX mkdir -p with node:fs mkdirSync recursive`.
+
+### Warning fixes
+
+- **WR-01 — install-skill TOCTOU race**: Wrapped the `symlinkSync` call in a catch that handles EEXIST by re-probing the destination. If the racing invocation linked the same source, return `already-installed` (idempotent); if it linked a different source and force=false, throw `ExistingDestinationConflictError`; otherwise fall through to the SymlinkNotPermittedError path. Two new SS9 tests cover both arms using the existing recording fake with patched lstat/readlink. Files: `apps/achilles-cli/src/skill-symlink.ts`, `skill-symlink.test.ts`. Commit: `fix(13): WR-01 install-skill TOCTOU EEXIST retry-with-re-probe`.
+- **WR-02 — init.ts / launch.ts rethrow non-ElectronBinaryMissingError**: Replaced the bare `throw err;` with a typed `[achilles] init failed: <detail>` / `[achilles] launch failed: <detail>` stderr write + processExitImpl(1). Two new tests (`init.test.ts:WR-02`, `launch.test.ts:WR-02`) assert the function does NOT throw, surfaces the typed prefix, and exits 1. Commit: `fix(13): WR-02 classify non-ElectronBinaryMissingError locator failures`.
+- **WR-03 — preload silently swallows validation errors**: Replaced `catch {}` with `catch (err) { console.error('[achilles-preload] dropped malformed ... payload on channel ${channel}: ${(err as Error).message}') }` in both `subscribe()` and `send()`. The security guarantee is unchanged (the payload still never crosses the boundary); the diagnostic stream is now reachable in the renderer's DevTools console. File: `apps/achilles/src/preload/index.ts`. Commit: `fix(13): WR-03 preload surfaces dropped malformed-payload errors via console.error`.
+- **WR-04 — SKILL.md word budget**: Trimmed from 1360 to 1241 words (under the 1250 negotiated soft budget; well under the 2000 hard cap). Trims came from "When the run fails", "Privacy", the half-duplex turn-taking paragraph in "What it does", the non-blocking paragraph in "How to launch", and the spoken-region description in "How the spoken interaction works". New S2 sub-test asserts `<= 1250 words` so a future maintainer cannot quietly let the body drift back. Files: `packages/achilles-skill/skill/SKILL.md`, `skill-content.test.ts`. Commit: `fix(13): WR-04 trim SKILL.md to 1241 words and assert the soft budget`.
+- **WR-05 — check-source-of-truth tmpdir cleanup leak**: Restructured the production wiring tail to route tmpdir disposal through a single `finally` block. The processExitImpl seam now captures the intended exit code into a `pendingExitCode` variable; the finally disposes tmpToClean (best-effort, with its own inner try/catch) before calling `process.exit`. File: `apps/achilles-cli/scripts/check-source-of-truth.mjs`. Commit: `fix(13): WR-05 route check-source-of-truth tmpdir disposal through try/finally`.
+- **WR-06 — `setTimeoutImpl` seam `as unknown` cast**: Dropped the redundant `as unknown` cast in the production fallback (the seam's return type is already `unknown`) and added explicit `(cb, ms) => unknown` type annotations on the local `setT` / `clearT` constants. Documented in the seam declaration's docstring why the token type is intentionally `unknown` (test fakes use numeric ids while production returns NodeJS.Timeout). File: `apps/achilles/src/main/init-wizard.ts`. Commit: `fix(13): WR-06 drop unnecessary 'as unknown' cast in setTimeoutImpl fallback`.
+- **WR-07 — spawn() unwrapped in init.ts / launch.ts**: Wrapped both spawn() calls in try/catch to handle synchronous throws (EACCES, EISDIR, ENOENT on the binary itself). Wired `child.on('error', ...)` listeners for the async-failure window (binary disappears between resolve and exec); in init this triggers exit(1), in launch the detached contract requires writing only a diagnostic. Extended `AttachedChild` / `DetachableChild` interfaces with the `'error'` overload. New tests in `init.test.ts` and `launch.test.ts` cover both arms (sync spawn throw + async child 'error' event) using a new `throwOnSpawn` option and a `fireError` test seam. Commit: `fix(13): WR-07 wrap spawn() in try/catch and wire async 'error' listener`.
+- **WR-08 — electron-binary-locator mixed-separator on Windows**: Added a cosmetic conversion of the Windows error-message path from `/` to `\` (using `path.sep`) so the diagnostic reads `C:\Program Files\...\Achilles.exe` instead of `C:/Program Files/.../Achilles.exe`. The function's RETURN value stays posix-style — that contract is documented in the file header and asserted by the L2 test fixture. Two new tests pin the unchanged return shape and the error-message format. Commit: `fix(13): WR-08 render win32 binary path with native separators in error message`.
+- **WR-09 — init-wizard docstring vs console.error fallback contradiction**: Updated the module docstring to acknowledge the default `console.error` fallback is defence-in-depth and that production callers SHOULD inject an explicit logger seam. Threaded an explicit `logger:` seam through `main/index.ts`'s `createInitWizardSession` call so production no longer relies on the fallback. Files: `apps/achilles/src/main/init-wizard.ts`, `main/index.ts`. Commit: `fix(13): WR-09 clarify init-wizard logger contract and inject explicit seam`.
+
+### Verification
+
+All test suites and typechecks executed against the worktree before commit. Numbers below are end-state after all 13 fixes landed.
+
+- **phase-13-unit**: 56 tests pass (49 original + 7 new). Files: 7. Duration ~330ms.
+- **phase-12-unit**: 240 tests (236 pass + 4 skipped) — was 235; +1 SKILL.md word-budget assertion.
+- **phase-11-unit**: 452 tests pass — was 449; +3 InitWizard U7b tests.
+- **phase-10-unit**: 157 tests pass — unchanged.
+- **phase-09-unit**: 145 tests (133 pass + 12 skipped) — unchanged.
+- **node-test scripts**: 25 mjs tests pass across `check-source-of-truth.test.mjs`, `check-tarball-no-secrets.test.mjs`, `check-package-wiring.test.mjs`, `entitlements.mac.test.mjs`, `Info.plist.test.mjs`.
+- **TypeScript**: `tsc --noEmit` clean in `apps/achilles`, `apps/achilles-cli`, and `packages/achilles-skill`. Pre-existing errors in `packages/claude-code-bridge/src/version-check.test.ts` and the vitest workspace's `passWithNoTests` type gap are unchanged by this fix pass (both predate phase 13 — see existing WR-10 note in `vitest.workspace.ts` line 112-120).
+
+### Deferred Info findings (out of scope)
+
+The fix request explicitly skipped info-tier findings. IN-01 through IN-06 remain open in this REVIEW.md for future iteration:
+- IN-01: cleanup `(ipcMain as never as ...)` casts in `main/index.ts`
+- IN-02: hoist `WritableSeam` to `apps/achilles-cli/src/seams.ts`
+- IN-03: document exit code 2 in `transcripts.ts` unknown-subcommand message
+- IN-04: differentiate MOCK_LOOP smoke-test copy in `InitWizard.tsx`
+- IN-05: trim SKILL.md frontmatter `description` field to ~50 words
+- IN-06: add Info.plist.fragment ↔ electron-builder.json drift-prevention test (or remove misleading comment)
+
+_Fixed: 2026-06-06_
+_Fixer: Claude (gsd-code-fixer)_
+_Iteration: 1_
