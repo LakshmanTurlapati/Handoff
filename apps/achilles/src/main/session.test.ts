@@ -1036,3 +1036,135 @@ describe("createSession — CR-03 toggle-mode commit race", () => {
     expect(droppedLogs.length).toBe(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// CR-04: claudeFactory / bridge.send exceptions must surface, drive
+// the state machine back to idle via the failure override path, and
+// emit a user-facing error.
+// ─────────────────────────────────────────────────────────────────────
+
+describe("createSession — CR-04 bridge construction / send failure", () => {
+  it("claudeFactory throwing ClaudeVersionError surfaces an error and drives state out of processing", async () => {
+    const controller = makeStateController();
+    const sentIpc: Array<{ channel: string; payload: unknown }> = [];
+    const logs: string[] = [];
+    const micCapture = makeMicCapture();
+    const mockTts = createMockTts({ chunksPerSegment: 1 });
+
+    let nextToken = 1;
+    const timers = new Map<number, () => void>();
+    const setTimeoutImpl = (cb: () => void, _ms: number): unknown => {
+      const t = nextToken++;
+      timers.set(t, cb);
+      return t;
+    };
+    const clearTimeoutImpl = (token: unknown): void => {
+      timers.delete(token as number);
+    };
+
+    const deps: AchillesSessionDeps = {
+      stateController: controller,
+      claudeFactory: () => {
+        throw new Error("ClaudeVersionError: claude-code 1.0.0 too old");
+      },
+      ttsFactory: () => mockTts,
+      mintSttToken: vi.fn(async () => ({
+        token: "tok",
+        expiresAt: "2026-12-31T23:59:59.000Z",
+      })),
+      micCapture,
+      sendIpc: (channel, payload) => sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => logs.push(msg),
+      setTimeoutImpl,
+      clearTimeoutImpl,
+    };
+    const session = createSession(deps);
+
+    await session.onHotkeyPress();
+    session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-0000000000c5",
+      text: "do the work",
+      committedAt: 0,
+    });
+
+    await flushAsync();
+
+    // The orchestrator must NOT remain stuck in processing.
+    expect(controller.now()).not.toBe("processing");
+    // An error log line must have been emitted (no stack-trace
+    // swallowed silently).
+    const errorLogs = logs.filter((l) =>
+      l.includes("bridge construction failed") || l.includes("bridge send failed"),
+    );
+    expect(errorLogs.length).toBeGreaterThan(0);
+  });
+
+  it("bridge.send throwing EPIPE-like error surfaces an error and drives state out of processing", async () => {
+    const controller = makeStateController();
+    const sentIpc: Array<{ channel: string; payload: unknown }> = [];
+    const logs: string[] = [];
+    const micCapture = makeMicCapture();
+    const mockTts = createMockTts({ chunksPerSegment: 1 });
+
+    // Build a bridge whose send() throws to simulate EPIPE.
+    const scripted = makeScriptedClaudeBridge({
+      outcome: { kind: "success" },
+      sessionId: "cr04-sid",
+      lastTurnText: "",
+    });
+    const explodingBridge: ClaudeBridgeLike = {
+      ...scripted.bridge,
+      send(_text: string): void {
+        throw new Error("EPIPE: write to closed stdin");
+      },
+    };
+
+    let nextToken = 1;
+    const timers = new Map<number, () => void>();
+    const setTimeoutImpl = (cb: () => void, _ms: number): unknown => {
+      const t = nextToken++;
+      timers.set(t, cb);
+      return t;
+    };
+    const clearTimeoutImpl = (token: unknown): void => {
+      timers.delete(token as number);
+    };
+
+    const deps: AchillesSessionDeps = {
+      stateController: controller,
+      claudeFactory: () => explodingBridge,
+      ttsFactory: () => mockTts,
+      mintSttToken: vi.fn(async () => ({
+        token: "tok",
+        expiresAt: "2026-12-31T23:59:59.000Z",
+      })),
+      micCapture,
+      sendIpc: (channel, payload) => sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => logs.push(msg),
+      setTimeoutImpl,
+      clearTimeoutImpl,
+    };
+    const session = createSession(deps);
+
+    await session.onHotkeyPress();
+    session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-0000000000c6",
+      text: "do the work",
+      committedAt: 0,
+    });
+
+    await flushAsync();
+
+    expect(controller.now()).not.toBe("processing");
+    const errorLogs = logs.filter((l) =>
+      l.includes("bridge construction failed") || l.includes("bridge send failed"),
+    );
+    expect(errorLogs.length).toBeGreaterThan(0);
+  });
+});

@@ -783,15 +783,55 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
       dispatch({ type: "CIRCLE_CLICK" });
       return;
     }
-    // Drive the production STT_COMMITTED tag.
+    // Drive the production STT_COMMITTED tag. The reducer's
+    // STT_COMMITTED case ignores the event when state is not
+    // `listening`, so the toggle-mode race path (state already
+    // `processing`) is a no-op for the reducer — exactly the desired
+    // semantics. We still dispatch so the event trace is uniform.
     dispatch({ type: "STT_COMMITTED", transcript: payload.text });
-    // Spawn the bridge child + start consuming events.
-    const bridge = deps.claudeFactory({
-      systemPromptFile: deps.systemPromptFile,
-      resumeSessionId: lastSessionId ?? undefined,
-    });
+    // CR-04: wrap bridge construction + send in try/catch so a
+    // ClaudeVersionError (from the real createClaudeSession's
+    // runVersionCheck) or an EPIPE-shaped exception (from child.stdin
+    // after the child has already exited) does not pin state in
+    // `processing`. On failure we surface a user-facing error via
+    // INJECT_ERROR (drives the state machine to `error`) and log the
+    // attribution. Without this wrap, the exception propagates up to
+    // the IPC handler, which swallows it — and state is stuck.
+    let bridge: ClaudeBridgeLike;
+    try {
+      bridge = deps.claudeFactory({
+        systemPromptFile: deps.systemPromptFile,
+        resumeSessionId: lastSessionId ?? undefined,
+      });
+    } catch (err) {
+      log(
+        `[achilles] bridge construction failed: ${(err as Error).message}`,
+      );
+      dispatch({ type: "INJECT_ERROR", kind: "unknown" });
+      currentClaudeSession = null;
+      return;
+    }
     currentClaudeSession = bridge;
-    bridge.send(wrapped);
+    try {
+      bridge.send(wrapped);
+    } catch (err) {
+      log(
+        `[achilles] bridge send failed: ${(err as Error).message}`,
+      );
+      // Close the bridge best-effort so the child process does not
+      // linger.
+      try {
+        const closed = bridge.close();
+        if (closed instanceof Promise) {
+          closed.catch(() => undefined);
+        }
+      } catch {
+        // best-effort
+      }
+      currentClaudeSession = null;
+      dispatch({ type: "INJECT_ERROR", kind: "unknown" });
+      return;
+    }
     activeConsumerPromise = consumeClaudeEvents(bridge).catch((err) => {
       log(
         `[achilles] claude consumer error: ${(err as Error).message}`,
