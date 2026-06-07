@@ -73,6 +73,14 @@ function makeMockAudioContext(): MockCtx {
   };
   let currentTime = 0;
   const destination = {} as AudioNode;
+  // WR-03: the playback-queue now creates a long-lived GainNode mixer
+  // at construction time. Provide a minimal createGain stub so the
+  // structural mock satisfies the new code path.
+  const createGain = (): AudioNode =>
+    ({
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    }) as unknown as AudioNode;
   const ctx = {
     get currentTime() {
       return currentTime;
@@ -84,6 +92,7 @@ function makeMockAudioContext(): MockCtx {
       sources.push(next);
       return next as unknown as AudioBufferSourceNode;
     },
+    createGain,
   } as unknown as AudioContext;
   return {
     ctx,
@@ -278,7 +287,7 @@ describe("playback-queue (P1..P7)", () => {
     expect(typeof module.createPlaybackQueue).toBe("function");
   });
 
-  it("P7: flush() stops the current source, clears the queue, drops the analyser playback source, and fires onDrained", async () => {
+  it("P7: flush() stops the current source, clears the queue, leaves the long-lived playback mixer connected, and fires onDrained (WR-03)", async () => {
     const mock = makeMockAudioContext();
     const binding = createAnalyserBinding({ audioContext: mock.ctx });
     const setPlaybackSourceSpy = vi.spyOn(binding, "setPlaybackSource");
@@ -293,6 +302,11 @@ describe("playback-queue (P1..P7)", () => {
       onDrained,
       decodeAudioDataImpl,
     });
+    // WR-03: setPlaybackSource is called EXACTLY once at construction
+    // with the long-lived mixer node. Per-chunk reconnects are gone.
+    expect(setPlaybackSourceSpy).toHaveBeenCalledTimes(1);
+    const constructionCall = setPlaybackSourceSpy.mock.calls[0]!;
+    expect(constructionCall[0]).not.toBeNull();
 
     handle.enqueue(makeChunk(0));
     handle.enqueue(makeChunk(1));
@@ -300,16 +314,18 @@ describe("playback-queue (P1..P7)", () => {
     await flushMicrotasks();
 
     expect(mock.sources.length).toBe(3);
+    // Still only the construction-time call — no per-chunk churn.
+    expect(setPlaybackSourceSpy).toHaveBeenCalledTimes(1);
 
     handle.flush();
     // Every scheduled source.stop(0) was called.
     for (const src of mock.sources) {
       expect(src.stop).toHaveBeenCalledWith(0);
     }
-    // Playback source on the analyser binding was nulled out.
-    const calls = setPlaybackSourceSpy.mock.calls;
-    const lastCall = calls[calls.length - 1]!;
-    expect(lastCall[0]).toBeNull();
+    // WR-03: flush() does NOT detach the mixer from the analyser. The
+    // next utterance reuses the same connection so the Waveform
+    // amplitude reads continuously without flicker.
+    expect(setPlaybackSourceSpy).toHaveBeenCalledTimes(1);
     expect(onDrained).toHaveBeenCalledTimes(1);
     expect(handle.queueSize).toBe(0);
     expect(handle.playing).toBe(false);

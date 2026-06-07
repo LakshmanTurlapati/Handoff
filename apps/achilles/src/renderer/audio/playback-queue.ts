@@ -65,6 +65,17 @@ export function createPlaybackQueue(
     opts.decodeAudioDataImpl ??
     ((data: ArrayBuffer) => opts.audioContext.decodeAudioData(data));
 
+  // WR-03: long-lived mixer node. Every chunk's AudioBufferSourceNode
+  // routes through this single GainNode rather than the destination
+  // directly, and the analyser binding's playback source is set ONCE
+  // to the mixer at construction time. This eliminates the per-chunk
+  // setPlaybackSource() churn that previously caused the analyser to
+  // disconnect-and-reconnect on every chunk boundary (visible as
+  // amplitude flicker in the Waveform).
+  const playbackMixer = opts.audioContext.createGain();
+  playbackMixer.connect(opts.audioContext.destination);
+  opts.analyserBinding.setPlaybackSource(playbackMixer);
+
   // Renderer-side SequenceBuffer state. We store chunks keyed by seq;
   // `nextExpected` advances monotonically. `scheduledEndTime` tracks
   // the audio-context time at which the last scheduled buffer source
@@ -110,12 +121,11 @@ export function createPlaybackQueue(
   ): void {
     const source = opts.audioContext.createBufferSource();
     source.buffer = decoded;
-    // Route through the analyser binding's playback source so the
-    // Waveform reflects TTS amplitude during 'speaking'. The orchestrator
-    // (Plan 12-04) flips analyserBinding.setMode('speaking') before the
-    // first chunk plays.
-    source.connect(opts.audioContext.destination);
-    opts.analyserBinding.setPlaybackSource(source);
+    // WR-03: route each source through the long-lived playbackMixer
+    // (which is already connected to both the audio destination and
+    // the analyser). The analyser sees a continuous amplitude across
+    // the entire utterance, not a per-chunk reconnect.
+    source.connect(playbackMixer);
 
     const startAt = Math.max(opts.audioContext.currentTime, scheduledEndTime);
     source.start(startAt);
@@ -136,9 +146,11 @@ export function createPlaybackQueue(
       if (isLastChunkPlayed && !completionFired) {
         completionFired = true;
         playing = false;
-        // Drop the analyser playback source so a fresh utterance
-        // re-attaches cleanly.
-        opts.analyserBinding.setPlaybackSource(null);
+        // WR-03: keep the mixer attached to the analyser so the next
+        // utterance does not need to re-establish the connection. The
+        // mixer is silent between utterances (no active source nodes),
+        // so the analyser reads zero amplitude until the next chunk
+        // arrives.
         try {
           opts.onPlaybackComplete();
         } catch (err) {
@@ -215,7 +227,10 @@ export function createPlaybackQueue(
     finalSeq = -1;
     playing = false;
     completionFired = false;
-    opts.analyserBinding.setPlaybackSource(null);
+    // WR-03: leave the playbackMixer attached to the analyser. The
+    // mixer carries no active sources after the .stop(0) loop above,
+    // so the analyser reads zero amplitude until the next utterance
+    // re-attaches sources to the mixer.
     try {
       opts.onDrained();
     } catch (err) {
