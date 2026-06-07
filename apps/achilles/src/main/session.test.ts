@@ -2320,6 +2320,85 @@ describe("createSession — SE25 announceStuckThinking opens TTS + appendText + 
   });
 });
 
+describe("createSession — WR-09 announceStuckThinking re-arms the watchdog so subsequent stalls fire again", () => {
+  // WR-09 regression. Phase 14 review found announceStuckThinking did NOT
+  // call armForTurn after firing. The watchdog stayed dormant until the
+  // next utterance — a stuck Claude that resumed briefly and stalled again
+  // would NOT produce a second announcement, so the user received exactly
+  // one 'still working' message no matter how long Claude ran.
+
+  it("announceStuckThinking calls stuckThinkingWatchdog.armForTurn so the watchdog wakes for the next stall window", async () => {
+    const h = makeHarness();
+    const spy = makeWatchdogSpy();
+    const session: AchillesSession = createSession({
+      stateController: h.controller,
+      claudeFactory: () => h.mockClaude,
+      ttsFactory: () => h.mockTts,
+      mintSttToken: h.mintSttToken,
+      micCapture: h.micCapture,
+      sendIpc: (channel, payload) => h.sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => h.logs.push(msg),
+      setTimeoutImpl: h.setTimeoutImpl,
+      clearTimeoutImpl: h.clearTimeoutImpl,
+      stuckThinkingWatchdog: spy as never,
+    });
+    await session.onHotkeyPress();
+    // Reset the spy so the post-announce armForTurn is observable in
+    // isolation (the orchestrator's consumeClaudeEvents also calls
+    // armForTurn at the start of a turn — that is SE24's contract).
+    spy.armForTurn.mockClear();
+    session.announceStuckThinking({ waitedMs: 60_000 });
+    expect(spy.armForTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("announceStuckThinking called twice re-arms the watchdog twice (each fire is an independent affordance)", async () => {
+    const h = makeHarness();
+    const spy = makeWatchdogSpy();
+    const session: AchillesSession = createSession({
+      stateController: h.controller,
+      claudeFactory: () => h.mockClaude,
+      ttsFactory: () => h.mockTts,
+      mintSttToken: h.mintSttToken,
+      micCapture: h.micCapture,
+      sendIpc: (channel, payload) => h.sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => h.logs.push(msg),
+      setTimeoutImpl: h.setTimeoutImpl,
+      clearTimeoutImpl: h.clearTimeoutImpl,
+      stuckThinkingWatchdog: spy as never,
+    });
+    await session.onHotkeyPress();
+    spy.armForTurn.mockClear();
+    session.announceStuckThinking({ waitedMs: 60_000 });
+    session.announceStuckThinking({ waitedMs: 60_000 });
+    expect(spy.armForTurn).toHaveBeenCalledTimes(2);
+    // Two IPC broadcasts fan-out so the renderer sees both affordances.
+    const announceBroadcasts = h.sentIpc.filter(
+      (s) => s.channel === IPC_STUCK_THINKING_ANNOUNCE,
+    );
+    expect(announceBroadcasts.length).toBe(2);
+  });
+
+  it("announceStuckThinking when stuckThinkingWatchdog dep is undefined is still safe (default-off invariant)", async () => {
+    // Optional-chain semantics: when no watchdog is supplied, the re-arm
+    // is a no-op and the IPC broadcast still fires.
+    const h = makeHarness();
+    await h.session.onHotkeyPress();
+    expect(() =>
+      h.session.announceStuckThinking({ waitedMs: 60_000 }),
+    ).not.toThrow();
+    const announceBroadcasts = h.sentIpc.filter(
+      (s) => s.channel === IPC_STUCK_THINKING_ANNOUNCE,
+    );
+    expect(announceBroadcasts.length).toBe(1);
+  });
+});
+
 describe("createSession — SE26 announceStuckThinking does NOT dispatch CIRCLE_CLICK / HOTKEY_PRESS", () => {
   it("the watchdog firing does NOT auto-cancel — no CIRCLE_CLICK or HOTKEY_PRESS event is dispatched as a side effect", async () => {
     const h = makeHarness();

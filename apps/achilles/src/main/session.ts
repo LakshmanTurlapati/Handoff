@@ -1730,6 +1730,15 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     // must NOT dispatch CIRCLE_CLICK / HOTKEY_PRESS as a side effect
     // of the watchdog firing. The user must still press the hotkey to
     // cancel. This invariant is verified by SE26's spy assertion.
+    //
+    // WR-09 fix: re-arm the watchdog after firing so a Claude that
+    // resumes work briefly then stalls again produces another
+    // affordance. Without this re-arm the watchdog stayed dormant after
+    // the first fire and a stuck Claude could run for 30+ minutes with
+    // the user receiving exactly one 'still working' message. The
+    // re-arm is also a no-op when the watchdog is disposed (SW7), so a
+    // late-fire-during-teardown is safe.
+    deps.stuckThinkingWatchdog?.armForTurn();
   }
 
   function dispose(): void {
