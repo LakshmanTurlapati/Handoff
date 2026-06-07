@@ -463,6 +463,116 @@ describe("SS8: non-Windows symlink failure throws SymlinkNotPermittedError", () 
   });
 });
 
+describe("SS9: WR-01 TOCTOU — symlinkSync EEXIST races a concurrent install", () => {
+  // Race scenario: invocation A's lstatSync reported ENOENT, A proceeded
+  // to symlinkSync, BUT invocation B linked the SAME destination first.
+  // A's symlinkSync raises EEXIST. The function re-probes; if B's link
+  // points at the same source we're idempotent — return
+  // 'already-installed' instead of throwing.
+  it("EEXIST + post-race lstat shows our source — returns 'already-installed' (idempotent)", () => {
+    const dest = "/home/user/.claude/skills/achilles";
+    const src = "/pkg/skill";
+    // Seed: lstat initially reports ENOENT (no existing destination).
+    // Then symlinkSync throws EEXIST (the race condition). The fake's
+    // lstat / readlink behaviour is configured to report our source on
+    // a subsequent probe — simulating that the concurrent invocation
+    // linked the SAME target.
+    const existing = {};
+    const { fs, calls } = buildFsFake({
+      existingDestinations: existing,
+      throwOn: {
+        symlinkSync: { code: "EEXIST", message: "file already exists" },
+      },
+    });
+    // Patch the fake's lstatSync / readlinkSync so the re-probe (after
+    // symlinkSync threw) sees the destination as a symlink pointing at
+    // our requested source. The first lstatSync call must still report
+    // ENOENT so we reach the symlink attempt.
+    let lstatCallCount = 0;
+    const origLstat = fs.lstatSync;
+    fs.lstatSync = (path) => {
+      lstatCallCount += 1;
+      if (lstatCallCount === 1) {
+        return origLstat(path);
+      }
+      // Subsequent lstats: report the destination as a symlink.
+      calls.push({ fn: "lstatSync", args: [path] });
+      return {
+        isSymbolicLink: () => true,
+        isDirectory: () => false,
+        isFile: () => false,
+      };
+    };
+    fs.readlinkSync = (path) => {
+      calls.push({ fn: "readlinkSync", args: [path] });
+      return src;
+    };
+
+    const { logger, messages } = buildLogger();
+    const result = installSkillSymlink({
+      source: src,
+      destination: dest,
+      force: false,
+      fs,
+      platform: "darwin",
+      logger,
+    });
+    expect(result).toEqual({ mode: "already-installed" });
+    // Confirm we re-probed via lstat + readlink.
+    expect(lstatCallCount).toBeGreaterThanOrEqual(2);
+    expect(calls.find((c) => c.fn === "readlinkSync")).toBeDefined();
+    // No fallback copy on the EEXIST-recovers path.
+    expect(calls.filter((c) => c.fn === "cpSync")).toHaveLength(0);
+    // Idempotency log line surfaced.
+    expect(
+      messages.find((m) => m.msg.includes("already installed")),
+    ).toBeDefined();
+  });
+
+  it("EEXIST + post-race lstat shows a DIFFERENT source, force=false — throws ExistingDestinationConflictError", () => {
+    const dest = "/home/user/.claude/skills/achilles";
+    const src = "/pkg/skill";
+    const wrong = "/some/other/path";
+    const { fs, calls } = buildFsFake({
+      throwOn: {
+        symlinkSync: { code: "EEXIST", message: "file already exists" },
+      },
+    });
+    let lstatCallCount = 0;
+    fs.lstatSync = (path) => {
+      lstatCallCount += 1;
+      if (lstatCallCount === 1) {
+        // Initial probe: ENOENT (we observed no destination).
+        const err = new Error(`ENOENT: ${path}`);
+        (err as unknown as { code: string }).code = "ENOENT";
+        throw err;
+      }
+      calls.push({ fn: "lstatSync", args: [path] });
+      return {
+        isSymbolicLink: () => true,
+        isDirectory: () => false,
+        isFile: () => false,
+      };
+    };
+    fs.readlinkSync = (path) => {
+      calls.push({ fn: "readlinkSync", args: [path] });
+      return wrong;
+    };
+
+    const { logger } = buildLogger();
+    expect(() =>
+      installSkillSymlink({
+        source: src,
+        destination: dest,
+        force: false,
+        fs,
+        platform: "darwin",
+        logger,
+      }),
+    ).toThrowError(ExistingDestinationConflictError);
+  });
+});
+
 describe("logger emits zero emojis (CLAUDE.md global)", () => {
   it("symlink success message does NOT contain Extended_Pictographic codepoints", () => {
     const { fs } = buildFsFake({});

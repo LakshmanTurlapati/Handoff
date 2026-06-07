@@ -249,6 +249,16 @@ export function installSkillSymlink(
   // Step 3: try the symlink. On macOS / Linux this is the only path
   // that returns `mode: 'symlink'`; on Windows the catch below may
   // fall through to a copy.
+  //
+  // WR-01 (TOCTOU): two concurrent `achilles install-skill` invocations
+  // (or a Claude Code skill-discovery scan racing the second call) can
+  // both observe ENOENT on lstatSync and then both attempt symlinkSync.
+  // When the second symlinkSync hits EEXIST, re-probe the destination —
+  // if it now points at our requested source the install is idempotent
+  // and we report `already-installed`; otherwise the race left a
+  // genuinely-different link and we raise the conflict on the second
+  // pass so the operator sees the same error they would have seen in
+  // the non-racing case.
   try {
     fs.symlinkSync(source, destination, "dir");
     logger.info(
@@ -257,6 +267,41 @@ export function installSkillSymlink(
     return { mode: "symlink" };
   } catch (err) {
     const code = getErrorCode(err);
+    if (code === "EEXIST") {
+      // A concurrent invocation linked the same destination between our
+      // lstat probe and our symlink call. Re-probe to decide whether
+      // the in-flight link is ours.
+      try {
+        const stat = fs.lstatSync(destination);
+        if (stat.isSymbolicLink()) {
+          const currentTarget = resolve(fs.readlinkSync(destination));
+          const normalisedSource = resolve(source);
+          if (currentTarget === normalisedSource) {
+            logger.info(
+              `[achilles] skill already installed at ${destination} (linked by a concurrent install); nothing to do.`,
+            );
+            return { mode: "already-installed" };
+          }
+          if (!force) {
+            throw new ExistingDestinationConflictError(
+              `[achilles] Destination ${destination} was concurrently linked to a different source (${currentTarget}); the requested source is ${source}. Pass --force to overwrite.`,
+            );
+          }
+        }
+        // Concurrent invocation created a directory / file (or a
+        // symlink we just decided to overwrite); fall through to the
+        // SymlinkNotPermittedError below with EEXIST detail so the
+        // caller sees the genuine race condition.
+      } catch (probeErr) {
+        // Re-probe itself failed; treat as the original EEXIST condition.
+        // Conflict errors raised above are intentional and must
+        // propagate.
+        if (probeErr instanceof ExistingDestinationConflictError) {
+          throw probeErr;
+        }
+        // Fall through to SymlinkNotPermittedError below.
+      }
+    }
     if (
       platform === "win32" &&
       code !== undefined &&
