@@ -19,37 +19,24 @@ A developer can hand off intent to their terminal coding agent through the most 
 
 **v1.1 — Handoff Install & Launch (paused):** In progress at the time of the v1.2 pivot. Two phases completed (npm distribution, Codex-native `/handoff`); Phase 08.1 (authless hosted launch) was inserted and partially scoped. v1.1 artifacts remain in `.planning/phases/06-*`, `07-*`, and `08.1-*` for resumption after v1.2 ships.
 
-**v1.2 — Achilles (current):** Voice companion skill for Claude Code. New vertical, distinct from Handoff but living in the same monorepo.
-
-## Current Milestone: v1.2 Achilles
-
-**Goal:** Ship a voice companion that installs as a Claude Code skill and as an npm CLI, opens a small reactive UI (circle + waveform driven by the live mic), routes transcripts through ElevenLabs into Claude Code in the terminal, and speaks Claude Code's acknowledgement and completion back through ElevenLabs.
-
-**Target features:**
-- Achilles distributable as a Claude Code skill **and** as an npm-installable CLI from one source of truth
-- Small floating UI surface — dynamic circle, waveform reacting to live microphone amplitude
-- ElevenLabs STT: microphone capture transcribed to text in near real time
-- ElevenLabs TTS: spoken acknowledgement when work starts, spoken summary when work completes
-- Transcript piped into Claude Code in the terminal as if typed by the user
-- Minimal embedded system prompt that instructs Claude Code to first acknowledge what it is about to do, then announce completion in a tone fit for spoken playback
-- Cloud-hosted Claude Code is the primary install target this milestone
+**v1.2 — Achilles (shipped 2026-06-07):** Voice companion for Claude Code. Three packages (`@achilles/voice-protocol`, `@achilles/voice-stt`, `@achilles/voice-tts`) + Claude Code bridge subprocess wrapper + Electron floating-UI shell + end-to-end orchestrator with embedded companion system prompt + dual-distribution surface (npm CLI + Claude Code skill from one source of truth) + signed cross-platform installers + cross-cutting hardening (latency probe, opt-in transcript persistence, circuit-breaker incident detection, stuck-thinking watchdog, suspend/resume + device-change handlers). All 30 v1.2 requirements verified code-side; audit verdict `tech_debt` with documented v1.3 followups. See `.planning/milestones/v1.2-ROADMAP.md` and `.planning/milestones/v1.2-MILESTONE-AUDIT.md`.
 
 ## Requirements
 
 ### Validated
 
-No milestone is fully validated yet. v1.0 shipped with deferred manual verification and missing milestone verification artifacts across several phases. v1.1 is paused before validation.
+**v1.2 (30 requirements, all verified code-side; live-environment validation routed to release operator):**
+- DIST-01..05 (distribution: npm install + install-skill + one-source-of-truth + init wizard + signed installers)
+- UI-01..07 + LOOP-02 (floating UI shell: panel + 5 states + reactive circle + waveform + drag + hotkey + macOS mic permission + transcript display)
+- LOOP-01, LOOP-03..07 (mic capture, Claude subprocess injection, ack/spoken-summary extraction, half-duplex turn-taking, latency budget, cancel)
+- PROMPT-01..05 (embedded companion prompt + word caps + selective TTS routing + failure override)
+- SAFE-01..06 (API key main-process-only + opt-in persistence + ElevenLabs-only allowlist + sandwich-defence + graceful degradation + stuck-thinking/suspend/device-change)
+
+v1.0 and v1.1 milestones each retain their original validation status (v1.0 archived with verification debt; v1.1 paused before validation).
 
 ### Active
 
-<!-- v1.2 active requirements are populated by REQUIREMENTS.md after scoping. -->
-
-- [ ] Install Achilles as a Claude Code skill from a single artifact
-- [ ] Install Achilles as a global npm CLI from the same artifact
-- [ ] Launch a small, always-on-top UI showing a circle and a waveform that react to live microphone amplitude
-- [ ] Transcribe the user's voice via ElevenLabs and forward the transcript to Claude Code in the terminal
-- [ ] Speak an acknowledgement before Claude Code starts work and a summary after Claude Code completes, using ElevenLabs TTS
-- [ ] Ship a minimal embedded system prompt that drives the spoken acknowledgement and completion behaviour
+No active milestone. Run `/gsd:new-milestone` to scope v1.3.
 
 ### Paused (v1.1 — Handoff Install & Launch)
 
@@ -80,7 +67,9 @@ The repository contains first-party product code under `apps/` and `packages/`, 
 
 Achilles will land as a new vertical inside the same monorepo (working name `apps/achilles` and supporting `packages/voice-*` modules — exact layout decided during planning). It does **not** depend on the Handoff bridge/relay path; it talks directly to Claude Code on the developer's machine and to ElevenLabs over outbound HTTPS/WSS.
 
-The product direction shifted at v1.2: Handoff remains the existing remote-window product, but the immediate user goal is a voice front end for Claude Code that is installable everywhere (skill + npm) and works against cloud-hosted Claude Code first. v1.1 Handoff work is paused — its phases stay in `.planning/phases/` for resumption after v1.2 ships.
+The product direction shifted at v1.2: Handoff remains the existing remote-window product, but the immediate user goal is a voice front end for Claude Code. v1.2 shipped on 2026-06-07; v1.1 Handoff work remains paused and ready for resumption.
+
+Per the v1.2 audit, the v1.3 candidate scope includes: (a) IN-01 ElevenLabs SDK migration once a sandbox account is provisioned, (b) renderer-side device-change composition-root binding to fully close SAFE-06, (c) voice picker UI (VOICE-01), (d) cloud Claude Code routing (CLOUD-01), or (e) resuming v1.1 Handoff install work (HOFF-01..04). The release operator owns live-environment validation: cross-OS fresh install, macOS code-signing identity, real ElevenLabs + Claude round-trip, real OS suspend/resume + device hot-swap, and real LOOP-06 latency budget measurement.
 
 ## Next Milestone Goals
 
@@ -135,4 +124,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-06 after pivoting to v1.2 Achilles (voice companion for Claude Code). v1.1 Handoff Install & Launch paused.*
+*Last updated: 2026-06-07 after v1.2 Achilles shipped (audit verdict tech_debt; release-operator validation pending).*
