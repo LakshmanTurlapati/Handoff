@@ -603,11 +603,24 @@ async function bootstrap(): Promise<void> {
     ): void => {
       window.webContents.send(channel, payload);
       if (channel === IPC_INCIDENT_TTS_FAIL) {
-        const p = payload as { summaryText?: string } | null | undefined;
-        const summaryText = p?.summaryText;
-        if (typeof summaryText === "string" && summaryText.length > 0) {
-          process.stderr.write(`[achilles] TTS unavailable: ${summaryText}\n`);
-        }
+        // WR-05 fix: when summaryText is empty (e.g. the TTS circuit
+        // opens during the ack path before any summary is computed) the
+        // prior implementation silently skipped the stderr write. The
+        // user — whose TTS just died — got NO terminal output AND NO
+        // audio. PITFALLS #18 requires "print the completion text to the
+        // launching terminal so the user does not lose it"; even an
+        // empty completion warrants a minimal log line so the user knows
+        // the TTS failed. We now always emit a line and surface the
+        // classified kind for diagnostic clarity.
+        const p =
+          payload as { summaryText?: string; kind?: string } | null | undefined;
+        const summaryText = p?.summaryText ?? "";
+        const kind = p?.kind ?? "unknown";
+        process.stderr.write(
+          summaryText.length > 0
+            ? `[achilles] TTS unavailable (${kind}): ${summaryText}\n`
+            : `[achilles] TTS unavailable (${kind}); no completion summary cached.\n`,
+        );
       }
     };
     // Plan 14-04 SAFE-06 stuck-thinking watchdog construction. The
