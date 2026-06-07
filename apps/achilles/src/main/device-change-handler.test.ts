@@ -137,6 +137,54 @@ describe("classifyDevice — DC3 label heuristics", () => {
     expect(result.kind).toBe("speaker");
     expect(result.isBluetoothHfp).toBe(false);
   });
+
+  // WR-01 regression. The classifier previously applied the HFP heuristic to
+  // any non-audiooutput device, including videoinput. A camera labelled
+  // 'Hands-Free' or 'HFP' would falsely trigger hfpDowngradeDetected=true
+  // and the orchestrator would re-acquire the mic stream as a side effect.
+  it("WR-01: videoinput with 'Hands-Free' label does NOT trigger isBluetoothHfp", () => {
+    const dev: MediaDeviceInfoLike = {
+      deviceId: "dev-006",
+      kind: "videoinput",
+      label: "Hands-Free Display Camera",
+    };
+    const result = classifyDevice(dev);
+    expect(result.isBluetoothHfp).toBe(false);
+  });
+
+  it("WR-01: videoinput with 'HFP' label does NOT trigger isBluetoothHfp", () => {
+    const dev: MediaDeviceInfoLike = {
+      deviceId: "dev-007",
+      kind: "videoinput",
+      label: "Bluetooth HFP Camera",
+    };
+    const result = classifyDevice(dev);
+    expect(result.isBluetoothHfp).toBe(false);
+  });
+
+  it("WR-01: audiooutput with HFP-style label does NOT trigger isBluetoothHfp", () => {
+    // audiooutput cannot downgrade an audio INPUT profile; the HFP heuristic
+    // is for the mic surface only.
+    const dev: MediaDeviceInfoLike = {
+      deviceId: "dev-008",
+      kind: "audiooutput",
+      label: "Hands-Free Headset",
+    };
+    const result = classifyDevice(dev);
+    expect(result.kind).toBe("speaker");
+    expect(result.isBluetoothHfp).toBe(false);
+  });
+
+  it("WR-01: audioinput with HFP-style label STILL triggers isBluetoothHfp (no regression)", () => {
+    const dev: MediaDeviceInfoLike = {
+      deviceId: "dev-009",
+      kind: "audioinput",
+      label: "Hands-Free AirPods",
+    };
+    const result = classifyDevice(dev);
+    expect(result.kind).toBe("mic");
+    expect(result.isBluetoothHfp).toBe(true);
+  });
 });
 
 describe("createDeviceChangeMonitor — DC1 surface", () => {

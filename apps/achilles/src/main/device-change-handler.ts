@@ -178,20 +178,42 @@ const HFP_REGEX = /Bluetooth.*Mic/i;
  * ClassifiedDevice using the label-pattern HFP heuristic. Pure: no
  * side effects, no clock reads, no IPC.
  *
+ * WR-01 fix: limit the HFP-downgrade heuristic to audioinput devices.
+ * Previously the classifier relabelled `videoinput` as `'mic'` and
+ * applied the HFP label pattern to it — so a Bluetooth camera whose
+ * label contained 'Hands-Free' (e.g., 'Hands-Free Display Camera')
+ * would falsely trigger hfpDowngradeDetected=true. The orchestrator
+ * would then run a spurious soft re-acquire of the mic stream.
+ *
+ * Behaviour after the fix:
+ *
+ *   - audioinput -> {kind: 'mic',     isBluetoothHfp: <label check>}
+ *   - audiooutput -> {kind: 'speaker', isBluetoothHfp: false}
+ *   - videoinput -> {kind: 'mic',     isBluetoothHfp: false}
+ *     (kind defaulted to 'mic' for back-compat with the prior
+ *     normalisation; the HFP flag is FORCED false because video
+ *     devices are not audio devices and cannot downgrade an audio
+ *     profile.)
+ *
  * @public
  */
 export function classifyDevice(info: MediaDeviceInfoLike): ClassifiedDevice {
   const label = info.label;
-  const isBluetoothHfp =
-    label.includes("Hands-Free") ||
-    label.includes("HFP") ||
-    HFP_REGEX.test(label);
   // Map W3C kind union to the audio-only subset the orchestrator cares
-  // about. videoinput is filtered out at the call site (we only
-  // enumerate audio devices) but defensively normalise to 'mic' if it
-  // somehow lands here.
+  // about.
   const kind: "mic" | "speaker" =
     info.kind === "audiooutput" ? "speaker" : "mic";
+  // WR-01 fix: only audioinput devices participate in the HFP-downgrade
+  // heuristic. A 'Hands-Free Display Camera' (videoinput) must NOT
+  // surface as an HFP downgrade — the orchestrator's response is a
+  // mic-stream re-acquire, which is meaningless when the changed
+  // device is video. audiooutput is also excluded because it cannot
+  // downgrade an audio INPUT profile.
+  const isBluetoothHfp =
+    info.kind === "audioinput" &&
+    (label.includes("Hands-Free") ||
+      label.includes("HFP") ||
+      HFP_REGEX.test(label));
   return {
     deviceId: info.deviceId,
     kind,
