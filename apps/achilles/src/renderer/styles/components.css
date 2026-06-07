@@ -388,3 +388,86 @@
     opacity: 0.85;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────── */
+/* Plan 14-03 SAFE-05 graceful-degradation UX                      */
+/*                                                                 */
+/* TypedFallback overlay is positioned over the transcript region  */
+/* (UI-SPEC s2 transcript: top:176 left:16 right:16, 228x64) so it */
+/* substitutes for the transcript stream when STT is unavailable.  */
+/* The locked label + input both sit inside the same pixel grid    */
+/* slot so the floating shell silhouette is unchanged.             */
+/*                                                                 */
+/* IncidentStatus dot anchors to the top-left of the floating     */
+/* window — opposite the RecordingIndicator (top-right) so both   */
+/* affordances are visible simultaneously without overlap.        */
+/* ─────────────────────────────────────────────────────────────── */
+.typed-fallback {
+  position: absolute;
+  top: 176px;
+  left: 16px;
+  width: 228px;
+  height: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(28, 30, 38, 0.94);
+  border: var(--achilles-border-width) solid var(--achilles-border);
+  pointer-events: auto;
+  z-index: 10;
+}
+
+.typed-fallback-label {
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--achilles-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.typed-fallback-input {
+  font-family: var(--font-family);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  color: var(--achilles-text);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--achilles-border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.typed-fallback-input:focus {
+  border-color: var(--achilles-listening);
+  box-shadow: 0 0 0 1px var(--achilles-listening);
+}
+
+.incident-status-dot {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  pointer-events: auto;
+  z-index: 5;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  background: var(--achilles-status-ok);
+}
+
+.incident-status-dot.incident-status-ok {
+  background: var(--achilles-status-ok);
+}
+
+.incident-status-dot.incident-status-degraded {
+  background: var(--achilles-status-degraded);
+}
+
+.incident-status-dot.incident-status-failed {
+  background: var(--achilles-status-failed);
+}

@@ -19,6 +19,9 @@ import {
   ACHILLES_STATES,
   HOTKEY_MODES,
   IPC_ERROR,
+  IPC_INCIDENT_STATUS,
+  IPC_INCIDENT_STT_FAIL,
+  IPC_INCIDENT_TTS_FAIL,
   IPC_INIT_API_KEY_RESULT,
   IPC_INIT_API_KEY_SUBMIT,
   IPC_INIT_MIC_PERMISSION_REQUEST,
@@ -42,6 +45,7 @@ import {
   IPC_TTS_AMPLITUDE,
   IPC_TTS_CHUNK,
   IPC_TTS_PLAYBACK_COMPLETE,
+  IPC_TYPED_FALLBACK_SUBMIT,
   IPC_UPDATE_HOTKEY_CONFIG,
   IPC_UPDATE_WINDOW_POSITION,
   IPC_UTTERANCE_COMMIT,
@@ -450,6 +454,110 @@ export type TranscriptPersistenceStatePayload = z.infer<
 >;
 
 // ─────────────────────────────────────────────────────────────────────
+// Phase 14-03 — Incident detection (SAFE-05)
+//
+// Four schemas paired with the four IPC channels added in
+// constants.ts. The failure-kind union is a SHARED schema so the STT
+// and TTS broadcasts speak the same vocabulary; the orchestrator
+// classifier maps every thrown ElevenLabs error into one of these
+// five buckets. Each payload schema is `.strict()` so a compromised
+// renderer (or a future field-leak refactor in main) cannot smuggle
+// extra fields across the trust boundary.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Locked failure-kind vocabulary shared across the three SAFE-05
+ * payload schemas. The same five values appear in
+ * incident-detection.ts's ClassifiedErrorKind type — these must be
+ * kept in sync.
+ */
+export const IncidentFailureKindSchema = z.union([
+  z.literal("auth"),
+  z.literal("rate_limit"),
+  z.literal("server"),
+  z.literal("network"),
+  z.literal("unknown"),
+]);
+
+export type IncidentFailureKind = z.infer<typeof IncidentFailureKindSchema>;
+
+/**
+ * Main → Renderer. Carries the STT failure kind + attempt count when
+ * the STT circuit-breaker opens. The renderer's App.tsx subscribes,
+ * sets `typedFallbackActive=true`, and mounts the TypedFallback
+ * overlay so the user can continue the conversation by typing.
+ */
+export const IncidentSttFailPayloadSchema = z
+  .object({
+    kind: IncidentFailureKindSchema,
+    attemptCount: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type IncidentSttFailPayload = z.infer<typeof IncidentSttFailPayloadSchema>;
+
+/**
+ * Main → Renderer. Carries the TTS failure kind + the spoken summary
+ * text the user did NOT hear + the attempt count. The renderer
+ * surfaces the summaryText visibly in TranscriptOverlay; main also
+ * writes the same text to process.stderr via the index.ts sendIpc
+ * tap so the launching terminal keeps a copy.
+ */
+export const IncidentTtsFailPayloadSchema = z
+  .object({
+    kind: IncidentFailureKindSchema,
+    summaryText: z.string(),
+    attemptCount: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type IncidentTtsFailPayload = z.infer<typeof IncidentTtsFailPayloadSchema>;
+
+/**
+ * Main → Renderer. Broadcasts every composed health snapshot of the
+ * STT + TTS circuit-breaker pair. Each per-surface field is one of
+ * 'ok' | 'degraded' | 'failed' which the IncidentStatus dot maps to
+ * green / yellow / red.
+ */
+export const IncidentStatusPayloadSchema = z
+  .object({
+    sttHealth: z.union([
+      z.literal("ok"),
+      z.literal("degraded"),
+      z.literal("failed"),
+    ]),
+    ttsHealth: z.union([
+      z.literal("ok"),
+      z.literal("degraded"),
+      z.literal("failed"),
+    ]),
+  })
+  .strict();
+
+export type IncidentStatusPayload = z.infer<typeof IncidentStatusPayloadSchema>;
+
+/**
+ * Renderer → Main. Carries the user-typed fallback prompt when STT
+ * is unavailable. The handler in ipc-bridge.ts routes the text
+ * through session.handleTypedPrompt(text) which re-uses the SAME
+ * sandwich-defence + bridge.send pipeline as a spoken utterance
+ * (SAFE-04 invariant preserved for the typed path).
+ *
+ * The min(1) constraint mirrors the renderer-side guard in
+ * TypedFallback — both surfaces reject empty submissions so the
+ * orchestrator never sees a no-op prompt.
+ */
+export const TypedFallbackSubmitPayloadSchema = z
+  .object({
+    text: z.string().min(1),
+  })
+  .strict();
+
+export type TypedFallbackSubmitPayload = z.infer<
+  typeof TypedFallbackSubmitPayloadSchema
+>;
+
+// ─────────────────────────────────────────────────────────────────────
 // Channel-keyed schema map + helpers
 // ─────────────────────────────────────────────────────────────────────
 
@@ -497,6 +605,13 @@ export const IPC_PAYLOAD_SCHEMAS: Record<string, z.ZodTypeAny> = {
   [IPC_INIT_WIZARD_DONE]: InitWizardDonePayloadSchema,
   // Phase 14-02 SAFE-02 transcript persistence affordance state.
   [IPC_TRANSCRIPT_PERSISTENCE_STATE]: TranscriptPersistenceStatePayloadSchema,
+  // Phase 14-03 SAFE-05 incident-detection broadcasts +
+  // typed-fallback inbound. Each schema is `.strict()` so unknown
+  // fields are rejected at the boundary.
+  [IPC_INCIDENT_STT_FAIL]: IncidentSttFailPayloadSchema,
+  [IPC_INCIDENT_TTS_FAIL]: IncidentTtsFailPayloadSchema,
+  [IPC_INCIDENT_STATUS]: IncidentStatusPayloadSchema,
+  [IPC_TYPED_FALLBACK_SUBMIT]: TypedFallbackSubmitPayloadSchema,
 };
 
 /**

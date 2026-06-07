@@ -71,6 +71,9 @@ import type {
 } from "@achilles/claude-code-bridge";
 
 import {
+  IPC_INCIDENT_STATUS,
+  IPC_INCIDENT_STT_FAIL,
+  IPC_INCIDENT_TTS_FAIL,
   IPC_STT_TOKEN,
   IPC_TTS_CHUNK,
 } from "../shared/constants.js";
@@ -82,6 +85,10 @@ import type {
   MicFramePayload,
   UtteranceCommitPayload,
 } from "./../shared/ipc-schemas.js";
+import type {
+  CircuitBreaker,
+  ClassifiedErrorKind,
+} from "./incident-detection.js";
 import {
   detectManipulationTokens,
   wrapTranscript,
@@ -356,6 +363,27 @@ export interface AchillesSessionDeps {
    * (verified structurally by transcript-store.test.ts TS2 + TS10).
    */
   transcriptStore?: TranscriptStoreLike;
+  /**
+   * Plan 14-03 — optional SAFE-05 STT circuit breaker. When provided,
+   * onHotkeyPress + requestSttToken route their mintSttToken() call
+   * through `sttCircuit.attempt(...)`. On exhausted=true the
+   * orchestrator broadcasts IPC_INCIDENT_STT_FAIL and dispatches
+   * INJECT_ERROR; the renderer's TypedFallback overlay mounts so the
+   * user can continue by typing. When undefined the orchestrator's
+   * behaviour is bit-for-bit identical to its pre-14-03 surface.
+   */
+  sttCircuit?: CircuitBreaker;
+  /**
+   * Plan 14-03 — optional SAFE-05 TTS circuit breaker. When provided,
+   * openTtsClient routes `tts.open()` through
+   * `ttsCircuit.attempt(...)`. On exhausted=true the orchestrator
+   * broadcasts IPC_INCIDENT_TTS_FAIL with the cached spoken-summary
+   * text; the renderer surfaces the text visibly and main writes it
+   * to process.stderr (via the index.ts sendIpc tap). When undefined
+   * the orchestrator's behaviour is bit-for-bit identical to its
+   * pre-14-03 surface.
+   */
+  ttsCircuit?: CircuitBreaker;
 }
 
 /**
@@ -427,6 +455,18 @@ export interface AchillesSession {
    * is a no-op.
    */
   dispose(): void;
+  /**
+   * Plan 14-03 SAFE-05 — typed-fallback entry point. The renderer's
+   * TypedFallback overlay calls bridge.sendTypedFallbackSubmit({text})
+   * when STT is unavailable; the IPC handler in ipc-bridge.ts forwards
+   * the text to this method. The implementation routes the text
+   * through detectManipulationTokens + wrapTranscript + bridge.send
+   * IDENTICALLY to onUtteranceCommit's success path — there is no
+   * parallel code path. The latency probe (Plan 14-01) treats the
+   * typed prompt as a zero-STT-cost utterance (markSpeechEnd at now,
+   * stt_committed recorded immediately).
+   */
+  handleTypedPrompt(text: string): void;
   readonly metrics: AchillesSessionMetrics;
 }
 
@@ -501,6 +541,14 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
   // can detect a stale consumer when an utterance is cancelled.
   let activeConsumerPromise: Promise<void> | null = null;
   let disposed = false;
+  // Plan 14-03 SAFE-05: cached spoken-summary text for the current
+  // turn. Populated inside consumeClaudeEvents process_exit branch
+  // BEFORE the (potentially failing) openTtsClient call so when the
+  // TTS circuit opens, the IPC_INCIDENT_TTS_FAIL payload carries the
+  // text the user did NOT hear. The cache is reset every turn via
+  // resetTurnLocals() so a stale prior summary cannot bleed into the
+  // next turn's incident payload.
+  let cachedSummaryText = "";
   // Mirror of the controller's current state — accessed in the hot
   // path of onMicFrame to gate frames without round-tripping through
   // controller.now() every frame. Updated on every dispatch.
@@ -543,6 +591,44 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     ttsOpenedForTurn = false;
     speakingEnteredForTurn = false;
     observedToolErrors = [];
+    cachedSummaryText = "";
+  }
+
+  /**
+   * Plan 14-03 SAFE-05 helper. Maps a CircuitBreaker.status() snapshot
+   * into the IncidentHealth bucket used by the renderer:
+   *
+   *   - closed  -> 'ok'
+   *   - half-open OR closed-with-failures -> 'degraded'
+   *   - open    -> 'failed'
+   *
+   * Pure. No side effects. When the breaker is undefined (no SAFE-05
+   * wiring), the surface is treated as 'ok' so a downgraded boot path
+   * still produces a sane initial status broadcast.
+   */
+  function bucketCircuitHealth(
+    breaker: CircuitBreaker | undefined,
+  ): "ok" | "degraded" | "failed" {
+    if (breaker === undefined) return "ok";
+    const status = breaker.status();
+    if (status.state === "open") return "failed";
+    if (status.state === "half-open") return "degraded";
+    if (status.consecutiveFailures > 0) return "degraded";
+    return "ok";
+  }
+
+  /**
+   * Compose the per-surface health snapshot + broadcast it to the
+   * renderer via IPC_INCIDENT_STATUS. The renderer mirrors the
+   * snapshot into its IncidentStatus dot. Idempotent at the IPC layer
+   * — the renderer dedupes identical consecutive payloads if it
+   * chooses; main does not bother because the volume is bounded by
+   * circuit-breaker state transitions (rare).
+   */
+  function broadcastIncidentStatus(): void {
+    const sttHealth = bucketCircuitHealth(deps.sttCircuit);
+    const ttsHealth = bucketCircuitHealth(deps.ttsCircuit);
+    deps.sendIpc(IPC_INCIDENT_STATUS, { sttHealth, ttsHealth });
   }
 
   /**
@@ -613,6 +699,15 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
    * Open the TTS stream lazily on the first ack emission, fan out the
    * orchestrator's TTS consumer that broadcasts each chunk via
    * IPC_TTS_CHUNK to the renderer playback-queue.
+   *
+   * Plan 14-03 SAFE-05 — when deps.ttsCircuit is supplied, the
+   * tts.open() call is routed through `ttsCircuit.attempt(...)`. On
+   * exhausted=true the orchestrator broadcasts IPC_INCIDENT_TTS_FAIL
+   * carrying the cached spoken-summary text + the classified kind, AND
+   * throws so the caller observes the failure on the same path the
+   * pre-14-03 catch handled. The breaker also re-broadcasts the
+   * composed IncidentStatus snapshot so the renderer's dot tracks the
+   * state change.
    */
   async function openTtsClient(): Promise<OrchestratorTtsClient> {
     if (currentTtsClient !== null) return currentTtsClient;
@@ -624,7 +719,28 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     // guard `currentTtsClient !== null && ttsOpenedForTurn` skipped
     // close() and the underlying WebSocket / pending fetch leaked.
     try {
-      await tts.open();
+      if (deps.ttsCircuit !== undefined) {
+        const outcome = await deps.ttsCircuit.attempt(() => tts.open());
+        if ("error" in outcome) {
+          if (outcome.exhausted) {
+            // Broadcast the incident BEFORE the throw so the renderer
+            // surfaces the affordance even if the catch below logs the
+            // failure and best-effort-closes the handle.
+            const kind: ClassifiedErrorKind = outcome.error.kind;
+            deps.sendIpc(IPC_INCIDENT_TTS_FAIL, {
+              kind,
+              summaryText: cachedSummaryText,
+              attemptCount: outcome.attemptCount,
+            });
+            broadcastIncidentStatus();
+          }
+          // Always re-throw so the original failure path (the
+          // try/catch below) does its best-effort close + log.
+          throw outcome.error.cause ?? new Error(`tts ${outcome.error.kind}`);
+        }
+      } else {
+        await tts.open();
+      }
     } catch (err) {
       log(
         `[achilles] tts open failed: ${(err as Error).message}`,
@@ -789,6 +905,15 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
           }
         }
         const norm = normaliseForTts(summaryBody);
+        // Plan 14-03 SAFE-05: cache the spoken-summary text BEFORE
+        // the (potentially failing) openTtsClient call. When the TTS
+        // circuit opens during the catch path, the
+        // IPC_INCIDENT_TTS_FAIL payload carries this text so the
+        // renderer can surface it visibly + the main process can
+        // print it to the launching terminal's stderr (via the
+        // index.ts sendIpc tap). PITFALLS #18 "cache most recent
+        // completion text locally" invariant.
+        cachedSummaryText = norm.normalised;
         // Plan 14-02 SAFE-02: persist the assistant summary body —
         // the post-normalisation, post-PROMPT-05-override text the
         // user actually hears. We use summaryBody (NOT norm.normalised)
@@ -881,6 +1006,40 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     // idle → listening: mint token + broadcast.
     const next = dispatch({ type: "HOTKEY_PRESS" });
     log(`[achilles] hotkey press: state=${next}`);
+    // Plan 14-03 SAFE-05: route the mintSttToken() call through the
+    // STT circuit-breaker when configured. On exhausted=true the
+    // orchestrator broadcasts IPC_INCIDENT_STT_FAIL + dispatches
+    // INJECT_ERROR; the renderer's TypedFallback overlay mounts so
+    // the user can continue by typing. When the breaker is undefined
+    // (degraded boot / tests that do not exercise SAFE-05), the
+    // legacy try/catch path is preserved bit-for-bit.
+    if (deps.sttCircuit !== undefined) {
+      const outcome = await deps.sttCircuit.attempt(() => deps.mintSttToken());
+      if ("error" in outcome) {
+        if (outcome.exhausted) {
+          deps.sendIpc(IPC_INCIDENT_STT_FAIL, {
+            kind: outcome.error.kind,
+            attemptCount: outcome.attemptCount,
+          });
+          broadcastIncidentStatus();
+          dispatch({ type: "INJECT_ERROR", kind: "unknown" });
+          log(
+            `[achilles] stt circuit open: kind=${outcome.error.kind}`,
+          );
+        } else {
+          log(
+            `[achilles] stt token mint failed: ` +
+              `${(outcome.error.cause as Error | undefined)?.message ?? outcome.error.kind}`,
+          );
+        }
+        return;
+      }
+      deps.sendIpc(IPC_STT_TOKEN, {
+        token: outcome.result.token,
+        expiresAt: outcome.result.expiresAt,
+      });
+      return;
+    }
     try {
       const minted = await deps.mintSttToken();
       deps.sendIpc(IPC_STT_TOKEN, {
@@ -912,6 +1071,35 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
    */
   async function requestSttToken(): Promise<void> {
     if (disposed) return;
+    // Plan 14-03 SAFE-05: route the mintSttToken() call through the
+    // STT circuit-breaker when configured. The refresh path is
+    // identical to onHotkeyPress's mint path — same incident
+    // broadcast, same status broadcast — except we do NOT dispatch
+    // INJECT_ERROR because the refresh is a mid-turn token rotation
+    // and the user-facing state should not flip to 'error' just
+    // because a token refresh exhausted (the in-flight turn continues
+    // until its own boundary fires).
+    if (deps.sttCircuit !== undefined) {
+      const outcome = await deps.sttCircuit.attempt(() => deps.mintSttToken());
+      if ("error" in outcome) {
+        if (outcome.exhausted) {
+          deps.sendIpc(IPC_INCIDENT_STT_FAIL, {
+            kind: outcome.error.kind,
+            attemptCount: outcome.attemptCount,
+          });
+          broadcastIncidentStatus();
+        }
+        log(
+          `[achilles] stt token refresh failed: kind=${outcome.error.kind}`,
+        );
+        return;
+      }
+      deps.sendIpc(IPC_STT_TOKEN, {
+        token: outcome.result.token,
+        expiresAt: outcome.result.expiresAt,
+      });
+      return;
+    }
     try {
       const minted = await deps.mintSttToken();
       deps.sendIpc(IPC_STT_TOKEN, {
@@ -925,41 +1113,28 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     }
   }
 
-  function onUtteranceCommit(payload: UtteranceCommitPayload): void {
-    if (disposed) return;
-    // CR-03 toggle-mode commit race: in toggle mode the user's second
-    // hotkey press dispatches HOTKEY_PRESS (listening → processing) BEFORE
-    // the renderer's IPC_UTTERANCE_COMMIT lands. Previously the guard
-    // here was `mirroredState !== "listening"`, which silently dropped
-    // the commit and the user's voice never reached Claude.
-    //
-    // Relax the guard to accept commits from BOTH `listening` AND
-    // `processing`. The toggle-hotkey path has already advanced the
-    // visible state but the commit is still in-flight, and the user
-    // clearly intends to commit. From `speaking` / `idle` / `error` the
-    // commit is still dropped — those states are out-of-band for a
-    // valid utterance-commit IPC.
-    if (mirroredState !== "listening" && mirroredState !== "processing") {
-      log(
-        `[achilles] dropping utterance-commit: state=${mirroredState}`,
-      );
-      return;
-    }
-    // Reset per-turn locals before we start.
-    resetTurnLocals();
-    accumulatedText = "";
-    // Plan 14-01: anchor the LOOP-06 sample at the renderer's
-    // committedAt epoch (the STT WebSocket's commit timestamp — the
-    // documented "speech-end" boundary) and record the first stage
-    // 'stt_committed' at the current nowImpl tick. markSpeechEnd
-    // resets any prior in-flight slot so a cancelled previous turn
-    // does not contaminate this sample.
-    deps.latencyProbe?.markSpeechEnd(payload.committedAt, payload.id);
-    deps.latencyProbe?.recordStage("stt_committed");
+  /**
+   * Plan 14-03 SAFE-05 shared commit pipeline. Both onUtteranceCommit
+   * (spoken path) AND handleTypedPrompt (typed-fallback path) route
+   * through this helper so there is exactly ONE pipeline:
+   *
+   *   1. detectManipulationTokens (passive warn-only)
+   *   2. wrapTranscript (SAFE-04 sandwich-defence wrap)
+   *   3. transcriptStore.appendTurn (raw text, role=user)
+   *   4. STT_COMMITTED dispatch
+   *   5. claudeFactory + bridge.send (CR-04 wrapped)
+   *   6. consumeClaudeEvents drain (consumer promise captured)
+   *
+   * The single-pipeline invariant is verified by SE20: the typed
+   * prompt's bridge.send captured-payload starts with DELIM_START +
+   * contains REMINDER_LINE — bit-for-bit identical to a spoken
+   * utterance.
+   */
+  function commitText(rawText: string): void {
     // SAFE-04 sandwich-defence. Wrap BEFORE forwarding to the bridge.
     // The detector is the passive-observer warning path — log + warn
     // but do NOT silently strip (per CONTEXT.md + SAFE-04).
-    const manipulation = detectManipulationTokens(payload.text);
+    const manipulation = detectManipulationTokens(rawText);
     if (manipulation.detected) {
       log(
         `[achilles] manipulation patterns detected: ` +
@@ -968,7 +1143,7 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     }
     let wrapped: string;
     try {
-      wrapped = wrapTranscript(payload.text);
+      wrapped = wrapTranscript(rawText);
     } catch (err) {
       log(
         `[achilles] sandwich-defence wrap failed: ${(err as Error).message}`,
@@ -982,19 +1157,22 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     // sandwich-wrapped form) when the transcript store is configured
     // and enabled. The optional chain collapses to a SYNC no-op when
     // the store is undefined or enabled=false (verified structurally
-    // by transcript-store.test.ts TS2 + TS10). We persist payload.text
+    // by transcript-store.test.ts TS2 + TS10). We persist rawText
     // because the user wants their own words back when they re-open
     // their transcripts, not the DELIM_START / DELIM_END envelope.
     deps.transcriptStore?.appendTurn({
       role: "user",
-      text: payload.text,
+      text: rawText,
     });
     // Drive the production STT_COMMITTED tag. The reducer's
     // STT_COMMITTED case ignores the event when state is not
     // `listening`, so the toggle-mode race path (state already
     // `processing`) is a no-op for the reducer — exactly the desired
-    // semantics. We still dispatch so the event trace is uniform.
-    dispatch({ type: "STT_COMMITTED", transcript: payload.text });
+    // semantics. We still dispatch so the event trace is uniform. For
+    // the typed-prompt path, the renderer state may be 'idle' (the
+    // user hit Enter without ever pressing the hotkey) — the reducer
+    // ignores the tag in that case but the bridge send proceeds.
+    dispatch({ type: "STT_COMMITTED", transcript: rawText });
     // CR-04: wrap bridge construction + send in try/catch so a
     // ClaudeVersionError (from the real createClaudeSession's
     // runVersionCheck) or an EPIPE-shaped exception (from child.stdin
@@ -1043,6 +1221,74 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
         `[achilles] claude consumer error: ${(err as Error).message}`,
       );
     });
+  }
+
+  function onUtteranceCommit(payload: UtteranceCommitPayload): void {
+    if (disposed) return;
+    // CR-03 toggle-mode commit race: in toggle mode the user's second
+    // hotkey press dispatches HOTKEY_PRESS (listening → processing) BEFORE
+    // the renderer's IPC_UTTERANCE_COMMIT lands. Previously the guard
+    // here was `mirroredState !== "listening"`, which silently dropped
+    // the commit and the user's voice never reached Claude.
+    //
+    // Relax the guard to accept commits from BOTH `listening` AND
+    // `processing`. The toggle-hotkey path has already advanced the
+    // visible state but the commit is still in-flight, and the user
+    // clearly intends to commit. From `speaking` / `idle` / `error` the
+    // commit is still dropped — those states are out-of-band for a
+    // valid utterance-commit IPC.
+    if (mirroredState !== "listening" && mirroredState !== "processing") {
+      log(
+        `[achilles] dropping utterance-commit: state=${mirroredState}`,
+      );
+      return;
+    }
+    // Reset per-turn locals before we start.
+    resetTurnLocals();
+    accumulatedText = "";
+    // Plan 14-01: anchor the LOOP-06 sample at the renderer's
+    // committedAt epoch (the STT WebSocket's commit timestamp — the
+    // documented "speech-end" boundary) and record the first stage
+    // 'stt_committed' at the current nowImpl tick. markSpeechEnd
+    // resets any prior in-flight slot so a cancelled previous turn
+    // does not contaminate this sample.
+    deps.latencyProbe?.markSpeechEnd(payload.committedAt, payload.id);
+    deps.latencyProbe?.recordStage("stt_committed");
+    commitText(payload.text);
+  }
+
+  /**
+   * Plan 14-03 SAFE-05 — typed-fallback entry point. The renderer's
+   * TypedFallback overlay calls bridge.sendTypedFallbackSubmit({text})
+   * when STT is unavailable; the IPC handler in ipc-bridge.ts forwards
+   * the text here. The implementation routes the text through the
+   * SAME commitText helper as onUtteranceCommit — there is no parallel
+   * code path. The latency probe (Plan 14-01) treats the typed prompt
+   * as a zero-STT-cost utterance: markSpeechEnd is anchored at the
+   * current nowImpl tick (the user has just pressed Enter so
+   * speech_end ≡ commit) and stt_committed is recorded immediately
+   * because there is no STT round-trip.
+   *
+   * The typed prompt is accepted regardless of state — the user's
+   * STT is broken; refusing the prompt because the state machine
+   * thinks we are still 'idle' would defeat the SAFE-05 contract.
+   */
+  function handleTypedPrompt(text: string): void {
+    if (disposed) return;
+    // Reset per-turn locals before we start so a stale prior turn
+    // does not bleed into the typed-prompt cycle.
+    resetTurnLocals();
+    accumulatedText = "";
+    // Plan 14-01: anchor the LOOP-06 sample at the current tick. The
+    // typed prompt has no STT phase so speech_end ≡ commit; the
+    // probe records both stages at the same tick. We synthesise a
+    // utterance id from the wall-clock to keep the probe's per-
+    // utterance correlation surface uniform.
+    const nowMs = Date.now();
+    const utteranceId = `typed-${nowMs}`;
+    deps.latencyProbe?.markSpeechEnd(nowMs, utteranceId);
+    deps.latencyProbe?.recordStage("stt_committed");
+    commitText(text);
   }
 
   function onMicFrame(_payload: MicFramePayload): void {
@@ -1205,6 +1451,7 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     onTtsPlaybackComplete,
     onCancel,
     dispose,
+    handleTypedPrompt,
     metrics,
   };
 }

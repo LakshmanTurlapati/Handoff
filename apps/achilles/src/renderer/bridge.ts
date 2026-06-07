@@ -37,6 +37,49 @@ export interface AchillesBridge {
    * for the indicator render it directly with `visible={true}`).
    */
   onTranscriptPersistenceState?(cb: (enabled: boolean) => void): () => void;
+  /**
+   * Plan 14-03 SAFE-05. Subscribe to the STT failure broadcast. When
+   * the channel fires, App.tsx mounts the TypedFallback overlay so
+   * the user can continue the conversation by typing.
+   *
+   * Optional on the bridge surface because the headless mock-bridge
+   * path does NOT need to drive the affordance — the component tests
+   * render it directly via the active prop.
+   */
+  onIncidentSttFail?(
+    cb: (payload: { kind: string; attemptCount: number }) => void,
+  ): () => void;
+  /**
+   * Plan 14-03 SAFE-05. Subscribe to the TTS failure broadcast. When
+   * the channel fires, App.tsx surfaces the spoken-summary text in
+   * the floating UI (main also prints it to the launching terminal's
+   * stderr separately).
+   */
+  onIncidentTtsFail?(
+    cb: (payload: {
+      kind: string;
+      summaryText: string;
+      attemptCount: number;
+    }) => void,
+  ): () => void;
+  /**
+   * Plan 14-03 SAFE-05. Subscribe to the composed STT + TTS health
+   * broadcast. App.tsx mirrors the snapshot into local state which
+   * the IncidentStatus dot consumes.
+   */
+  onIncidentStatus?(
+    cb: (payload: {
+      sttHealth: "ok" | "degraded" | "failed";
+      ttsHealth: "ok" | "degraded" | "failed";
+    }) => void,
+  ): () => void;
+  /**
+   * Plan 14-03 SAFE-05. Forward the user-typed fallback prompt to
+   * main. The orchestrator routes the text through
+   * session.handleTypedPrompt(text) which applies the SAME
+   * sandwich-defence + bridge.send pipeline as a spoken utterance.
+   */
+  sendTypedFallbackSubmit?(payload: { text: string }): void;
   requestState(state: AchillesState): void;
   openSystemSettings(): void;
   updateWindowPosition(pos: { x: number; y: number }): void;

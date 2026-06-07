@@ -22,6 +22,7 @@ import {
   IPC_STT_TOKEN_REQUEST,
   IPC_TTS_CHUNK,
   IPC_TTS_PLAYBACK_COMPLETE,
+  IPC_TYPED_FALLBACK_SUBMIT,
   IPC_UTTERANCE_COMMIT,
 } from "../shared/constants.js";
 import { createMockStateController } from "./state-machine.js";
@@ -217,6 +218,7 @@ function makeFakeSession(): AchillesSession & {
     onTtsPlaybackComplete: ReturnType<typeof vi.fn>;
     onCancel: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
+    handleTypedPrompt: ReturnType<typeof vi.fn>;
   };
 } {
   const spies = {
@@ -227,6 +229,7 @@ function makeFakeSession(): AchillesSession & {
     onTtsPlaybackComplete: vi.fn(),
     onCancel: vi.fn(),
     dispose: vi.fn(),
+    handleTypedPrompt: vi.fn(),
   };
   return {
     onHotkeyPress: spies.onHotkeyPress,
@@ -236,6 +239,7 @@ function makeFakeSession(): AchillesSession & {
     onTtsPlaybackComplete: spies.onTtsPlaybackComplete,
     onCancel: spies.onCancel,
     dispose: spies.dispose,
+    handleTypedPrompt: spies.handleTypedPrompt,
     metrics: {
       framesDroppedDuringSpeaking: 0,
       framesDroppedDuringProcessing: 0,
@@ -439,6 +443,135 @@ describe("wireIpcBridge — Plan 12-04 IB7 dispose removes Phase 12 listeners", 
     expect(ipcMain.handlers.has(IPC_TTS_PLAYBACK_COMPLETE)).toBe(false);
     expect(ipcMain.handlers.has(IPC_MIC_FRAME)).toBe(false);
     expect(ipcMain.handlers.has(IPC_STT_TOKEN_REQUEST)).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Plan 14-03 SAFE-05 — IB8 typed-fallback-submit handler
+// ─────────────────────────────────────────────────────────────────────
+
+describe("wireIpcBridge — Plan 14-03 IB8 typed-fallback-submit forwarding", () => {
+  it("IPC_TYPED_FALLBACK_SUBMIT inbound forwards a valid payload to session.handleTypedPrompt", () => {
+    const window = makeFakeWindow();
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const session = makeFakeSession();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      session,
+    });
+    const handler = ipcMain.handlers.get(IPC_TYPED_FALLBACK_SUBMIT);
+    expect(handler).toBeDefined();
+    handler!.listener(
+      { sender: { id: 1 } },
+      { text: "refactor the auth module" },
+    );
+    expect(session.spies.handleTypedPrompt).toHaveBeenCalledWith(
+      "refactor the auth module",
+    );
+  });
+
+  it("drops invalid payloads (empty text) with a [achilles] log line", () => {
+    const window = makeFakeWindow();
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const session = makeFakeSession();
+    const log = vi.fn();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      session,
+      logger: log,
+    });
+    const handler = ipcMain.handlers.get(IPC_TYPED_FALLBACK_SUBMIT);
+    // Empty text — Zod min(1) rejects.
+    handler!.listener({ sender: { id: 1 } }, { text: "" });
+    expect(session.spies.handleTypedPrompt).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalled();
+  });
+
+  it("drops payloads missing the text field with a [achilles] log line", () => {
+    const window = makeFakeWindow();
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const session = makeFakeSession();
+    const log = vi.fn();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      session,
+      logger: log,
+    });
+    const handler = ipcMain.handlers.get(IPC_TYPED_FALLBACK_SUBMIT);
+    handler!.listener({ sender: { id: 1 } }, {});
+    expect(session.spies.handleTypedPrompt).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalled();
+  });
+
+  it("rejects events from foreign senders (WR-06 pattern preserved)", () => {
+    const window = makeFakeWindow(42);
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const session = makeFakeSession();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      session,
+    });
+    const handler = ipcMain.handlers.get(IPC_TYPED_FALLBACK_SUBMIT);
+    handler!.listener({ sender: { id: 999 } }, { text: "rogue" });
+    expect(session.spies.handleTypedPrompt).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Plan 14-03 SAFE-05 — IB9 dispose removes typed-fallback-submit listener
+// ─────────────────────────────────────────────────────────────────────
+
+describe("wireIpcBridge — Plan 14-03 IB9 dispose removes IPC_TYPED_FALLBACK_SUBMIT", () => {
+  it("the handler is unregistered after dispose()", () => {
+    const window = makeFakeWindow();
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const session = makeFakeSession();
+    const handle = wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      session,
+    });
+    expect(ipcMain.handlers.has(IPC_TYPED_FALLBACK_SUBMIT)).toBe(true);
+    handle.dispose();
+    expect(ipcMain.handlers.has(IPC_TYPED_FALLBACK_SUBMIT)).toBe(false);
+  });
+
+  it("does not register IPC_TYPED_FALLBACK_SUBMIT when no session is provided", () => {
+    const window = makeFakeWindow();
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+    });
+    expect(ipcMain.handlers.has(IPC_TYPED_FALLBACK_SUBMIT)).toBe(false);
   });
 });
 

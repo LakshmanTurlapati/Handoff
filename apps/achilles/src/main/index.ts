@@ -28,6 +28,7 @@ import { createTtsStreamClient } from "@achilles/voice-tts";
 import {
   ACHILLES_MODE_INIT,
   DEFAULT_VOICE_ID,
+  IPC_INCIDENT_TTS_FAIL,
   IPC_INIT_API_KEY_SUBMIT,
   IPC_INIT_MIC_PERMISSION_REQUEST,
   IPC_INIT_SMOKE_START,
@@ -40,6 +41,11 @@ import {
 } from "../shared/constants.js";
 import type { AchillesState, PermissionState } from "../shared/constants.js";
 import { registerAchillesHotkey, unregisterAchillesHotkey } from "./hotkey.js";
+import {
+  classifyHttpError,
+  createCircuitBreaker,
+  type CircuitBreaker,
+} from "./incident-detection.js";
 import {
   createInitWizardSession,
   createInitWizardWindow,
@@ -497,6 +503,39 @@ async function bootstrap(): Promise<void> {
       enabled: transcriptsEnabled,
     });
   });
+  // ─── Plan 14-03 SAFE-05 circuit-breaker construction ───────────────
+  //
+  // Two CircuitBreaker instances wrap the two ElevenLabs surfaces
+  // (STT token-mint + TTS open()). The locked v1.2 thresholds match
+  // the plan's <interfaces> section:
+  //
+  //   maxConsecutiveFailures = 3
+  //   windowMs               = 60_000
+  //   cooldownMs             = 30_000
+  //   backoffBaseMs          = 250
+  //   backoffCapMs           = 5_000
+  //
+  // Both breakers share the classifier (HTTP-shape + Node-shape
+  // recognition) and the Math.random randomImpl. Production logger
+  // routes to console.error with the [achilles] prefix; no transcript
+  // text and no API key is logged (verified by ID10 test).
+  const sttCircuit: CircuitBreaker = createCircuitBreaker({
+    label: "stt",
+    classifyError: classifyHttpError,
+    logger: (msg) => {
+      // eslint-disable-next-line no-console
+      console.error(msg);
+    },
+  });
+  const ttsCircuit: CircuitBreaker = createCircuitBreaker({
+    label: "tts",
+    classifyError: classifyHttpError,
+    logger: (msg) => {
+      // eslint-disable-next-line no-console
+      console.error(msg);
+    },
+  });
+
   if (apiKey !== null) {
     // The mic-capture handle lives in the renderer (Phase 09 design).
     // The orchestrator gates the renderer-side mic by toggling state
@@ -516,6 +555,27 @@ async function bootstrap(): Promise<void> {
       },
     };
     const capturedApiKey = apiKey;
+    // Plan 14-03 SAFE-05 stderr tap. Wrap the renderer-bound sendIpc
+    // so when session.ts broadcasts IPC_INCIDENT_TTS_FAIL, the main
+    // process ALSO writes the spoken-summary text to process.stderr.
+    // The launching terminal receives the text — PITFALLS #18 "print
+    // the completion text to the launching terminal so the user does
+    // not lose it" contract. We do NOT log the API key, NOT log the
+    // raw transcript, NOT log any other channel's payload; only the
+    // normalised summary text routes to stderr.
+    const sendIpcWithStderrTap = (
+      channel: string,
+      payload: unknown,
+    ): void => {
+      window.webContents.send(channel, payload);
+      if (channel === IPC_INCIDENT_TTS_FAIL) {
+        const p = payload as { summaryText?: string } | null | undefined;
+        const summaryText = p?.summaryText;
+        if (typeof summaryText === "string" && summaryText.length > 0) {
+          process.stderr.write(`[achilles] TTS unavailable: ${summaryText}\n`);
+        }
+      }
+    };
     session = createSession({
       stateController: controller,
       claudeFactory: (opts) =>
@@ -533,9 +593,7 @@ async function bootstrap(): Promise<void> {
         return { token: minted.token, expiresAt: minted.expiresAt };
       },
       micCapture: micCaptureProxy,
-      sendIpc: (channel, payload) => {
-        window.webContents.send(channel, payload);
-      },
+      sendIpc: sendIpcWithStderrTap,
       readApiKey: () => capturedApiKey,
       voiceId: process.env.ELEVENLABS_VOICE_ID ?? DEFAULT_VOICE_ID,
       systemPromptFile: companionPromptPath,
@@ -551,6 +609,13 @@ async function bootstrap(): Promise<void> {
       // collapses every appendTurn call to a SYNC no-op (TS2 / TS10
       // structural invariant) so session.ts behaviour is preserved.
       transcriptStore,
+      // Plan 14-03 SAFE-05: pass both circuit breakers. The
+      // orchestrator routes mintSttToken and tts.open() through the
+      // breakers; on exhausted=true the matching IPC_INCIDENT_*
+      // broadcast fires and the stderr tap above writes the TTS
+      // summary to the launching terminal.
+      sttCircuit,
+      ttsCircuit,
     });
   }
 

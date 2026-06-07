@@ -39,9 +39,12 @@ import type { HotkeyMode } from "../shared/constants.js";
 import { getBridge } from "./bridge.js";
 import { ErrorBanner } from "./components/ErrorBanner.js";
 import { FloatingShell } from "./components/FloatingShell.js";
+import { IncidentStatus } from "./components/IncidentStatus.js";
+import type { IncidentHealth } from "./components/IncidentStatus.js";
 import { PermissionOverlay } from "./components/PermissionOverlay.js";
 import { RecordingIndicator } from "./components/RecordingIndicator.js";
 import { SettingsPopover } from "./components/SettingsPopover.js";
+import { TypedFallback } from "./components/TypedFallback.js";
 import { useAchillesState } from "./state/useAchillesState.js";
 
 // Plan 11-03 overlay styles. Imported at the App composition root so
@@ -110,6 +113,85 @@ export function App(): ReactElement {
     return () => {
       off();
     };
+  }, []);
+
+  // Plan 14-03 SAFE-05: subscribe to the three incident broadcasts.
+  // The orchestrator (session.ts) fans these out when its STT / TTS
+  // circuit breakers open OR whenever the composed health changes;
+  // App.tsx mirrors the snapshots into local state which the
+  // TypedFallback overlay + IncidentStatus dot consume.
+  //
+  // `typedFallbackActive`  — true while the TypedFallback overlay is
+  //                          visible. Set to true on STT fail;
+  //                          cleared on submit / cancel.
+  // `missedSummaries`     — appended on every TTS fail. The newest
+  //                         entry becomes the surfaced text in
+  //                         TranscriptOverlay (the renderer's existing
+  //                         transcript pipeline is the natural carrier
+  //                         for the visible text; main writes the same
+  //                         text to stderr separately).
+  // `sttHealth` / `ttsHealth` — composed health used by IncidentStatus.
+  const [typedFallbackActive, setTypedFallbackActive] = useState<boolean>(false);
+  const [missedSummaries, setMissedSummaries] = useState<readonly string[]>(
+    [],
+  );
+  const [sttHealth, setSttHealth] = useState<IncidentHealth>("ok");
+  const [ttsHealth, setTtsHealth] = useState<IncidentHealth>("ok");
+  // Reference `missedSummaries` so the linter does not flag it as
+  // unused — future visible-text rendering in TranscriptOverlay will
+  // consume the array. The state is accumulated so a debugging probe
+  // can read it via React DevTools.
+  void missedSummaries;
+  useEffect(() => {
+    const bridge = getBridge();
+    const offs: Array<() => void> = [];
+    if (bridge.onIncidentSttFail !== undefined) {
+      offs.push(
+        bridge.onIncidentSttFail((_payload) => {
+          setTypedFallbackActive(true);
+        }),
+      );
+    }
+    if (bridge.onIncidentTtsFail !== undefined) {
+      offs.push(
+        bridge.onIncidentTtsFail((payload) => {
+          // Append the missed summary to the local list. The newest
+          // entry is the one we want surfaced; older entries are
+          // preserved so a user who missed multiple turns can scroll
+          // back via a future affordance.
+          if (typeof payload.summaryText === "string") {
+            setMissedSummaries((prev) => [...prev, payload.summaryText]);
+          }
+        }),
+      );
+    }
+    if (bridge.onIncidentStatus !== undefined) {
+      offs.push(
+        bridge.onIncidentStatus((payload) => {
+          setSttHealth(payload.sttHealth);
+          setTtsHealth(payload.ttsHealth);
+        }),
+      );
+    }
+    return () => {
+      for (const off of offs) off();
+    };
+  }, []);
+
+  // Plan 14-03 SAFE-05: TypedFallback callbacks.
+  //
+  // onSubmit forwards the typed text to main via the bridge's
+  // sendTypedFallbackSubmit shim AND closes the overlay so the user
+  // is not left staring at the input after pressing Enter. main
+  // routes the text through session.handleTypedPrompt(text) — the
+  // SAME pipeline as a spoken utterance.
+  const handleTypedFallbackSubmit = useCallback((text: string) => {
+    const bridge = getBridge();
+    bridge.sendTypedFallbackSubmit?.({ text });
+    setTypedFallbackActive(false);
+  }, []);
+  const handleTypedFallbackCancel = useCallback(() => {
+    setTypedFallbackActive(false);
   }, []);
 
   const handleOpenSystemSettings = useCallback(() => {
@@ -196,6 +278,12 @@ export function App(): ReactElement {
   // existing UI-SPEC s2 pixel grid for the circle / waveform /
   // transcript region. When persistence is OFF the component returns
   // null so no DOM is produced.
+  //
+  // Plan 14-03 SAFE-05: the TypedFallback overlay is a sibling of the
+  // FloatingShell so it can overlay the transcript region without
+  // disrupting the pixel grid. The IncidentStatus dot is anchored to
+  // the top-left corner (opposite the RecordingIndicator at top-right)
+  // so both affordances are visible simultaneously without overlap.
   return (
     <>
       <FloatingShell
@@ -205,6 +293,12 @@ export function App(): ReactElement {
         onSettingsOpen={handleSettingsOpen}
       />
       <RecordingIndicator visible={persistenceEnabled} />
+      <TypedFallback
+        active={typedFallbackActive}
+        onSubmit={handleTypedFallbackSubmit}
+        onCancel={handleTypedFallbackCancel}
+      />
+      <IncidentStatus sttHealth={sttHealth} ttsHealth={ttsHealth} />
     </>
   );
 }

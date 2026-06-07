@@ -30,6 +30,7 @@ import {
   IPC_REQUEST_STATE,
   IPC_STT_TOKEN_REQUEST,
   IPC_TTS_PLAYBACK_COMPLETE,
+  IPC_TYPED_FALLBACK_SUBMIT,
   IPC_UPDATE_HOTKEY_CONFIG,
   IPC_UPDATE_WINDOW_POSITION,
   IPC_UTTERANCE_COMMIT,
@@ -37,6 +38,7 @@ import {
 import { parseEnvelope } from "../shared/ipc-schemas.js";
 import type {
   MicFramePayload,
+  TypedFallbackSubmitPayload,
   UtteranceCommitPayload,
 } from "../shared/ipc-schemas.js";
 import type {
@@ -419,6 +421,33 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
         }
       }),
     );
+
+    // Plan 14-03 SAFE-05 (IB8): typed-fallback-submit handler. The
+    // renderer's TypedFallback overlay forwards the user-typed prompt
+    // here when STT is unavailable. The handler validates the payload
+    // through the strict Zod schema (TypedFallbackSubmitPayloadSchema)
+    // and forwards the text to session.handleTypedPrompt(text) which
+    // applies the SAME sandwich-defence + bridge.send pipeline as a
+    // spoken utterance. The sender check ensures a rogue renderer
+    // (e.g. SettingsPopover preload) cannot smuggle a fake prompt.
+    ipcMainRef.on(
+      IPC_TYPED_FALLBACK_SUBMIT,
+      withSenderCheck(IPC_TYPED_FALLBACK_SUBMIT, (_event, payload) => {
+        try {
+          const parsed = parseEnvelope(
+            IPC_TYPED_FALLBACK_SUBMIT,
+            payload,
+          ) as TypedFallbackSubmitPayload;
+          session.handleTypedPrompt(parsed.text);
+        } catch (err) {
+          log(
+            `[achilles] dropping invalid ${IPC_TYPED_FALLBACK_SUBMIT} payload: ${
+              (err as Error).message
+            }`,
+          );
+        }
+      }),
+    );
   }
 
   // ─── Main → Renderer wiring ───────────────────────────────────────
@@ -444,6 +473,8 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
     ipcMainRef.removeAllListeners(IPC_TTS_PLAYBACK_COMPLETE);
     ipcMainRef.removeAllListeners(IPC_MIC_FRAME);
     ipcMainRef.removeAllListeners(IPC_STT_TOKEN_REQUEST);
+    // Plan 14-03 SAFE-05 channel (no-op when session was not supplied).
+    ipcMainRef.removeAllListeners(IPC_TYPED_FALLBACK_SUBMIT);
   }
 
   function broadcastPermissionState(state: PermissionState): void {

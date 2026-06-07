@@ -187,8 +187,10 @@ describe("IPC_PAYLOAD_SCHEMAS + parseEnvelope (IPC6 discriminated map)", () => {
     // request + response); Plan 13-03 appended 8 (init wizard step,
     // api-key submit/result, mic-permission request/result, smoke
     // start/result, wizard done); Plan 14-02 appended 1 (transcript
-    // persistence state for the RecordingIndicator). Total = 27.
-    expect(keys.length).toBe(27);
+    // persistence state for the RecordingIndicator); Plan 14-03 appended
+    // 4 (incident-stt-fail, incident-tts-fail, incident-status, typed-
+    // fallback-submit). Total = 31.
+    expect(keys.length).toBe(31);
     for (const k of keys) {
       expect(k.startsWith("achilles:")).toBe(true);
     }

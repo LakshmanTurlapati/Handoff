@@ -295,6 +295,12 @@ export default defineWorkspace([
         "apps/achilles/src/main/transcript-store.test.ts",
         "apps/achilles-cli/src/commands/transcripts.test.ts",
         "apps/achilles/src/renderer/components/RecordingIndicator.test.tsx",
+        // Plan 14-03 additions: incident-detection (SAFE-05 circuit
+        // breaker substrate) + TypedFallback + IncidentStatus (the
+        // visible UI affordances when STT / TTS fail).
+        "apps/achilles/src/main/incident-detection.test.ts",
+        "apps/achilles/src/renderer/components/TypedFallback.test.tsx",
+        "apps/achilles/src/renderer/components/IncidentStatus.test.tsx",
       ],
       environment: "node",
       passWithNoTests: true,

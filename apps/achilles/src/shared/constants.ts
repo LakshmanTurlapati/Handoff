@@ -345,3 +345,88 @@ export const SMOKE_TEST_TIMEOUT_MS = 60000;
  */
 export const IPC_TRANSCRIPT_PERSISTENCE_STATE =
   "achilles:transcript-persistence-state";
+
+// ─────────────────────────────────────────────────────────────────────
+// Phase 14-03 — Incident detection (SAFE-05)
+//
+// Four IPC channels paired with the SAFE-05 graceful-degradation
+// substrate. The two STT / TTS failure broadcasts carry the
+// classified failure kind so the renderer can surface the right
+// affordance (TypedFallback overlay for STT, visible-text routing
+// for TTS). The status broadcast composes the two circuit-breaker
+// states into a single health snapshot so the renderer's
+// IncidentStatus dot reflects current voice-service health. The
+// typed-fallback-submit channel is the renderer's only path for
+// continuing the conversation when STT is down — the typed text
+// flows through session.handleTypedPrompt(text) and re-uses the
+// existing sandwich-defence + bridge.send pipeline.
+//
+// Direction:
+//   Main → Renderer: incident-stt-fail, incident-tts-fail,
+//                    incident-status
+//   Renderer → Main: typed-fallback-submit
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Main → Renderer. Broadcasts when the STT circuit-breaker opens.
+ * Payload shape:
+ *
+ *   { kind: 'auth'|'rate_limit'|'server'|'network'|'unknown',
+ *     attemptCount: number }
+ *
+ * The renderer's App.tsx subscribes once at composition root mount;
+ * when the channel fires, the App sets `typedFallbackActive=true`
+ * which mounts the TypedFallback overlay. The user types a prompt,
+ * presses Enter, and the renderer forwards the text via
+ * IPC_TYPED_FALLBACK_SUBMIT. The orchestrator returns to voice
+ * mode after the typed prompt completes (the next hotkey press
+ * re-attempts STT through the half-open probe path).
+ */
+export const IPC_INCIDENT_STT_FAIL = "achilles:incident-stt-fail";
+
+/**
+ * Main → Renderer. Broadcasts when the TTS circuit-breaker opens.
+ * Payload shape:
+ *
+ *   { kind: 'auth'|'rate_limit'|'server'|'network'|'unknown',
+ *     summaryText: string,
+ *     attemptCount: number }
+ *
+ * `summaryText` is the spoken summary the user did NOT hear — the
+ * renderer surfaces it visibly in TranscriptOverlay AND the main
+ * process prints it to the launching terminal's stderr (handled in
+ * index.ts via the sendIpc tap). Both surfaces ensure the
+ * completion summary is not lost even when ElevenLabs TTS is down.
+ */
+export const IPC_INCIDENT_TTS_FAIL = "achilles:incident-tts-fail";
+
+/**
+ * Main → Renderer. Broadcasts whenever the composed STT + TTS
+ * circuit health changes. Payload shape:
+ *
+ *   { sttHealth: 'ok'|'degraded'|'failed',
+ *     ttsHealth: 'ok'|'degraded'|'failed' }
+ *
+ * The renderer's App.tsx subscribes once at composition root mount
+ * and forwards the latest snapshot to the IncidentStatus dot. The
+ * dot renders green when both surfaces are 'ok', yellow when one
+ * is degraded (or one failed with the other ok), and red when
+ * both have failed (or any failed with the other degraded). The
+ * truth source is the main-side circuit-breaker state; the dot is
+ * informational.
+ */
+export const IPC_INCIDENT_STATUS = "achilles:incident-status";
+
+/**
+ * Renderer → Main. Carries the user-typed fallback prompt when
+ * STT is unavailable. Payload shape:
+ *
+ *   { text: string }   // min length 1
+ *
+ * Main routes the payload through session.handleTypedPrompt(text)
+ * which applies detectManipulationTokens + wrapTranscript
+ * IDENTICALLY to a spoken utterance — no separate code path. The
+ * sandwich-defence + bridge.send pipeline is reused so the typed
+ * prompt is indistinguishable to the LLM from a voice utterance.
+ */
+export const IPC_TYPED_FALLBACK_SUBMIT = "achilles:typed-fallback-submit";

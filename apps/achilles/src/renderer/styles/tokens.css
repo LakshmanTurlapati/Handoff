@@ -71,6 +71,22 @@
   --achilles-destructive: #ff4d4f;
 
   /* ─────────────────────────────────────────────────────────── */
+  /* Color — incident status (Plan 14-03 SAFE-05)                */
+  /*                                                              */
+  /* The three colours drive the IncidentStatus health dot in the */
+  /* floating-window corner. The palette extends the Phase 11    */
+  /* state accents with the established green / amber / red trio  */
+  /* used by ops dashboards everywhere so the meaning is obvious  */
+  /* without a legend. The dot defaults to ok=green when both     */
+  /* circuit breakers are closed; degraded=amber when one surface */
+  /* is failing or partially failed; failed=red when both are    */
+  /* open.                                                        */
+  /* ─────────────────────────────────────────────────────────── */
+  --achilles-status-ok: #3dd68c;
+  --achilles-status-degraded: #f5a623;
+  --achilles-status-failed: #ff4d4f;
+
+  /* ─────────────────────────────────────────────────────────── */
   /* Motion — UI-SPEC Motion & Animation                         */
   /* ─────────────────────────────────────────────────────────── */
   --motion-ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
