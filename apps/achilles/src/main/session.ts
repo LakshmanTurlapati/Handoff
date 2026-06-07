@@ -653,7 +653,14 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
         if (outcome.kind === "failure") {
           summaryBody = buildFailureSummary(outcome);
         } else {
-          const extracted = extractSpokenSummary(accumulatedText);
+          // WR-05: extract from the bridge's authoritative
+          // lastTurnText rather than the orchestrator's local
+          // accumulator. The bridge documents
+          // `assistant_text_done.full_text` as the canonical
+          // accumulated string and updates lastTurnText synchronously
+          // before process_exit. The local accumulator could drift if
+          // upstream drops / reorders deltas.
+          const extracted = extractSpokenSummary(session.lastTurnText);
           if (extracted !== null && extracted.length > 0) {
             summaryBody = extracted;
           } else {
