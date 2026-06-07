@@ -212,7 +212,12 @@ describe("createCircuitBreaker — ID5 retryable failure accumulator opens at th
     expect("error" in c).toBe(true);
     if ("error" in c) {
       expect(c.exhausted).toBe(true);
-      expect(c.attemptCount).toBeGreaterThanOrEqual(3);
+      // WR-04 fix: attemptCount is the within-attempt counter (fn was
+      // invoked exactly once inside this attempt() call). The
+      // across-attempt counter that previously lived in attemptCount
+      // is now exposed via the separate consecutiveFailures field.
+      expect(c.attemptCount).toBe(1);
+      expect(c.consecutiveFailures).toBeGreaterThanOrEqual(3);
     }
     expect(breaker.status().state).toBe("open");
   });
@@ -508,6 +513,105 @@ describe("createCircuitBreaker — ID12 open breaker short-circuits", () => {
     if ("error" in outcome) {
       expect(outcome.exhausted).toBe(true);
       expect(outcome.attemptCount).toBe(0);
+    }
+  });
+});
+
+describe("createCircuitBreaker — WR-04 attemptCount and consecutiveFailures are separately tracked", () => {
+  // WR-04 regression. Prior to the fix, attemptCount on AttemptFailure was
+  // overloaded to mean both "fn invocations inside this attempt() call"
+  // (always 0 or 1 for the v1.2 breaker) AND "failures across attempt() calls
+  // in the sliding window" (the consecutiveFailures counter). An orchestrator
+  // observing attemptCount=3 could not tell whether fn was invoked 3 times
+  // inside ONE attempt() or once each in THREE attempt() calls. After WR-04
+  // the two counters are exposed separately on AttemptFailure.
+
+  it("a single retryable failure reports attemptCount=1 and consecutiveFailures=1", async () => {
+    const clock = makeClock();
+    const breaker = createCircuitBreaker({
+      label: "test",
+      maxConsecutiveFailures: 3,
+      nowImpl: clock.now,
+      randomImpl: fixedRandom(0.5),
+    });
+    const outcome = await breaker.attempt(async () => {
+      throw Object.assign(new Error("5xx"), { status: 503 });
+    });
+    expect("error" in outcome).toBe(true);
+    if ("error" in outcome) {
+      expect(outcome.attemptCount).toBe(1);
+      expect(outcome.consecutiveFailures).toBe(1);
+      expect(outcome.exhausted).toBe(false);
+    }
+  });
+
+  it("three consecutive retryable failures report attemptCount=1 each but consecutiveFailures grows 1,2,3", async () => {
+    const clock = makeClock();
+    const breaker = createCircuitBreaker({
+      label: "test",
+      maxConsecutiveFailures: 3,
+      windowMs: 60_000,
+      nowImpl: clock.now,
+      randomImpl: fixedRandom(0.5),
+    });
+    const failure = async (): Promise<AttemptOutcome<unknown>> => {
+      return breaker.attempt(async () => {
+        throw Object.assign(new Error("5xx"), { status: 503 });
+      });
+    };
+    const a = await failure();
+    const b = await failure();
+    const c = await failure();
+    expect("error" in a && a.attemptCount).toBe(1);
+    expect("error" in b && b.attemptCount).toBe(1);
+    expect("error" in c && c.attemptCount).toBe(1);
+    expect("error" in a && a.consecutiveFailures).toBe(1);
+    expect("error" in b && b.consecutiveFailures).toBe(2);
+    expect("error" in c && c.consecutiveFailures).toBe(3);
+  });
+
+  it("short-circuit path reports attemptCount=0 and consecutiveFailures unchanged", async () => {
+    const clock = makeClock();
+    const breaker = createCircuitBreaker({
+      label: "test",
+      cooldownMs: 30_000,
+      nowImpl: clock.now,
+      randomImpl: fixedRandom(0.5),
+    });
+    // Auth failure opens immediately, consecutiveFailures = 1.
+    await breaker.attempt(async () => {
+      throw Object.assign(new Error("nope"), { status: 401 });
+    });
+    expect(breaker.status().consecutiveFailures).toBe(1);
+    // Short-circuit: fn not invoked.
+    const fn = vi.fn(async () => "x");
+    const outcome = await breaker.attempt(fn);
+    expect(fn).not.toHaveBeenCalled();
+    expect("error" in outcome).toBe(true);
+    if ("error" in outcome) {
+      expect(outcome.attemptCount).toBe(0);
+      // consecutiveFailures snapshots the across-attempt counter at
+      // the short-circuit boundary; unchanged by the short-circuit
+      // itself (the auth failure is what made it 1).
+      expect(outcome.consecutiveFailures).toBe(1);
+    }
+  });
+
+  it("auth failure reports attemptCount=1 (fn invoked once) and consecutiveFailures=1", async () => {
+    const clock = makeClock();
+    const breaker = createCircuitBreaker({
+      label: "stt",
+      nowImpl: clock.now,
+      randomImpl: fixedRandom(0.5),
+    });
+    const outcome = await breaker.attempt(async () => {
+      throw Object.assign(new Error("Unauthorized"), { status: 401 });
+    });
+    expect("error" in outcome).toBe(true);
+    if ("error" in outcome) {
+      expect(outcome.error.kind).toBe("auth");
+      expect(outcome.attemptCount).toBe(1);
+      expect(outcome.consecutiveFailures).toBe(1);
     }
   });
 });

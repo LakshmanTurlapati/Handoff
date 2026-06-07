@@ -124,14 +124,33 @@ export interface AttemptSuccess<T> {
  * `exhausted` is true when the breaker considers this failure
  * terminal for the current orchestrator-driven request — the
  * orchestrator MUST stop retrying and surface the failure to the
- * renderer. `attemptCount` is the number of times fn was invoked
- * during this attempt sequence (0 when the breaker short-circuited).
+ * renderer.
+ *
+ * WR-04 fix: the prior `attemptCount` field conflated two distinct
+ * counters:
+ *   - The number of times fn was invoked WITHIN this single attempt()
+ *     call (in the v1.2 no-internal-retry breaker this is always 0 or 1).
+ *   - The number of failures ACROSS calls to attempt() in the current
+ *     sliding window (consecutiveFailures).
+ *
+ * The conflation surfaced an inflated 'we tried N times' string in the
+ * IPC_INCIDENT_STT_FAIL payload — a user observing attemptCount=3 could
+ * not tell whether fn was invoked 3 times inside ONE attempt() or once
+ * each in THREE attempt() calls. The new shape exposes both:
+ *
+ *   - `attemptCount`: invocations of fn WITHIN this attempt() call
+ *     (always 0 or 1 for the v1.2 breaker). KEPT for back-compat — the
+ *     existing IPC payloads continue to deserialize.
+ *   - `consecutiveFailures`: failures ACROSS attempt() calls in the
+ *     current sliding window. The renderer can compose a more accurate
+ *     "we've seen N failures recently" string.
  *
  * @public
  */
 export interface AttemptFailure {
   readonly error: ClassifiedError;
   readonly attemptCount: number;
+  readonly consecutiveFailures: number;
   readonly exhausted: boolean;
 }
 
@@ -480,12 +499,16 @@ export function createCircuitBreaker(
         log(
           `[achilles] circuit ${label}: ${errKind} attempt=0 opened=true (cooldown)`,
         );
+        // WR-04: short-circuit — fn was not invoked, so attemptCount=0.
+        // consecutiveFailures reflects the across-attempt counter at
+        // the time the breaker rejected the call.
         return Object.freeze({
           error: Object.freeze({
             kind: errKind,
             cause: new Error(`circuit ${label} open`),
           }),
           attemptCount: 0,
+          consecutiveFailures,
           exhausted: true,
         }) as AttemptFailure;
       }
@@ -501,12 +524,13 @@ export function createCircuitBreaker(
       const kind = classifyError(err);
       const tsForRecord = nowImpl();
       if (isHalfOpenProbe) {
-        // The probe failed — re-open the circuit. The attempt count
-        // for the failure shape is 1 (the probe).
+        // The probe failed — re-open the circuit. WR-04: fn was invoked
+        // exactly once (the probe) inside this attempt() call.
         recordFailedProbe(tsForRecord, kind);
         return Object.freeze({
           error: Object.freeze({ kind, cause: err }),
           attemptCount: 1,
+          consecutiveFailures,
           exhausted: true,
         }) as AttemptFailure;
       }
@@ -517,9 +541,11 @@ export function createCircuitBreaker(
       if (kind === "auth" || kind === "rate_limit") {
         consecutiveFailures += 1;
         openCircuit(tsForRecord, kind, 1);
+        // WR-04: fn was invoked once inside this attempt() call.
         return Object.freeze({
           error: Object.freeze({ kind, cause: err }),
           attemptCount: 1,
+          consecutiveFailures,
           exhausted: true,
         }) as AttemptFailure;
       }
@@ -532,18 +558,26 @@ export function createCircuitBreaker(
       evictFailureWindow(tsForRecord);
       if (failureTimestamps.length >= maxConsecutiveFailures) {
         openCircuit(tsForRecord, kind, consecutiveFailures);
+        // WR-04: fn was invoked exactly once inside this attempt() call;
+        // consecutiveFailures carries the across-attempt counter so the
+        // renderer can distinguish "we tried 1 time and got the third
+        // recent failure" from "we tried 3 times within one attempt".
         return Object.freeze({
           error: Object.freeze({ kind, cause: err }),
-          attemptCount: consecutiveFailures,
+          attemptCount: 1,
+          consecutiveFailures,
           exhausted: true,
         }) as AttemptFailure;
       }
       log(
         `[achilles] circuit ${label}: ${kind} attempt=${consecutiveFailures} opened=false`,
       );
+      // WR-04: same as above — fn was invoked once; consecutiveFailures
+      // carries the across-attempt counter.
       return Object.freeze({
         error: Object.freeze({ kind, cause: err }),
-        attemptCount: consecutiveFailures,
+        attemptCount: 1,
+        consecutiveFailures,
         exhausted: false,
       }) as AttemptFailure;
     }
