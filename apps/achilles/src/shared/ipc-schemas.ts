@@ -37,6 +37,7 @@ import {
   IPC_REGISTER_HOTKEY,
   IPC_REQUEST_STATE,
   IPC_STATE_CHANGED,
+  IPC_DEVICE_CHANGE,
   IPC_STT_TOKEN,
   IPC_STT_TOKEN_REQUEST,
   IPC_STUCK_THINKING_ANNOUNCE,
@@ -592,6 +593,25 @@ export type StuckThinkingAnnouncePayload = z.infer<
   typeof StuckThinkingAnnouncePayloadSchema
 >;
 
+/**
+ * CR-02 fix: Renderer → Main device-change forward. The renderer's
+ * mic-capture module observes navigator.mediaDevices.ondevicechange and
+ * forwards the event to main; the bridge handler routes the payload
+ * into session.onDeviceChange. The kind union mirrors
+ * MicDeviceChangeKind from mic-capture.ts. `deviceId` is optional
+ * because the renderer reports it only when the OS surfaces a label.
+ * `.strict()` blocks unknown fields so a future field addition is a
+ * deliberate schema bump.
+ */
+export const DeviceChangePayloadSchema = z
+  .object({
+    kind: z.union([z.literal("device-switch"), z.literal("hfp-downgrade")]),
+    deviceId: z.string().optional(),
+  })
+  .strict();
+
+export type DeviceChangePayload = z.infer<typeof DeviceChangePayloadSchema>;
+
 // ─────────────────────────────────────────────────────────────────────
 // Channel-keyed schema map + helpers
 // ─────────────────────────────────────────────────────────────────────
@@ -649,6 +669,8 @@ export const IPC_PAYLOAD_SCHEMAS: Record<string, z.ZodTypeAny> = {
   [IPC_TYPED_FALLBACK_SUBMIT]: TypedFallbackSubmitPayloadSchema,
   // Phase 14-04 SAFE-06 stuck-thinking watchdog announcement broadcast.
   [IPC_STUCK_THINKING_ANNOUNCE]: StuckThinkingAnnouncePayloadSchema,
+  // CR-02 fix: Renderer → Main device-change forward (SAFE-06 wiring).
+  [IPC_DEVICE_CHANGE]: DeviceChangePayloadSchema,
 };
 
 /**

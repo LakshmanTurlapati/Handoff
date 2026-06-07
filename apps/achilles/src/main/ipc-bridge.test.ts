@@ -219,6 +219,10 @@ function makeFakeSession(): AchillesSession & {
     onCancel: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
     handleTypedPrompt: ReturnType<typeof vi.fn>;
+    onDeviceChange: ReturnType<typeof vi.fn>;
+    onSuspend: ReturnType<typeof vi.fn>;
+    onResume: ReturnType<typeof vi.fn>;
+    announceStuckThinking: ReturnType<typeof vi.fn>;
   };
 } {
   const spies = {
@@ -230,6 +234,10 @@ function makeFakeSession(): AchillesSession & {
     onCancel: vi.fn(),
     dispose: vi.fn(),
     handleTypedPrompt: vi.fn(),
+    onDeviceChange: vi.fn(),
+    onSuspend: vi.fn(),
+    onResume: vi.fn(),
+    announceStuckThinking: vi.fn(),
   };
   return {
     onHotkeyPress: spies.onHotkeyPress,
@@ -240,6 +248,10 @@ function makeFakeSession(): AchillesSession & {
     onCancel: spies.onCancel,
     dispose: spies.dispose,
     handleTypedPrompt: spies.handleTypedPrompt,
+    onDeviceChange: spies.onDeviceChange,
+    onSuspend: spies.onSuspend,
+    onResume: spies.onResume,
+    announceStuckThinking: spies.announceStuckThinking,
     metrics: {
       framesDroppedDuringSpeaking: 0,
       framesDroppedDuringProcessing: 0,
@@ -633,6 +645,144 @@ describe("wireIpcBridge — WR-06 senders are validated", () => {
     handler!.listener({ sender: { id: 42 } }, { state: "listening" });
     // CR-06 routes through CIRCLE_CLICK; idle -> listening.
     expect(controller.now()).toBe("listening");
+  });
+});
+
+describe("wireIpcBridge — CR-02 end-to-end SAFE-06 device-change wiring", () => {
+  // CR-02 regression. Phase 14 review found the device-change-handler +
+  // session.onDeviceChange + mic-capture.onDeviceChange were each
+  // implemented + tested in isolation, but never composed in production.
+  // The renderer's onDeviceChange callback had no path into main and
+  // session.onDeviceChange was dead code outside tests. These tests
+  // pin the end-to-end pipeline: a renderer event arrives via
+  // IPC_DEVICE_CHANGE -> withSenderCheck -> parseEnvelope ->
+  // session.onDeviceChange.
+
+  it("forwards a valid 'device-switch' payload to session.onDeviceChange", () => {
+    const window = makeFakeWindow();
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const session = makeFakeSession();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      session,
+    });
+    const handler = ipcMain.handlers.get("achilles:device-change");
+    expect(handler).toBeDefined();
+    handler!.listener(
+      { sender: { id: 1 } },
+      { kind: "device-switch", deviceId: "dev-abc" },
+    );
+    expect(session.spies.onDeviceChange).toHaveBeenCalledTimes(1);
+    expect(session.spies.onDeviceChange).toHaveBeenCalledWith({
+      kind: "device-switch",
+      deviceId: "dev-abc",
+    });
+  });
+
+  it("forwards a valid 'hfp-downgrade' payload to session.onDeviceChange", () => {
+    const window = makeFakeWindow();
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const session = makeFakeSession();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      session,
+    });
+    const handler = ipcMain.handlers.get("achilles:device-change");
+    handler!.listener({ sender: { id: 1 } }, { kind: "hfp-downgrade" });
+    expect(session.spies.onDeviceChange).toHaveBeenCalledTimes(1);
+    expect(session.spies.onDeviceChange).toHaveBeenCalledWith({
+      kind: "hfp-downgrade",
+      deviceId: undefined,
+    });
+  });
+
+  it("drops a payload with an unknown kind and logs the schema error", () => {
+    const window = makeFakeWindow();
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const session = makeFakeSession();
+    const log = vi.fn();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      session,
+      logger: log,
+    });
+    const handler = ipcMain.handlers.get("achilles:device-change");
+    handler!.listener({ sender: { id: 1 } }, { kind: "wrong" });
+    expect(session.spies.onDeviceChange).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalled();
+    const logMsg = (log as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] ?? "";
+    expect(String(logMsg)).toContain("dropping invalid");
+    expect(String(logMsg)).toContain("achilles:device-change");
+  });
+
+  it("rejects a foreign-sender device-change envelope", () => {
+    const window = makeFakeWindow(42);
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const session = makeFakeSession();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      session,
+    });
+    const handler = ipcMain.handlers.get("achilles:device-change");
+    handler!.listener(
+      { sender: { id: 999 } },
+      { kind: "device-switch", deviceId: "dev-001" },
+    );
+    expect(session.spies.onDeviceChange).not.toHaveBeenCalled();
+  });
+
+  it("does NOT register the device-change handler when session is not supplied (degraded boot path)", () => {
+    const window = makeFakeWindow();
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      // no session
+    });
+    const handler = ipcMain.handlers.get("achilles:device-change");
+    expect(handler).toBeUndefined();
+  });
+
+  it("dispose removes the device-change listener", () => {
+    const window = makeFakeWindow();
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const session = makeFakeSession();
+    const handle = wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      session,
+    });
+    expect(ipcMain.handlers.get("achilles:device-change")).toBeDefined();
+    handle.dispose();
+    expect(ipcMain.handlers.get("achilles:device-change")).toBeUndefined();
   });
 });
 

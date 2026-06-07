@@ -22,6 +22,7 @@
  */
 import {
   ERROR_COPY,
+  IPC_DEVICE_CHANGE,
   IPC_ERROR,
   IPC_MIC_FRAME,
   IPC_OPEN_SYSTEM_SETTINGS,
@@ -37,6 +38,7 @@ import {
 } from "../shared/constants.js";
 import { parseEnvelope } from "../shared/ipc-schemas.js";
 import type {
+  DeviceChangePayload,
   MicFramePayload,
   TypedFallbackSubmitPayload,
   UtteranceCommitPayload,
@@ -455,6 +457,37 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
         }
       }),
     );
+
+    // CR-02 fix: SAFE-06 device-change inbound handler. The renderer's
+    // mic-capture module observes navigator.mediaDevices.ondevicechange
+    // and forwards the event over this channel; the handler validates
+    // the payload through DeviceChangePayloadSchema and routes it to
+    // session.onDeviceChange which triggers the soft re-acquire
+    // (pauseFrameDelivery + setTimeout(resumeFrameDelivery, 0)) when
+    // the orchestrator is mid-listening. Without this wiring the
+    // mic-capture.onDeviceChange callback had no path into main and
+    // SAFE-06 was not satisfied by the shipped binary.
+    ipcMainRef.on(
+      IPC_DEVICE_CHANGE,
+      withSenderCheck(IPC_DEVICE_CHANGE, (_event, payload) => {
+        try {
+          const parsed = parseEnvelope(
+            IPC_DEVICE_CHANGE,
+            payload,
+          ) as DeviceChangePayload;
+          session.onDeviceChange({
+            kind: parsed.kind,
+            deviceId: parsed.deviceId,
+          });
+        } catch (err) {
+          log(
+            `[achilles] dropping invalid ${IPC_DEVICE_CHANGE} payload: ${
+              (err as Error).message
+            }`,
+          );
+        }
+      }),
+    );
   }
 
   // ─── Main → Renderer wiring ───────────────────────────────────────
@@ -482,6 +515,9 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
     ipcMainRef.removeAllListeners(IPC_STT_TOKEN_REQUEST);
     // Plan 14-03 SAFE-05 channel (no-op when session was not supplied).
     ipcMainRef.removeAllListeners(IPC_TYPED_FALLBACK_SUBMIT);
+    // CR-02 fix: SAFE-06 device-change channel (no-op when session was
+    // not supplied; matches the surrounding channel-set pattern).
+    ipcMainRef.removeAllListeners(IPC_DEVICE_CHANGE);
   }
 
   function broadcastPermissionState(state: PermissionState): void {

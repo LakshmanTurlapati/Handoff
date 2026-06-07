@@ -463,3 +463,27 @@ export const IPC_TYPED_FALLBACK_SUBMIT = "achilles:typed-fallback-submit";
  * onCancel path. SAFE-06 invariant.
  */
 export const IPC_STUCK_THINKING_ANNOUNCE = "achilles:stuck-thinking-announce";
+
+/**
+ * Renderer → Main. CR-02 fix: end-to-end wiring for SAFE-06 device
+ * change. The renderer's mic-capture module subscribes to
+ * `navigator.mediaDevices.ondevicechange` and forwards the event over
+ * this channel. The main-process ipc-bridge handler routes it into
+ * `session.onDeviceChange(payload)` which triggers the soft re-acquire
+ * (pauseFrameDelivery + setTimeout(resumeFrameDelivery, 0)) when the
+ * orchestrator is mid-listening. Without this channel the renderer's
+ * onDeviceChange callback had no path into main and the SAFE-06
+ * "USB/Bluetooth device change without restart" requirement was not
+ * satisfied by the shipped binary.
+ *
+ * Payload shape:
+ *
+ *   { kind: 'device-switch' | 'hfp-downgrade', deviceId?: string }
+ *
+ * `deviceId` is the optional device label the renderer reports; the
+ * renderer omits it when the OS does not surface one. The main-side
+ * handler treats both 'device-switch' and 'hfp-downgrade' uniformly
+ * (the latter is informational — log a warning but the response is
+ * a soft re-acquire identical to 'device-switch').
+ */
+export const IPC_DEVICE_CHANGE = "achilles:device-change";

@@ -19,6 +19,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 import {
   ACHILLES_MODE_INIT,
+  IPC_DEVICE_CHANGE,
   IPC_ERROR,
   IPC_INIT_API_KEY_RESULT,
   IPC_INIT_API_KEY_SUBMIT,
@@ -280,6 +281,20 @@ const api = {
    */
   sendInitWizardDone(): void {
     send(IPC_INIT_WIZARD_DONE, {});
+  },
+  /**
+   * CR-02 fix: Renderer → Main. Forward a device-change notification
+   * to main. The renderer's mic-capture module observes
+   * navigator.mediaDevices.ondevicechange and calls this; main routes
+   * the payload into session.onDeviceChange which triggers the soft
+   * re-acquire pipeline when the orchestrator is mid-listening.
+   * SAFE-06 end-to-end wiring.
+   */
+  sendDeviceChange(payload: {
+    kind: "device-switch" | "hfp-downgrade";
+    deviceId?: string;
+  }): void {
+    send(IPC_DEVICE_CHANGE, payload);
   },
 };
 

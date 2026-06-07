@@ -80,6 +80,19 @@ export interface AchillesBridge {
    * sandwich-defence + bridge.send pipeline as a spoken utterance.
    */
   sendTypedFallbackSubmit?(payload: { text: string }): void;
+  /**
+   * CR-02 fix: SAFE-06 device-change forward. The renderer's
+   * mic-capture module observes navigator.mediaDevices.ondevicechange
+   * and forwards the event over this method. Main routes the payload
+   * into session.onDeviceChange which triggers the soft re-acquire
+   * pipeline when the orchestrator is mid-listening. Optional on the
+   * bridge surface because the headless mock-bridge path does NOT
+   * need to drive this affordance.
+   */
+  sendDeviceChange?(payload: {
+    kind: "device-switch" | "hfp-downgrade";
+    deviceId?: string;
+  }): void;
   requestState(state: AchillesState): void;
   openSystemSettings(): void;
   updateWindowPosition(pos: { x: number; y: number }): void;
