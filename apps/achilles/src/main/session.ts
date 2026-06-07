@@ -422,6 +422,15 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
   // Without this, state stays pinned in `processing` forever and the
   // mic gate is never engaged — PITFALLS #2 echo loop opens wide.
   let speakingEnteredForTurn = false;
+  // WR-01 side-channel tool-error accumulator. We observe every
+  // `tool_result` event with `is_error:true` and pass the captured
+  // tool_use_ids into the fallback `deriveOutcome` call on process_exit
+  // when `session.outcome` is unexpectedly null. Defence-in-depth:
+  // the orchestrator does NOT trust ANY one source for outcome
+  // attribution. The previous fallback passed `toolErrors: []` which
+  // could mask a real failure as success and route the LLM's
+  // hallucinated success body verbatim (PITFALLS #17).
+  let observedToolErrors: string[] = [];
   // Flag tracking whether the orchestrator opened TTS for this turn.
   // Used to gate the close() in onCancel + dispose().
   let ttsOpenedForTurn = false;
@@ -460,6 +469,7 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     ackEmitted = false;
     ttsOpenedForTurn = false;
     speakingEnteredForTurn = false;
+    observedToolErrors = [];
   }
 
   /**
@@ -598,6 +608,12 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
             );
           }
         }
+      } else if (ev.type === "tool_result" && ev.is_error === true) {
+        // WR-01 side-channel: accumulate tool_use_ids so the fallback
+        // deriveOutcome below sees the real tool-error list when
+        // session.outcome is unexpectedly null. The accumulator is
+        // scoped to this turn via resetTurnLocals().
+        observedToolErrors.push(ev.tool_use_id);
       } else if (ev.type === "session_init") {
         // Capture sessionId for the next turn's --resume.
         lastSessionId = ev.session_id;
@@ -605,9 +621,16 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
         // End of the bridge stream. session.outcome is now populated
         // (the bridge computes it synchronously inside the exit
         // listener). Determine the spoken summary body.
+        //
+        // WR-01: the fallback when session.outcome is null preserves
+        // the side-channel toolErrors observed during the turn rather
+        // than passing an empty array. A defective bridge that does
+        // not populate outcome but DID emit tool_result.is_error events
+        // would otherwise mask a real failure as success and route the
+        // LLM's hallucinated success body verbatim (PITFALLS #17).
         const outcome = session.outcome ?? deriveOutcome({
           exitCode: ev.exit_code,
-          toolErrors: [],
+          toolErrors: observedToolErrors,
         });
         // Authoritative outcome path — PITFALLS #17 + PROMPT-05.
         let summaryBody: string;

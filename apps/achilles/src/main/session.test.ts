@@ -1168,3 +1168,103 @@ describe("createSession — CR-04 bridge construction / send failure", () => {
     expect(errorLogs.length).toBeGreaterThan(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// WR-01: outcome fallback preserves toolErrors observed during the
+// turn. If session.outcome is null but tool_result.is_error events
+// were emitted, the fallback deriveOutcome must see the captured
+// tool_use_ids — otherwise a real failure is masked as success and the
+// LLM's hallucinated body plays through TTS (PITFALLS #17).
+// ─────────────────────────────────────────────────────────────────────
+
+describe("createSession — WR-01 outcome fallback preserves toolErrors", () => {
+  it("routes the PROMPT-05 override when session.outcome is null but tool_result.is_error was observed", async () => {
+    const controller = makeStateController();
+    const sentIpc: Array<{ channel: string; payload: unknown }> = [];
+    const logs: string[] = [];
+    const micCapture = makeMicCapture();
+    const mockTts = createMockTts({ chunksPerSegment: 2 });
+
+    // Build a scripted bridge whose `outcome` is null (defective
+    // bridge that did not populate outcome) but emits a tool_result
+    // with is_error:true and exit_code:0. With the old fallback this
+    // would produce {kind: "success"} and route the LLM's hallucinated
+    // body.
+    const scripted = makeScriptedClaudeBridge({
+      outcome: null,
+      sessionId: "wr01-sid",
+      lastTurnText: "<spoken-summary>All good.</spoken-summary>",
+    });
+
+    let nextToken = 1;
+    const timers = new Map<number, () => void>();
+    const setTimeoutImpl = (cb: () => void, _ms: number): unknown => {
+      const t = nextToken++;
+      timers.set(t, cb);
+      return t;
+    };
+    const clearTimeoutImpl = (token: unknown): void => {
+      timers.delete(token as number);
+    };
+
+    const deps: AchillesSessionDeps = {
+      stateController: controller,
+      claudeFactory: () => scripted.bridge,
+      ttsFactory: () => mockTts,
+      mintSttToken: vi.fn(async () => ({
+        token: "tok",
+        expiresAt: "2026-12-31T23:59:59.000Z",
+      })),
+      micCapture,
+      sendIpc: (channel, payload) => sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => logs.push(msg),
+      setTimeoutImpl,
+      clearTimeoutImpl,
+    };
+    const session = createSession(deps);
+
+    await session.onHotkeyPress();
+    session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-0000000000w1",
+      text: "run the broken command",
+      committedAt: 0,
+    });
+
+    // Script: session_init, tool_result with is_error:true, then
+    // process_exit with exit_code:0 and outcome stays null.
+    scripted.push({
+      type: "session_init",
+      session_id: "wr01-sid",
+      model: "mock-claude-code",
+      claude_code_version: "9.9.9",
+    });
+    scripted.push({
+      type: "tool_result",
+      tool_use_id: "tool-use-1",
+      content: "tool failure",
+      is_error: true,
+    });
+    scripted.push({
+      type: "process_exit",
+      exit_code: 0,
+      signal: null,
+    });
+    scripted.endStream();
+
+    await flushAsync();
+
+    // The PROMPT-05 override phrase must have been routed to TTS.
+    const overrideAppends = mockTts.appendedTexts.filter((t) =>
+      t.startsWith("I ran into a problem"),
+    );
+    expect(overrideAppends.length).toBeGreaterThan(0);
+    // The lying success body must NOT have been routed.
+    const lyingAppends = mockTts.appendedTexts.filter((t) =>
+      t.includes("All good"),
+    );
+    expect(lyingAppends.length).toBe(0);
+  });
+});
