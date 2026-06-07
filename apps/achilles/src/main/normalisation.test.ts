@@ -55,6 +55,17 @@ describe("stripAnsi() — CSI + OSC escape removal", () => {
     expect(result.count).toBe(1);
   });
 
+  // WR-02 defence-in-depth: real OSC sequences may terminate with the
+  // C1 String Terminator (ESC \\ = 0x1b 0x5c) rather than BEL (0x07).
+  // A paste from a remote terminal can drop in an ST-terminated OSC;
+  // the regex must catch both forms.
+  it("strips an OSC sequence terminated with ESC \\ (String Terminator)", () => {
+    const input = "title\x1b]0;remote\x1b\\body";
+    const result = stripAnsi(input);
+    expect(result.value).toBe("titlebody");
+    expect(result.count).toBe(1);
+  });
+
   it("leaves non-ANSI text untouched and reports count = 0", () => {
     const input = "no escapes here";
     const result = stripAnsi(input);

@@ -72,9 +72,17 @@ const ANSI_CSI_REGEX = /\x1b\[[0-9;?]*[A-Za-z]/g;
 /**
  * OSC escape sequence regex. Covers terminal title setters
  * (\x1b]0;title\x07) and other Operating-System-Command escapes
- * terminated by BEL (0x07).
+ * terminated by EITHER BEL (0x07) OR the C1 String Terminator
+ * (ESC \\ = 0x1b 0x5c).
+ *
+ * WR-02 defence-in-depth: while the companion.md prompt forbids ANSI
+ * in <spoken-summary>, a paste from a remote terminal can drop in an
+ * ST-terminated OSC sequence. The class [^\x07\x1b] keeps the inner
+ * match from crossing another ESC (so we never swallow content past
+ * the terminator), and the (?:\x07|\x1b\\) alternation matches either
+ * terminator.
  */
-const ANSI_OSC_REGEX = /\x1b\][^\x07]*\x07/g;
+const ANSI_OSC_REGEX = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
 /**
  * Absolute Unix-style path regex. Anchors on a leading word boundary
