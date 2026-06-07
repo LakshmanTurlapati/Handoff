@@ -29,6 +29,7 @@ import {
   existsSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   statSync,
   unlinkSync,
 } from "node:fs";
@@ -311,12 +312,20 @@ const invokedAsScript = (() => {
   // `process.argv[1]` is the absolute path of the script the Node
   // runtime was launched with. Compare against this module's file URL
   // to detect entrypoint mode without invoking commander on import.
+  // npm-link / npm install -g installs the bin as a symlink; resolve
+  // both sides via realpathSync so the comparison survives that.
   const entry = process.argv[1];
   if (!entry) return false;
   try {
-    return resolve(entry) === resolve(fileURLToPath(import.meta.url));
+    const canonicalEntry = realpathSync(resolve(entry));
+    const canonicalHere = realpathSync(resolve(fileURLToPath(import.meta.url)));
+    return canonicalEntry === canonicalHere;
   } catch {
-    return false;
+    try {
+      return resolve(entry) === resolve(fileURLToPath(import.meta.url));
+    } catch {
+      return false;
+    }
   }
 })();
 
