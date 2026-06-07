@@ -2474,6 +2474,51 @@ describe("createSession — SE27 onSuspend tears down bridge + TTS + mic + drive
     );
     expect(resumeLogs.length).toBe(1);
   });
+
+  // WR-08 regression. Phase 14 review found onResume was essentially a
+  // no-op — only the log line was emitted. Pitfall #25 calls for
+  // "re-acquire the default audio device on resume", which on Linux/
+  // Pipewire is NOT guaranteed via the OS devicechange event. After
+  // WR-08, onResume triggers the soft re-acquire path uniformly so the
+  // renderer's mic stream is refreshed even if the OS does not surface
+  // a devicechange after a long suspend.
+  it("WR-08: onResume triggers a defensive soft re-acquire via onDeviceChange so a stale mic stream is refreshed", async () => {
+    const h = makeHarness();
+    await h.session.onHotkeyPress();
+    expect(h.controller.now()).toBe("listening");
+    // After suspend the state is idle and mirroredState is idle.
+    h.session.onSuspend();
+    expect(h.controller.now()).toBe("idle");
+    // Now press hotkey again to drive listening so the WR-08 onResume
+    // re-acquire path has an observable effect (pauseFrameDelivery is
+    // called when mirroredState === 'listening').
+    await h.session.onHotkeyPress();
+    expect(h.controller.now()).toBe("listening");
+    h.micCapture.pauseFrameDelivery.mockClear();
+    h.session.onResume();
+    // The WR-08 re-acquire fires through onDeviceChange which pauses
+    // the mic worklet when mirroredState === 'listening'.
+    expect(h.micCapture.pauseFrameDelivery).toHaveBeenCalledTimes(1);
+    // The resume log line + a 'device change' log line were both emitted.
+    const resumeLogs = h.logs.filter((l) =>
+      l.includes("resume: ready for next utterance"),
+    );
+    expect(resumeLogs.length).toBe(1);
+    const deviceLogs = h.logs.filter((l) =>
+      l.includes("device change: deviceId=unknown kind=device-switch"),
+    );
+    expect(deviceLogs.length).toBe(1);
+  });
+
+  it("WR-08: onResume from idle is a no-op beyond the resume + device-change log lines (no mic re-acquire when nothing was listening)", async () => {
+    const h = makeHarness();
+    expect(h.controller.now()).toBe("idle");
+    h.micCapture.pauseFrameDelivery.mockClear();
+    h.session.onResume();
+    // mirroredState is 'idle' so onDeviceChange short-circuits — no
+    // pauseFrameDelivery on resume from idle.
+    expect(h.micCapture.pauseFrameDelivery).not.toHaveBeenCalled();
+  });
 });
 
 describe("createSession — SE28 onSuspend during state 'idle' is a no-op (no in-flight bridge / TTS to tear down)", () => {

@@ -1632,6 +1632,17 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
   function onResume(): void {
     if (disposed) return;
     log(`[achilles] resume: ready for next utterance`);
+    // WR-08 fix: trigger a defensive soft re-acquire so the renderer's
+    // mic stream is refreshed even if the OS does not emit a
+    // devicechange on resume (Linux/Pipewire does not guarantee one).
+    // The orchestrator's onDeviceChange handler runs the
+    // pauseFrameDelivery + setTimeout(resumeFrameDelivery, 0) sequence
+    // uniformly; calling it here means the mic stream is never bound
+    // to a stale audio device after a long suspend. onDeviceChange is
+    // a no-op when mirroredState !== 'listening' so the resume path
+    // from an idle state does not surface any spurious mic-gate
+    // activity.
+    onDeviceChange({ kind: "device-switch" });
   }
 
   /**
