@@ -460,10 +460,31 @@ async function bootstrap(): Promise<void> {
   // dispose wiring simpler (no branching on the env var here).
   const transcriptsEnabled = process.env.ACHILLES_SAVE_TRANSCRIPTS === "1";
   const retentionDaysRaw = process.env.ACHILLES_TRANSCRIPT_RETENTION_DAYS;
-  const retentionDays =
+  const retentionDaysParsed =
     retentionDaysRaw !== undefined && retentionDaysRaw.length > 0
       ? Number.parseInt(retentionDaysRaw, 10)
       : DEFAULT_RETENTION_DAYS;
+  // WR-02 fix: clamp the retention window to >= 1 day. Without the lower
+  // bound a negative value (e.g. ACHILLES_TRANSCRIPT_RETENTION_DAYS=-5)
+  // would pass the isFinite guard and reach applyRetention where
+  // `ageDays > retentionDays` would delete every transcript file (any
+  // positive age > a negative threshold). This is a privacy issue: a
+  // misconfigured retention setting wipes the user's transcripts. We
+  // also fall back to the default on NaN.
+  const retentionDays =
+    Number.isFinite(retentionDaysParsed) && retentionDaysParsed >= 1
+      ? retentionDaysParsed
+      : DEFAULT_RETENTION_DAYS;
+  if (
+    retentionDaysRaw !== undefined &&
+    retentionDaysRaw.length > 0 &&
+    retentionDays !== retentionDaysParsed
+  ) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[achilles] ignoring invalid ACHILLES_TRANSCRIPT_RETENTION_DAYS=${retentionDaysRaw}; using default ${DEFAULT_RETENTION_DAYS}`,
+    );
+  }
   let transcriptStore: TranscriptStore;
   {
     const {
@@ -480,9 +501,9 @@ async function bootstrap(): Promise<void> {
     transcriptStore = createTranscriptStore({
       enabled: transcriptsEnabled,
       dirPath: transcriptsDir,
-      retentionDays: Number.isFinite(retentionDays)
-        ? retentionDays
-        : DEFAULT_RETENTION_DAYS,
+      // WR-02 fix: retentionDays is already clamped to a finite >= 1
+      // value above; passing it directly removes the duplicate guard.
+      retentionDays,
       writeFileImpl: (path, data, options) => {
         appendFileSync(path, data, { flag: options.flag });
       },
@@ -597,14 +618,31 @@ async function bootstrap(): Promise<void> {
     // defaults to STUCK_THINKING_DEFAULT_TIMEOUT_MS (60_000).
     let sessionRef: AchillesSession | null = null;
     const stuckTimeoutRaw = process.env.ACHILLES_STUCK_TIMEOUT_MS;
-    const stuckTimeoutMs =
+    const stuckTimeoutParsed =
       stuckTimeoutRaw !== undefined && stuckTimeoutRaw.length > 0
         ? Number.parseInt(stuckTimeoutRaw, 10)
         : STUCK_THINKING_DEFAULT_TIMEOUT_MS;
+    // WR-02 fix: clamp the stuck-thinking timeout to >= 1000 ms.
+    // A negative or zero value would resolve to setTimeout(cb, -5) which
+    // Node coerces to 1 ms, firing the watchdog instantly on every
+    // utterance and flooding the user with stuck-thinking announcements.
+    // We also fall back to the default on NaN.
+    const stuckTimeoutMs =
+      Number.isFinite(stuckTimeoutParsed) && stuckTimeoutParsed >= 1000
+        ? stuckTimeoutParsed
+        : STUCK_THINKING_DEFAULT_TIMEOUT_MS;
+    if (
+      stuckTimeoutRaw !== undefined &&
+      stuckTimeoutRaw.length > 0 &&
+      stuckTimeoutMs !== stuckTimeoutParsed
+    ) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[achilles] ignoring invalid ACHILLES_STUCK_TIMEOUT_MS=${stuckTimeoutRaw}; using default ${STUCK_THINKING_DEFAULT_TIMEOUT_MS}`,
+      );
+    }
     const stuckThinkingWatchdog = createStuckThinkingWatchdog({
-      timeoutMs: Number.isFinite(stuckTimeoutMs)
-        ? stuckTimeoutMs
-        : STUCK_THINKING_DEFAULT_TIMEOUT_MS,
+      timeoutMs: stuckTimeoutMs,
       onTimeout: ({ waitedMs }): void => {
         sessionRef?.announceStuckThinking({ waitedMs });
       },
