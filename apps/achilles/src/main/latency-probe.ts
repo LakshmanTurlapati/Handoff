@@ -375,8 +375,30 @@ export function createLatencyProbe(deps: LatencyProbeDeps = {}): LatencyProbe {
 
   function recordStage(stage: LatencyStage, t?: number): void {
     if (disposed) return;
-    if (inFlight === null) return;
     const ts = typeof t === "number" ? t : nowImpl();
+    if (inFlight === null) {
+      // WR-03 fix: tts_playback_complete fires AFTER finalizeSample
+      // (the sample finalises on the first audible byte at
+      // tts_playback_start; the playback-complete signal arrives once
+      // the renderer has drained the last chunk, which is after the
+      // first-chunk anchor). Previously the inFlight===null guard
+      // silently dropped the call, leaving tts_playback_complete as
+      // dead data in the public LatencyStage taxonomy.
+      //
+      // Retroactively stamp the most recently finalized sample's
+      // stages map so report.perStageP50.tts_playback_complete carries
+      // observed data. LatencySample is shallow-frozen via Object.freeze
+      // but the inner `stages` object is not, so the property write is
+      // legal. Only tts_playback_complete is allowed through this
+      // post-finalize path — other stages either fired during the
+      // sample window or are genuinely missing.
+      if (stage !== "tts_playback_complete") return;
+      if (window.length === 0) return;
+      const lastSample = window[window.length - 1]!;
+      if (lastSample.stages.tts_playback_complete !== undefined) return;
+      lastSample.stages.tts_playback_complete = ts;
+      return;
+    }
     // Only record the first observation of each stage per sample —
     // the probe semantics are "first time the stage fired", not "most
     // recent fire". This matches the LOOP-06 metric definition where

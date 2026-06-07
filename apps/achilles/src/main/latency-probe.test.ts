@@ -257,10 +257,10 @@ describe("createLatencyProbe — LP5 report() shape", () => {
     const probe = createLatencyProbe({ nowImpl: () => 0 });
     // Build a sample inline so we can record tts_playback_complete
     // BEFORE finalizeSample (the recordHappyPath helper records
-    // playback_complete AFTER finalize, which the probe ignores —
-    // appropriate for the LOOP-06 metric since playback_complete is
-    // a post-anchor diagnostic, but here we want all stages in the
-    // sample so we can assert their per-stage rollups).
+    // playback_complete AFTER finalize; the WR-03 fix now retroactively
+    // stamps the most recent finalized sample so post-finalize calls
+    // are no longer dropped, but the pre-finalize path remains the
+    // canonical record-it-during-the-sample-window flow).
     probe.markSpeechEnd(0, "u1");
     probe.recordStage("stt_committed", 50);
     probe.recordStage("claude_first_text_delta", 200);
@@ -277,6 +277,78 @@ describe("createLatencyProbe — LP5 report() shape", () => {
       expect(r.perStageP50.stt_committed).toBe(50);
       expect(r.perStageP50.tts_playback_start).toBe(500);
       expect(r.perStageP50.tts_playback_complete).toBe(1500);
+    }
+  });
+});
+
+describe("createLatencyProbe — WR-03 tts_playback_complete after finalize is retroactively stamped", () => {
+  // WR-03 regression. The orchestrator calls recordStage('tts_playback_complete')
+  // from session.onTtsPlaybackComplete — which runs AFTER finalizeSample
+  // (the sample is finalized at first-chunk fanout via the consumer loop).
+  // Previously the inFlight===null guard silently dropped the call, leaving
+  // tts_playback_complete as dead data in the public LatencyStage taxonomy
+  // even though report.perStageP50 exposed it. After WR-03 the call is
+  // retroactively stamped on the most recently finalized sample so the
+  // metric reflects observed data.
+
+  it("recordStage('tts_playback_complete') AFTER finalizeSample stamps the most recent sample", () => {
+    const probe = createLatencyProbe({ nowImpl: () => 0 });
+    probe.markSpeechEnd(0, "u1");
+    probe.recordStage("stt_committed", 50);
+    probe.recordStage("tts_first_chunk", 450);
+    probe.recordStage("tts_playback_start", 500);
+    probe.finalizeSample();
+    // Post-finalize tts_playback_complete now retroactively updates the
+    // sample's stages map (pre-WR-03 this was silently dropped).
+    probe.recordStage("tts_playback_complete", 1500);
+    const r = probe.report();
+    expect(r.sampleCount).toBe(1);
+    if (r.sampleCount > 0) {
+      expect(r.perStageP50.tts_playback_complete).toBe(1500);
+    }
+  });
+
+  it("post-finalize recordStage for a non-tts_playback_complete stage is still dropped (unchanged behaviour)", () => {
+    const probe = createLatencyProbe({ nowImpl: () => 0 });
+    probe.markSpeechEnd(0, "u1");
+    probe.recordStage("stt_committed", 50);
+    probe.recordStage("tts_first_chunk", 450);
+    probe.recordStage("tts_playback_start", 500);
+    probe.finalizeSample();
+    // Other stages remain dropped — only tts_playback_complete has the
+    // post-finalize retroactive path, because the others are anchors
+    // that legitimately fire during the sample window.
+    probe.recordStage("claude_first_text_delta", 9999);
+    const r = probe.report();
+    expect(r.sampleCount).toBe(1);
+    if (r.sampleCount > 0) {
+      // claude_first_text_delta is NaN because no record-during-sample
+      // happened; the stale post-finalize call did NOT silently update it.
+      expect(Number.isNaN(r.perStageP50.claude_first_text_delta)).toBe(true);
+    }
+  });
+
+  it("post-finalize recordStage('tts_playback_complete') with empty window is a no-op", () => {
+    const probe = createLatencyProbe({ nowImpl: () => 0 });
+    // No markSpeechEnd / finalizeSample — empty window. The fix's
+    // window.length === 0 guard returns early without throwing.
+    probe.recordStage("tts_playback_complete", 1500);
+    expect(probe.report()).toEqual({ sampleCount: 0 });
+  });
+
+  it("post-finalize recordStage('tts_playback_complete') is idempotent (does not overwrite an existing value)", () => {
+    const probe = createLatencyProbe({ nowImpl: () => 0 });
+    probe.markSpeechEnd(0, "u1");
+    probe.recordStage("tts_playback_start", 500);
+    probe.recordStage("tts_playback_complete", 1000);
+    probe.finalizeSample();
+    // A second post-finalize call must not overwrite the previously
+    // recorded value (matches the in-flight first-fire semantics).
+    probe.recordStage("tts_playback_complete", 2000);
+    const r = probe.report();
+    expect(r.sampleCount).toBe(1);
+    if (r.sampleCount > 0) {
+      expect(r.perStageP50.tts_playback_complete).toBe(1000);
     }
   });
 });
