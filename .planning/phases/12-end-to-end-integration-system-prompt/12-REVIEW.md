@@ -685,3 +685,92 @@ contents, not the count.
 _Reviewed: 2026-06-06T00:00:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+
+## FIX LOG
+
+Applied 2026-06-07 (gsd-code-fixer, iteration 1). All 4 critical + 9
+warning findings fixed. Info findings deferred (out of fix scope per
+the orchestrator's `critical_warning` selection).
+
+| Finding | Status | Commit  | Files |
+|---------|--------|---------|-------|
+| CR-01   | fixed  | 70ca89f | session.ts, session.test.ts |
+| CR-02   | fixed  | ec1d8b6 | session.ts, session.test.ts, ipc-bridge.ts, ipc-bridge.test.ts |
+| CR-03   | fixed  | 61f6ee4 | session.ts, session.test.ts |
+| CR-04   | fixed  | 341cf02 | session.ts, session.test.ts |
+| WR-01   | fixed  | 2a9e327 | session.ts, session.test.ts |
+| WR-02   | fixed  | 5a34ba1e | normalisation.ts, normalisation.test.ts |
+| WR-03   | fixed  | fc7e7df | renderer/audio/playback-queue.ts, .test.ts |
+| WR-04   | fixed  | 309d748 | session.ts |
+| WR-05   | fixed  | 2c311f8 | session.ts |
+| WR-06   | fixed  | 78f42df | session.ts, session.test.ts |
+| WR-07   | fixed  | 60768e4 | session.ts, ipc-bridge.test.ts |
+| WR-08   | fixed  | 70b6ae0 | mock-loop-clients.ts, mock-loop-clients.test.ts |
+| WR-09   | fixed  | a4ec25f | session.ts |
+
+**Verification:**
+
+- `MOCK_LOOP=1 npx vitest run --project phase-12-unit` -> 210/210 pass
+  (200 baseline + 10 new regression tests for CR-01..04, WR-01, WR-02,
+  WR-03, WR-08).
+- `npm run typecheck --workspace apps/achilles` -> exit 0.
+- Phase-09 regression: 145/145 (133 passed + 12 live-only skipped) -
+  no regression.
+- Phase-10 regression: 157/157 - no regression.
+- Phase-11 regression: 423/423 - no regression.
+
+**Per-finding fix summary:**
+
+- **CR-01** Added `enterSpeakingForTurn()` helper that gates mic +
+  dispatches the speaking transition exactly once per turn. Routed
+  both the happy-path ack branch and the defensive `process_exit`
+  branch through it so the state machine cleanly walks
+  `processing -> speaking -> idle` even when no
+  `assistant_text_delta` carries a sentence terminator.
+- **CR-02** Added `session.requestSttToken()` that mints a fresh
+  token and broadcasts `IPC_STT_TOKEN` without touching the state
+  machine. Rerouted the `IPC_STT_TOKEN_REQUEST` handler through it
+  instead of `onHotkeyPress()`.
+- **CR-03** Relaxed `onUtteranceCommit` guard from
+  `mirroredState !== "listening"` to `"listening" || "processing"` so
+  the toggle-mode race (second hotkey press advances state ->
+  processing BEFORE the renderer's commit IPC lands) no longer drops
+  the user's voice.
+- **CR-04** Wrapped `deps.claudeFactory(...)` and `bridge.send(...)`
+  in try/catch. On `ClaudeVersionError` or EPIPE-shape exception, log
+  the attribution, close the bridge best-effort, dispatch
+  `INJECT_ERROR` (drives state machine -> error), and null out
+  `currentClaudeSession`.
+- **WR-01** Built a side-channel `observedToolErrors[]` accumulator
+  and pass it into the `deriveOutcome` fallback so a defective bridge
+  with `outcome:null` but `tool_result.is_error` events still routes
+  the PROMPT-05 override.
+- **WR-02** Extended `ANSI_OSC_REGEX` to match either BEL (0x07) or
+  the C1 String Terminator (ESC \, i.e. `\x1b\\`).
+- **WR-03** Replaced per-chunk `setPlaybackSource(source)` churn with
+  a long-lived `GainNode` mixer; analyser binding is attached ONCE at
+  construction.
+- **WR-04** Moved `currentTtsClient = tts` to AFTER `await tts.open()`
+  succeeds; best-effort close the unopened handle on failure.
+- **WR-05** Replaced `extractSpokenSummary(accumulatedText)` with
+  `extractSpokenSummary(session.lastTurnText)` to read the bridge's
+  authoritative full_text.
+- **WR-06** Deferred `resumeFrameDelivery()` in `onCancel` by
+  `SPEAKING_DEBOUNCE_MS` so the mic does not pick up the cancellation
+  playback tail.
+- **WR-07** Split `framesDroppedDuringSpeaking` into two counters
+  (`framesDroppedDuringSpeaking`, `framesDroppedDuringProcessing`)
+  plus a derived sum `framesDroppedDuringHalfDuplexGate`.
+- **WR-08** Mock TTS now computes `maxSeq = Math.max(...seqs)` and
+  assigns `isFinal = seq === maxSeq` rather than
+  `isFinal = i === seqs.length - 1`, so the post-swap chunk with the
+  highest seq always carries the flag.
+- **WR-09** `enterSpeakingForTurn(failureReason?)` dispatches the
+  dedicated `CLAUDE_FAILURE_OVERRIDE` reducer tag when called from the
+  process_exit failure branch; the ack branch still dispatches
+  `CLAUDE_RESULT_READY` (no failureReason argument) because it fires
+  before outcome is known.
+
+_Fixed: 2026-06-07T00:00:00Z_
+_Fixer: Claude (gsd-code-fixer)_
+_Iteration: 1_
