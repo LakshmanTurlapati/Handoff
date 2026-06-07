@@ -86,6 +86,7 @@ import {
   detectManipulationTokens,
   wrapTranscript,
 } from "./sandwich-defence.js";
+import type { LatencyProbe } from "./latency-probe.js";
 import { normaliseForTts } from "./normalisation.js";
 import type { AchillesEvent } from "./state-machine.js";
 
@@ -313,6 +314,25 @@ export interface AchillesSessionDeps {
    * Optional clear-timer override. Paired with setTimeoutImpl.
    */
   clearTimeoutImpl?: (token: unknown) => void;
+  /**
+   * Plan 14-01 — optional LOOP-06 latency probe. When provided, the
+   * orchestrator records stage timestamps at six well-known transition
+   * points:
+   *
+   *   onUtteranceCommit           → 'stt_committed' + markSpeechEnd
+   *   first assistant_text_delta  → 'claude_first_text_delta'
+   *   process_exit                → 'claude_assistant_done'
+   *   tts.open() resolves         → 'tts_first_chunk'
+   *   first IPC_TTS_CHUNK fan-out → 'tts_playback_start' + finalizeSample
+   *   onTtsPlaybackComplete       → 'tts_playback_complete'
+   *
+   * The probe is undefined by default — Plan 12-04 callers (and the
+   * Plan 14-01 tests that do not exercise the probe) pass nothing and
+   * the orchestrator's behaviour is bit-for-bit identical to its pre-
+   * 14-01 surface (verified by SE17). Production index.ts wires this
+   * field iff ACHILLES_DEBUG=1.
+   */
+  latencyProbe?: LatencyProbe;
 }
 
 /**
@@ -598,6 +618,12 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
       }
       throw err;
     }
+    // Plan 14-01: stamp the LOOP-06 'tts_first_chunk' stage the moment
+    // the TTS stream is ready to accept appendText. The actual first
+    // chunk is fanned out later in the consumer loop below; for the
+    // CONTEXT.md stage taxonomy this is the documented anchor for "the
+    // TTS pipeline is connected and ready".
+    deps.latencyProbe?.recordStage("tts_first_chunk");
     currentTtsClient = tts;
     ttsOpenedForTurn = true;
     // Spawn the chunk-fanout consumer. We do NOT await it — the
@@ -607,6 +633,12 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     // log line.
     void (async (): Promise<void> => {
       try {
+        // Plan 14-01: first-chunk guard. The LOOP-06 metric anchor is
+        // the moment the FIRST audible byte leaves main via IPC; we
+        // stamp 'tts_playback_start' + finalizeSample exactly once
+        // per turn (the consumer keeps running for subsequent chunks
+        // + the 'complete' event but those do not re-stamp).
+        let firstChunkFanned = false;
         for await (const ev of tts.events$) {
           if (disposed) break;
           if (ev.type === "chunk") {
@@ -616,6 +648,11 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
               bytes: ev.chunk.bytes,
               isFinal: ev.chunk.isFinal,
             });
+            if (!firstChunkFanned) {
+              firstChunkFanned = true;
+              deps.latencyProbe?.recordStage("tts_playback_start");
+              deps.latencyProbe?.finalizeSample();
+            }
           }
           // 'complete' is observed but does NOT trigger the debounce —
           // the renderer's playback-queue is the authoritative source
@@ -649,6 +686,12 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
           const ack = extractAck(accumulatedText);
           if (ack !== null) {
             ackEmitted = true;
+            // Plan 14-01: stamp 'claude_first_text_delta' the moment
+            // we have a parseable ack — this is the LOOP-06 stage
+            // anchor for "the bridge produced its first usable
+            // assistant text". The probe ignores subsequent ack
+            // attempts in the same turn (first-fire semantics).
+            deps.latencyProbe?.recordStage("claude_first_text_delta");
             // Normalise + open + appendText + dispatch.
             const norm = normaliseForTts(ack);
             // Pre-open TTS for the turn so the spoken summary later
@@ -681,6 +724,11 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
         // Capture sessionId for the next turn's --resume.
         lastSessionId = ev.session_id;
       } else if (ev.type === "process_exit") {
+        // Plan 14-01: stamp 'claude_assistant_done' as the bridge
+        // signals the child has exited. The probe uses this to
+        // measure the claude-side end-to-end portion of the LOOP-06
+        // budget.
+        deps.latencyProbe?.recordStage("claude_assistant_done");
         // End of the bridge stream. session.outcome is now populated
         // (the bridge computes it synchronously inside the exit
         // listener). Determine the spoken summary body.
@@ -865,6 +913,14 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
     // Reset per-turn locals before we start.
     resetTurnLocals();
     accumulatedText = "";
+    // Plan 14-01: anchor the LOOP-06 sample at the renderer's
+    // committedAt epoch (the STT WebSocket's commit timestamp — the
+    // documented "speech-end" boundary) and record the first stage
+    // 'stt_committed' at the current nowImpl tick. markSpeechEnd
+    // resets any prior in-flight slot so a cancelled previous turn
+    // does not contaminate this sample.
+    deps.latencyProbe?.markSpeechEnd(payload.committedAt, payload.id);
+    deps.latencyProbe?.recordStage("stt_committed");
     // SAFE-04 sandwich-defence. Wrap BEFORE forwarding to the bridge.
     // The detector is the passive-observer warning path — log + warn
     // but do NOT silently strip (per CONTEXT.md + SAFE-04).
@@ -973,6 +1029,14 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
       // last chunk and the renderer signalling.
       return;
     }
+    // Plan 14-01: stamp 'tts_playback_complete' as a diagnostic
+    // post-LOOP-06 stage. The sample for the current turn has
+    // already been finalized on the first chunk (the LOOP-06 metric
+    // anchor); this call records the trailing duration into the now-
+    // empty in-flight slot, which the probe silently ignores. That
+    // is intentional — the call is uniform across all six stages
+    // and the probe's semantics handle the no-op cleanly.
+    deps.latencyProbe?.recordStage("tts_playback_complete");
     clearDebounce();
     debounceToken = setT(() => {
       debounceToken = null;

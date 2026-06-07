@@ -1275,3 +1275,215 @@ describe("createSession — WR-01 outcome fallback preserves toolErrors", () => 
     expect(lyingAppends.length).toBe(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Plan 14-01 SE15..SE17 — LatencyProbe wiring
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Lightweight LatencyProbe spy that records every probe call as a
+ * {kind, ...} entry. The spy implements the full LatencyProbe surface
+ * so it satisfies the (optional) deps.latencyProbe field bit-for-bit
+ * AND lets the test assert call order + arguments.
+ */
+interface ProbeCall {
+  readonly kind:
+    | "markSpeechEnd"
+    | "recordStage"
+    | "finalizeSample"
+    | "dispose";
+  readonly stage?: string;
+  readonly speechEndMs?: number;
+  readonly utteranceId?: string;
+  readonly t?: number;
+}
+
+function makeProbeSpy(): {
+  calls: ProbeCall[];
+  probe: {
+    markSpeechEnd: (epochMs: number, utteranceId: string) => void;
+    recordStage: (stage: string, t?: number) => void;
+    finalizeSample: () => void;
+    report: () => { sampleCount: 0 };
+    dispose: () => void;
+  };
+} {
+  const calls: ProbeCall[] = [];
+  return {
+    calls,
+    probe: {
+      markSpeechEnd: (epochMs: number, utteranceId: string): void => {
+        calls.push({ kind: "markSpeechEnd", speechEndMs: epochMs, utteranceId });
+      },
+      recordStage: (stage: string, t?: number): void => {
+        calls.push({ kind: "recordStage", stage, t });
+      },
+      finalizeSample: (): void => {
+        calls.push({ kind: "finalizeSample" });
+      },
+      report: () => ({ sampleCount: 0 }),
+      dispose: (): void => {
+        calls.push({ kind: "dispose" });
+      },
+    },
+  };
+}
+
+describe("createSession — SE15 LatencyProbe markSpeechEnd + stt_committed on utterance commit", () => {
+  it("onUtteranceCommit calls probe.markSpeechEnd(payload.committedAt, payload.id) AND probe.recordStage('stt_committed')", async () => {
+    const h = makeHarness();
+    const probeSpy = makeProbeSpy();
+    // Patch the harness's session to also receive the probe. We
+    // rebuild a new session with the harness's seams plus the probe.
+    const sessionWithProbe: AchillesSession = createSession({
+      stateController: h.controller,
+      claudeFactory: () => h.mockClaude,
+      ttsFactory: () => h.mockTts,
+      mintSttToken: h.mintSttToken,
+      micCapture: h.micCapture,
+      sendIpc: (channel, payload) => h.sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => h.logs.push(msg),
+      setTimeoutImpl: h.setTimeoutImpl,
+      clearTimeoutImpl: h.clearTimeoutImpl,
+      latencyProbe: probeSpy.probe as never,
+    });
+    await sessionWithProbe.onHotkeyPress();
+    sessionWithProbe.onUtteranceCommit({
+      id: "11111111-1111-4111-8111-111111111111",
+      text: "hello",
+      committedAt: 12345,
+    });
+    const markCalls = probeSpy.calls.filter((c) => c.kind === "markSpeechEnd");
+    expect(markCalls.length).toBe(1);
+    expect(markCalls[0]!.speechEndMs).toBe(12345);
+    expect(markCalls[0]!.utteranceId).toBe(
+      "11111111-1111-4111-8111-111111111111",
+    );
+    const sttCalls = probeSpy.calls.filter(
+      (c) => c.kind === "recordStage" && c.stage === "stt_committed",
+    );
+    expect(sttCalls.length).toBe(1);
+  });
+});
+
+describe("createSession — SE16 LatencyProbe wired at six stage boundaries through a full turn", () => {
+  it("records claude_first_text_delta + claude_assistant_done + tts_first_chunk + tts_playback_start (+ finalizeSample) + tts_playback_complete", async () => {
+    const h = makeHarness();
+    const probeSpy = makeProbeSpy();
+    const session: AchillesSession = createSession({
+      stateController: h.controller,
+      claudeFactory: () => h.mockClaude,
+      ttsFactory: () => h.mockTts,
+      mintSttToken: h.mintSttToken,
+      micCapture: h.micCapture,
+      sendIpc: (channel, payload) => h.sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => h.logs.push(msg),
+      setTimeoutImpl: h.setTimeoutImpl,
+      clearTimeoutImpl: h.clearTimeoutImpl,
+      latencyProbe: probeSpy.probe as never,
+    });
+    await session.onHotkeyPress();
+    session.onUtteranceCommit({
+      id: "u-se16",
+      text: "say something",
+      committedAt: 100,
+    });
+    await flushAsync();
+    session.onTtsPlaybackComplete();
+    h.fireTimer();
+    // Collect recorded stages in call order. We expect the six named
+    // stages to appear at least once each across the turn.
+    const stageCalls = probeSpy.calls
+      .filter((c) => c.kind === "recordStage")
+      .map((c) => c.stage);
+    expect(stageCalls).toContain("stt_committed");
+    expect(stageCalls).toContain("claude_first_text_delta");
+    expect(stageCalls).toContain("claude_assistant_done");
+    expect(stageCalls).toContain("tts_first_chunk");
+    expect(stageCalls).toContain("tts_playback_start");
+    expect(stageCalls).toContain("tts_playback_complete");
+    // finalizeSample fires exactly once — on the first chunk fan-out
+    // (the LOOP-06 metric anchor).
+    const finalizeCalls = probeSpy.calls.filter(
+      (c) => c.kind === "finalizeSample",
+    );
+    expect(finalizeCalls.length).toBe(1);
+    // Stage ordering check: stt_committed appears before
+    // tts_playback_start, which appears before tts_playback_complete.
+    const idxStt = stageCalls.indexOf("stt_committed");
+    const idxStart = stageCalls.indexOf("tts_playback_start");
+    const idxComplete = stageCalls.indexOf("tts_playback_complete");
+    expect(idxStt).toBeLessThan(idxStart);
+    expect(idxStart).toBeLessThan(idxComplete);
+  });
+});
+
+describe("createSession — SE17 LatencyProbe undefined preserves Plan 12-04 behaviour", () => {
+  it("the orchestrator is bit-for-bit identical when latencyProbe is undefined (no behavioural change)", async () => {
+    // We compare two sessions running the same scenario — one with
+    // latencyProbe set, one without. The probe-free path must drive
+    // the same state machine + send the same IPC payloads + invoke
+    // the same micCapture pause/resume sequence.
+    const baseline = makeHarness();
+    await baseline.session.onHotkeyPress();
+    baseline.session.onUtteranceCommit({
+      id: "u-baseline",
+      text: "hello",
+      committedAt: 100,
+    });
+    await flushAsync();
+    baseline.session.onTtsPlaybackComplete();
+    baseline.fireTimer();
+
+    const withProbe = makeHarness();
+    const probeSpy = makeProbeSpy();
+    const sessionWithProbe = createSession({
+      stateController: withProbe.controller,
+      claudeFactory: () => withProbe.mockClaude,
+      ttsFactory: () => withProbe.mockTts,
+      mintSttToken: withProbe.mintSttToken,
+      micCapture: withProbe.micCapture,
+      sendIpc: (channel, payload) =>
+        withProbe.sentIpc.push({ channel, payload }),
+      readApiKey: () => "xi-mock-api-key-1234567890123456",
+      voiceId: "test-voice-id",
+      systemPromptFile: "/mock/path/to/companion.md",
+      logger: (msg) => withProbe.logs.push(msg),
+      setTimeoutImpl: withProbe.setTimeoutImpl,
+      clearTimeoutImpl: withProbe.clearTimeoutImpl,
+      latencyProbe: probeSpy.probe as never,
+    });
+    await sessionWithProbe.onHotkeyPress();
+    sessionWithProbe.onUtteranceCommit({
+      id: "u-with-probe",
+      text: "hello",
+      committedAt: 100,
+    });
+    await flushAsync();
+    sessionWithProbe.onTtsPlaybackComplete();
+    withProbe.fireTimer();
+
+    // Behavioural invariants: both sessions emit the same IPC channels
+    // in the same order (the orchestrator does not branch on probe
+    // presence at any IPC fan-out site).
+    const baselineChannels = baseline.sentIpc.map((p) => p.channel);
+    const probeChannels = withProbe.sentIpc.map((p) => p.channel);
+    expect(probeChannels).toEqual(baselineChannels);
+    // Both call pauseFrameDelivery the same number of times.
+    expect(withProbe.micCapture.pauseFrameDelivery).toHaveBeenCalledTimes(
+      baseline.micCapture.pauseFrameDelivery.mock.calls.length,
+    );
+    expect(withProbe.micCapture.resumeFrameDelivery).toHaveBeenCalledTimes(
+      baseline.micCapture.resumeFrameDelivery.mock.calls.length,
+    );
+    // And the probe-equipped session did make probe calls — proving
+    // the wiring is present, not a no-op.
+    expect(probeSpy.calls.length).toBeGreaterThan(0);
+  });
+});

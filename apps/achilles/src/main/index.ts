@@ -46,6 +46,7 @@ import {
 } from "./init-wizard.js";
 import { wireIpcBridge } from "./ipc-bridge.js";
 import { readApiKey, MissingApiKeyError } from "./key-source.js";
+import { createLatencyProbe, type LatencyProbe } from "./latency-probe.js";
 import { createMockAmplitudeStream } from "./mock-amplitude.js";
 import {
   createMockClaude,
@@ -371,6 +372,51 @@ async function bootstrap(): Promise<void> {
       throw err;
     }
   }
+  // ─── Plan 14-01 latency probe construction ─────────────────────────
+  //
+  // When the CLI was invoked with `--debug`, the spawned Electron child
+  // receives `ACHILLES_DEBUG=1` in its env (cli.ts/launchCommand wiring).
+  // The probe captures stage timestamps + writes the rolling window to
+  // disk so the offline `achilles latency --report` subcommand can read
+  // them without an IPC round-trip. When the env var is unset, the
+  // probe is undefined and session.ts's pre-14-01 behaviour is bit-for-
+  // bit preserved (SE17 invariant).
+  //
+  // The sample file path mirrors the CLI's production reportPath
+  // (`~/.achilles/latency-samples.json`) — both surfaces use the same
+  // location so the offline subcommand does not need to discover
+  // anything about the Electron app's storage layout. We ensure the
+  // parent directory exists before the first write to avoid a
+  // permission error masking a missing-dir condition.
+  let latencyProbe: LatencyProbe | undefined;
+  if (process.env.ACHILLES_DEBUG === "1") {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const { homedir } = await import("node:os");
+    const { join: pathJoin } = await import("node:path");
+    const sampleFilePath = pathJoin(
+      homedir(),
+      ".achilles",
+      "latency-samples.json",
+    );
+    try {
+      mkdirSync(pathJoin(homedir(), ".achilles"), { recursive: true });
+    } catch {
+      // Best-effort — the writeFileImpl below also swallows write
+      // failures so the probe degrades gracefully if the path is not
+      // writable.
+    }
+    latencyProbe = createLatencyProbe({
+      debugEnabled: true,
+      writeSampleFile: true,
+      sampleFilePath,
+      writeFileImpl: (path, contents) => {
+        writeFileSync(path, contents);
+      },
+      // The default logger writes to console.log — we keep that for
+      // production so the operator sees `[achilles-latency]` lines on
+      // the launching terminal. No transcript content is included.
+    });
+  }
   if (apiKey !== null) {
     // The mic-capture handle lives in the renderer (Phase 09 design).
     // The orchestrator gates the renderer-side mic by toggling state
@@ -417,6 +463,9 @@ async function bootstrap(): Promise<void> {
         // eslint-disable-next-line no-console
         console.error(msg);
       },
+      // Plan 14-01: pass the optional probe iff ACHILLES_DEBUG=1.
+      // When undefined, session.ts behaviour is preserved (SE17).
+      ...(latencyProbe !== undefined ? { latencyProbe } : {}),
     });
   }
 
@@ -568,6 +617,9 @@ async function bootstrap(): Promise<void> {
     cancelPermissionPoll();
     bridgeHandle?.dispose();
     session?.dispose();
+    // Plan 14-01: tear down the LOOP-06 probe so the rolling window
+    // and the file-write seam are released before the process exits.
+    latencyProbe?.dispose();
     if (activeAmplitudeStop !== null) {
       activeAmplitudeStop();
       activeAmplitudeStop = null;

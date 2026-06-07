@@ -261,6 +261,27 @@ export default defineWorkspace([
       passWithNoTests: true,
     },
   },
+  {
+    // v1.2 phase-14 project. Owns the Plan 14-01 latency-probe module
+    // and its offline CLI report subcommand. Plan 14-01 wires the
+    // initial includes; Plans 14-02 / 14-03 / 14-04 will append further
+    // entries (transcript-store, incident-detection, stuck-thinking,
+    // suspend-resume, device-change) as they land. Each new plan
+    // extends the include glob explicitly so the verification command
+    // (which targets the file by path) remains unambiguous.
+    resolve: {
+      alias: workspaceAlias,
+    },
+    test: {
+      name: "phase-14-unit",
+      include: [
+        "apps/achilles/src/main/latency-probe.test.ts",
+        "apps/achilles-cli/src/commands/latency.test.ts",
+      ],
+      environment: "node",
+      passWithNoTests: true,
+    },
+  },
 ]);
 // v1.2 phase-09 addition: workspace aliases + phase-09-unit project for the
 // "@achilles/voice-protocol", "@achilles/voice-stt", and "@achilles/voice-tts" packages.

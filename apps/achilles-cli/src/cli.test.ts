@@ -50,13 +50,22 @@ const makeDepsWithSpies = () => {
   const installSkillCommand = vi.fn();
   const initCommand = vi.fn();
   const transcriptsCommand = vi.fn();
+  const latencyCommand = vi.fn();
   const deps: CliDeps = {
     launchCommand,
     installSkillCommand,
     initCommand,
     transcriptsCommand,
+    latencyCommand,
   };
-  return { deps, launchCommand, installSkillCommand, initCommand, transcriptsCommand };
+  return {
+    deps,
+    launchCommand,
+    installSkillCommand,
+    initCommand,
+    transcriptsCommand,
+    latencyCommand,
+  };
 };
 
 describe("runCli", () => {
@@ -232,5 +241,116 @@ describe("runCli", () => {
     const cliPath = resolve(HERE, "cli.ts");
     const firstLine = readFileSync(cliPath, "utf8").split("\n", 1)[0];
     expect(firstLine).toBe("#!/usr/bin/env node");
+  });
+
+  // ───────────────────────────────────────────────────────────────────
+  // Plan 14-01 C10..C12 — --debug global flag + latency subcommand
+  // ───────────────────────────────────────────────────────────────────
+
+  it("C10: `launch --debug` passes { env: { ...process.env, ACHILLES_DEBUG: '1' } } to deps.launchCommand", () => {
+    const stdout = makeStreamSpy();
+    const stderr = makeStreamSpy();
+    const processExitImpl = (_code: number) => {};
+    const { deps, launchCommand } = makeDepsWithSpies();
+
+    runCli({
+      argv: ["node", "achilles", "--debug", "launch"],
+      stdout: stdout.seam,
+      stderr: stderr.seam,
+      processExitImpl,
+      deps,
+    });
+
+    expect(launchCommand).toHaveBeenCalledTimes(1);
+    const overrides = launchCommand.mock.calls[0]?.[0] as
+      | { env?: Record<string, string | undefined> }
+      | undefined;
+    expect(overrides).toBeDefined();
+    expect(overrides?.env?.ACHILLES_DEBUG).toBe("1");
+    // The env passthrough must inherit from process.env so the
+    // spawned child receives the operator's full environment.
+    expect(overrides?.env?.PATH).toBe(process.env.PATH);
+  });
+
+  it("C11: `latency --report` routes to deps.latencyCommand with { report: true }", () => {
+    const stdout = makeStreamSpy();
+    const stderr = makeStreamSpy();
+    const processExitImpl = (_code: number) => {};
+    const { deps, latencyCommand } = makeDepsWithSpies();
+
+    runCli({
+      argv: ["node", "achilles", "latency", "--report"],
+      stdout: stdout.seam,
+      stderr: stderr.seam,
+      processExitImpl,
+      deps,
+    });
+
+    expect(latencyCommand).toHaveBeenCalledTimes(1);
+    expect(latencyCommand.mock.calls[0]?.[0]).toEqual({ report: true });
+  });
+
+  it("C11b: `latency` without --report routes to deps.latencyCommand with { report: false } (the command body then surfaces the 'Specify --report' error)", () => {
+    const stdout = makeStreamSpy();
+    const stderr = makeStreamSpy();
+    const processExitImpl = (_code: number) => {};
+    const { deps, latencyCommand } = makeDepsWithSpies();
+
+    runCli({
+      argv: ["node", "achilles", "latency"],
+      stdout: stdout.seam,
+      stderr: stderr.seam,
+      processExitImpl,
+      deps,
+    });
+
+    expect(latencyCommand).toHaveBeenCalledTimes(1);
+    expect(latencyCommand.mock.calls[0]?.[0]).toEqual({ report: false });
+  });
+
+  it("C12: ACHILLES_DEBUG is NOT set when --debug is absent — env passthrough is unchanged for plain `launch`", () => {
+    const stdout = makeStreamSpy();
+    const stderr = makeStreamSpy();
+    const processExitImpl = (_code: number) => {};
+    const { deps, launchCommand } = makeDepsWithSpies();
+
+    runCli({
+      argv: ["node", "achilles", "launch"],
+      stdout: stdout.seam,
+      stderr: stderr.seam,
+      processExitImpl,
+      deps,
+    });
+
+    expect(launchCommand).toHaveBeenCalledTimes(1);
+    // No overrides argument — the production launchCommand will fall
+    // back to its default env binding (process.env). Plan 12-04
+    // behaviour preserved.
+    expect(launchCommand.mock.calls[0]?.[0]).toBeUndefined();
+  });
+
+  it("C12b: --help lists `latency` and `--debug` (Plan 14-01 surface visible to operators)", () => {
+    const stdout = makeStreamSpy();
+    const stderr = makeStreamSpy();
+    const processExitImpl = (code: number) => {
+      throw new Error(`__EXIT_${code}__`);
+    };
+    const { deps } = makeDepsWithSpies();
+
+    try {
+      runCli({
+        argv: ["node", "achilles", "--help"],
+        stdout: stdout.seam,
+        stderr: stderr.seam,
+        processExitImpl,
+        deps,
+      });
+    } catch (err) {
+      if (!(err instanceof Error) || !err.message.startsWith("__EXIT_")) throw err;
+    }
+
+    const combined = stdout.chunks.join("");
+    expect(combined).toContain("latency");
+    expect(combined).toContain("--debug");
   });
 });

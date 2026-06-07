@@ -27,8 +27,9 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { spawn as nodeSpawn } from "node:child_process";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Command } from "commander";
 import {
   ElectronBinaryMissingError,
@@ -37,6 +38,7 @@ import {
 import { launchCommand as realLaunchCommand } from "./commands/launch.js";
 import { installSkillCommand as realInstallSkillCommand } from "./commands/install-skill.js";
 import { initCommand as realInitCommand } from "./commands/init.js";
+import { latencyCommand as realLatencyCommand } from "./commands/latency.js";
 import { transcriptsCommand as realTranscriptsCommand } from "./commands/transcripts.js";
 
 /**
@@ -64,6 +66,18 @@ export interface CliDeps {
   readonly installSkillCommand: (opts: { readonly force: boolean }) => void;
   readonly initCommand: () => void;
   readonly transcriptsCommand: (subcommand: string) => void;
+  /**
+   * Plan 14-01: `achilles latency --report` handler. Production
+   * wiring (bottom of this file) binds the seam to the real
+   * latencyCommand from commands/latency.ts; tests pass a spy.
+   *
+   * The `report` boolean is the canonical commander option name; the
+   * handler maps `true` → `"--report"` subcommand and `false` →
+   * `""` (which the handler treats as the "Specify --report" error
+   * path). This indirection keeps cli.ts agnostic of the latency.ts
+   * argument-shape contract.
+   */
+  readonly latencyCommand: (opts: { readonly report: boolean }) => void;
 }
 
 /**
@@ -103,6 +117,29 @@ const packageVersion: string = JSON.parse(
  * invocation because commander state (parsed args, error output
  * targets) is captured per-instance.
  */
+/**
+ * Compose the env override passed to `deps.launchCommand` when the
+ * top-level `--debug` flag is present. Inherits from `process.env` so
+ * the spawned Electron child receives the operator's full environment
+ * plus `ACHILLES_DEBUG=1`. Returns `undefined` when `--debug` is
+ * absent so the launch command falls back to its default env binding.
+ *
+ * The function is exposed separately so the bare-invocation path
+ * (`isBareInvocation === true`) and the explicit `launch` action use
+ * the same code path — preventing a future refactor from silently
+ * dropping the debug routing on one branch.
+ */
+function makeDebugEnv(
+  debug: boolean,
+):
+  | { readonly env: Readonly<Record<string, string | undefined>> }
+  | undefined {
+  if (!debug) return undefined;
+  return {
+    env: { ...process.env, ACHILLES_DEBUG: "1" },
+  };
+}
+
 function buildProgram(inputs: RunCliInputs): Command {
   const { stdout, stderr, processExitImpl, deps } = inputs;
   const program = new Command();
@@ -110,6 +147,13 @@ function buildProgram(inputs: RunCliInputs): Command {
     .name("achilles")
     .description("Achilles voice companion for Claude Code")
     .version(packageVersion)
+    // Plan 14-01: top-level --debug flag enables the LOOP-06 latency
+    // probe. When present, the launch action passes ACHILLES_DEBUG=1
+    // through to the spawned Electron child; the main process reads
+    // the env var at bootstrap and constructs the LatencyProbe. Absent
+    // --debug, the env passthrough is unchanged so the probe is
+    // unwired (Plan 12-04 behaviour preserved).
+    .option("--debug", "Enable per-utterance LOOP-06 latency probe logging")
     // Route commander's output to the injected stdout/stderr seams so
     // tests can capture --version / --help / error messages without
     // touching process.stdout / process.stderr.
@@ -136,7 +180,8 @@ function buildProgram(inputs: RunCliInputs): Command {
     .command("launch")
     .description("Open the floating Achilles UI")
     .action(() => {
-      deps.launchCommand();
+      const debugOpt = (program.opts() as { debug?: boolean }).debug ?? false;
+      deps.launchCommand(makeDebugEnv(debugOpt));
     });
 
   program
@@ -163,6 +208,17 @@ function buildProgram(inputs: RunCliInputs): Command {
     )
     .action((sub: string) => {
       deps.transcriptsCommand(sub);
+    });
+
+  program
+    .command("latency")
+    .description("Print the LOOP-06 rolling-window P50 / P95 summary")
+    .option(
+      "--report",
+      "Read the rolling-window JSON sample file and print P50 / P95",
+    )
+    .action((opts: { report?: boolean }) => {
+      deps.latencyCommand({ report: opts.report ?? false });
     });
 
   return program;
@@ -236,7 +292,7 @@ const invokedAsScript = (() => {
 
 if (invokedAsScript) {
   const productionDeps: CliDeps = {
-    launchCommand: () =>
+    launchCommand: (overrides) =>
       realLaunchCommand({
         locate: () =>
           locateElectronBinary({
@@ -247,7 +303,10 @@ if (invokedAsScript) {
         spawn: (cmd, args, opts) => nodeSpawn(cmd, [...args], opts),
         processExitImpl: (code) => process.exit(code),
         stderr: process.stderr,
-        env: process.env,
+        // Plan 14-01: honour the optional env override so the
+        // top-level --debug flag can inject ACHILLES_DEBUG=1 without
+        // touching the launch command's signature.
+        env: overrides?.env ?? process.env,
       }),
     installSkillCommand: (opts) =>
       realInstallSkillCommand({
@@ -271,6 +330,21 @@ if (invokedAsScript) {
     transcriptsCommand: (sub) =>
       realTranscriptsCommand(sub, {
         stdout: process.stdout,
+        processExitImpl: (code) => process.exit(code),
+      }),
+    latencyCommand: (opts) =>
+      realLatencyCommand({
+        // Plan 14-01: the production sample file path mirrors the
+        // main-side write path (`apps/achilles/src/main/index.ts`
+        // writes to `~/.achilles/latency-samples.json` via the
+        // LatencyProbe's writeFileImpl seam). Both surfaces use the
+        // same path under the user's home dir so the offline subcommand
+        // does not need an Electron IPC round-trip.
+        subcommand: opts.report ? "--report" : "",
+        reportPath: join(homedir(), ".achilles", "latency-samples.json"),
+        readFileImpl: (p) => readFileSync(p, "utf8"),
+        stdout: process.stdout,
+        stderr: process.stderr,
         processExitImpl: (code) => process.exit(code),
       }),
   };
