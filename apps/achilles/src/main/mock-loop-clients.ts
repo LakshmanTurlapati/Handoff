@@ -531,6 +531,18 @@ export function createMockTts(fixture: MockTtsFixture): MockTtsHandle {
       seqs[swapAt + 1] = tmp;
     }
     nextSeq += chunksPerSegment;
+    // WR-08: assign isFinal based on the HIGHEST seq in the segment,
+    // not the array index. The previous code marked isFinal=true on
+    // whichever chunk landed at i === seqs.length - 1 AFTER the swap
+    // — which could be the seq=N-1 chunk rather than the seq=N chunk.
+    // The renderer-side playback-queue keys completion off finalSeq
+    // (the seq with isFinal:true), so a misplaced flag silently broke
+    // completion detection when outOfOrderProbability > 0: the
+    // post-final chunk's onended fired but `seq === finalSeq` returned
+    // false, onPlaybackComplete never fired, and the 300 ms debounce
+    // timer never scheduled. Tests using outOfOrderProbability > 0
+    // were masking real ordering bugs.
+    const maxSeq = Math.max(...seqs);
     for (let i = 0; i < seqs.length; i++) {
       const seq = seqs[i]!;
       // Build a deterministic byte fingerprint: encode the seed string
@@ -543,7 +555,7 @@ export function createMockTts(fixture: MockTtsFixture): MockTtsHandle {
       const encoded = new TextEncoder().encode(seed);
       const bytes = new ArrayBuffer(encoded.length);
       new Uint8Array(bytes).set(encoded);
-      const isFinal = i === seqs.length - 1;
+      const isFinal = seq === maxSeq;
       push({
         type: "chunk",
         chunk: {

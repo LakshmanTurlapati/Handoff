@@ -172,6 +172,40 @@ describe("createMockTts — chunk synthesis", () => {
     );
   });
 
+  // WR-08: isFinal must be on the chunk with the HIGHEST seq, not the
+  // chunk at the last array index. With outOfOrderProbability > 0 the
+  // mock previously assigned isFinal=true on whichever chunk landed
+  // at i === seqs.length - 1 after the swap — which could be the
+  // lower-seq chunk. The renderer-side playback-queue keys completion
+  // off finalSeq (the seq with isFinal:true), so a misplaced flag
+  // silently broke completion detection in tests with reordering.
+  it("isFinal stays on the highest-seq chunk even when outOfOrderProbability scrambles the segment", async () => {
+    const tts = createMockTts({
+      chunksPerSegment: 3,
+      // Set to 1.0 to force at least one swap inside the segment for
+      // every appendText call.
+      outOfOrderProbability: 1.0,
+    });
+    await tts.open();
+    tts.appendText("A");
+    const iter = tts.events$[Symbol.asyncIterator]();
+    const chunks: Array<{ seq: number; isFinal: boolean }> = [];
+    for (let i = 0; i < 3; i++) {
+      const r = await iter.next();
+      const ev = r.value as { type: string; chunk?: { seq: number; isFinal: boolean } };
+      if (ev.type === "chunk") {
+        chunks.push(ev.chunk!);
+      }
+    }
+    expect(chunks.length).toBe(3);
+    // Exactly one isFinal:true.
+    const finals = chunks.filter((c) => c.isFinal);
+    expect(finals.length).toBe(1);
+    // That one chunk must carry the highest seq in the segment.
+    const maxSeq = Math.max(...chunks.map((c) => c.seq));
+    expect(finals[0]!.seq).toBe(maxSeq);
+  });
+
   it("appendedTexts captures every appendText call in order", () => {
     const tts = createMockTts({ chunksPerSegment: 1 });
     tts.appendText("first");
