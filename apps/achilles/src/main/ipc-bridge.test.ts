@@ -635,3 +635,87 @@ describe("wireIpcBridge — WR-06 senders are validated", () => {
     expect(controller.now()).toBe("listening");
   });
 });
+
+describe("wireIpcBridge — CR-03 strict-equality sender check rejects undefined ids", () => {
+  // CR-03 regression. Previously the guard short-circuited when
+  // event.sender.id === undefined so a forged IPC envelope that omitted
+  // the id field bypassed the check entirely. IPC_TYPED_FALLBACK_SUBMIT
+  // was the most exploitable channel — a forged event with no id would
+  // route arbitrary text through session.handleTypedPrompt(text) and
+  // into the SAFE-04 wrapTranscript pipeline.
+
+  it("rejects events whose sender.id is undefined when ownWebContentsId is set", () => {
+    const window = makeFakeWindow(42);
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const log = vi.fn();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      logger: log,
+    });
+    const handler = ipcMain.handlers.get(IPC_REQUEST_STATE);
+    // Forged sender with no id — under the prior bypass this would have
+    // been accepted and routed into the reducer.
+    handler!.listener(
+      { sender: { id: undefined as unknown as number } },
+      { state: "listening" },
+    );
+    // State unchanged — the listener did not dispatch.
+    expect(controller.now()).toBe("idle");
+    expect(log).toHaveBeenCalled();
+    const logMsg = (log as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] ?? "";
+    expect(String(logMsg)).toContain("unexpected sender");
+    expect(String(logMsg)).toContain("undefined");
+  });
+
+  it("rejects events whose sender is missing entirely when ownWebContentsId is set", () => {
+    const window = makeFakeWindow(42);
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const log = vi.fn();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      logger: log,
+    });
+    const handler = ipcMain.handlers.get(IPC_REQUEST_STATE);
+    // Forged event with sender = {} — the prior bypass also short-circuited
+    // here because event.sender?.id resolves to undefined.
+    handler!.listener(
+      { sender: {} as { id: number } },
+      { state: "listening" },
+    );
+    expect(controller.now()).toBe("idle");
+    expect(log).toHaveBeenCalled();
+  });
+
+  it("CR-03 closes the IPC_TYPED_FALLBACK_SUBMIT bypass surface specifically", () => {
+    const window = makeFakeWindow(42);
+    const ipcMain = makeFakeIpcMain();
+    const store = makeFakeStore();
+    const { controller } = makeController();
+    const session = makeFakeSession();
+    wireIpcBridge({
+      window: window as never,
+      controller,
+      store: store as never,
+      ipcMainRef: ipcMain as never,
+      session,
+    });
+    const handler = ipcMain.handlers.get(IPC_TYPED_FALLBACK_SUBMIT);
+    // Forged event with no sender id — pre-CR-03 this routed `rogue` to
+    // session.handleTypedPrompt; the strict-equality guard now rejects.
+    handler!.listener(
+      { sender: { id: undefined as unknown as number } },
+      { text: "rogue" },
+    );
+    expect(session.spies.handleTypedPrompt).not.toHaveBeenCalled();
+  });
+});

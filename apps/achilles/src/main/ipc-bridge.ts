@@ -164,8 +164,16 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
   // wrapped so it only fires when the event originates from the main
   // floating window's webContents. A future BrowserWindow (e.g.,
   // SettingsPopover) using the same preload could otherwise drive
-  // these channels. Tests bypass the check by leaving the sender id
-  // undefined.
+  // these channels.
+  //
+  // CR-03 fix: a strict equality guard. Previously the check short-circuited
+  // when `event.sender.id === undefined` so a forged IPC envelope (a rogue
+  // renderer that omits the id) bypassed the check entirely. The previous
+  // implementation also short-circuited when ownWebContentsId was undefined
+  // — these test seams now must supply an explicit equal id rather than
+  // exploit the loophole. SAFE-04 / pitfall #17 requires the trust boundary
+  // to be enforced at the main side, and IPC_TYPED_FALLBACK_SUBMIT was one of
+  // the channels exploitable by the prior bypass.
   const ownWebContentsId =
     (window as unknown as { webContents: { id?: number } }).webContents.id;
   function withSenderCheck(
@@ -173,15 +181,14 @@ export function wireIpcBridge(opts: WireIpcBridgeOptions): IpcBridgeHandle {
     handler: (event: { sender: { id: number } }, payload: unknown) => void,
   ): (event: { sender: { id: number } }, payload: unknown) => void {
     return (event, payload) => {
-      if (
-        ownWebContentsId !== undefined &&
-        event.sender.id !== undefined &&
-        event.sender.id !== ownWebContentsId
-      ) {
-        log(
-          `[achilles] rejecting ${channel} from unexpected sender id=${event.sender.id}`,
-        );
-        return;
+      if (ownWebContentsId !== undefined) {
+        const incoming = event.sender?.id;
+        if (incoming !== ownWebContentsId) {
+          log(
+            `[achilles] rejecting ${channel} from unexpected sender id=${incoming}`,
+          );
+          return;
+        }
       }
       handler(event, payload);
     };
