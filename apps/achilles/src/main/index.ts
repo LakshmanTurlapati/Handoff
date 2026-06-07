@@ -199,6 +199,15 @@ async function bootstrap(): Promise<void> {
         }),
       createSmokeRoundTrip: buildCreateSmokeRoundTrip(),
       appQuitImpl: () => app.quit(),
+      // WR-09 fix: inject the logger seam explicitly so the diagnostic
+      // stream is honest about its sink. The init-wizard module's
+      // default falls back to console.error with an inline disable —
+      // production wiring should provide the seam rather than rely on
+      // the fallback, per the module docstring.
+      logger: (msg) => {
+        // eslint-disable-next-line no-console
+        console.error(msg);
+      },
     });
 
     // Wire the four inbound IPC handlers (Plan 13-03 W2 contract). The

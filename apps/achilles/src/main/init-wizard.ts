@@ -37,6 +37,15 @@
  * NO emojis (CLAUDE.md global). NO console.log. NO direct env reads
  * (the createSmokeRoundTrip selection is the only env-sensitive
  * decision and it lives at the call site, not here).
+ *
+ * Logger fallback (WR-09 clarification): the optional `logger` seam
+ * defaults to `console.error` with an inline eslint-disable. The
+ * project's no-console rule still applies — production callers
+ * (main/index.ts → bootstrap()) SHOULD inject an explicit logger so
+ * the diagnostic stream is explicit and testable. The default fallback
+ * is a defence-in-depth so a missed wiring at the call site does NOT
+ * silently swallow init-wizard diagnostics; it is NOT a license to
+ * omit the seam in production wiring.
  */
 import type { PermissionState } from "../shared/constants.js";
 import {
@@ -263,6 +272,12 @@ export function createInitWizardSession(
   const clearT: (token: unknown) => void =
     deps.clearTimeoutImpl ??
     ((token) => clearTimeout(token as ReturnType<typeof setTimeout>));
+  // WR-09 fix: the fallback uses console.error and the inline
+  // eslint-disable is intentional. See the module docstring for why
+  // production callers SHOULD inject an explicit logger seam rather
+  // than rely on this fallback — the default exists so a missed
+  // wiring at bootstrap does not silently swallow diagnostics, not as
+  // a license to omit the seam.
   const log =
     deps.logger ??
     ((msg: string): void => {
