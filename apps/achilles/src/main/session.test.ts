@@ -995,3 +995,44 @@ describe("createSession — CR-02 STT token refresh does not mutate state", () =
     expect(h.controller.now()).toBe("speaking");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// CR-03: toggle-mode commit race — the second hotkey press transitions
+// listening → processing before the renderer's IPC_UTTERANCE_COMMIT
+// arrives. onUtteranceCommit must still accept the in-flight commit.
+// ─────────────────────────────────────────────────────────────────────
+
+describe("createSession — CR-03 toggle-mode commit race", () => {
+  it("accepts utterance-commit when state has already advanced to processing via the toggle-hotkey path", async () => {
+    const h = makeHarness();
+
+    await h.session.onHotkeyPress();
+    expect(h.controller.now()).toBe("listening");
+
+    // Simulate the second hotkey press (toggle commit). State advances
+    // listening → processing BEFORE the renderer's commit IPC arrives.
+    await h.session.onHotkeyPress();
+    expect(h.controller.now()).toBe("processing");
+
+    // Renderer's commit arrives late — must NOT be silently dropped.
+    h.session.onUtteranceCommit({
+      id: "00000000-0000-0000-0000-0000000000c4",
+      text: "refactor the auth module",
+      committedAt: 0,
+    });
+
+    await flushAsync();
+
+    // The bridge captured exactly one send call with the wrapped
+    // transcript — the user's voice reached Claude.
+    expect(h.mockClaude.capturedSends.length).toBe(1);
+    const sent = h.mockClaude.capturedSends[0]!;
+    expect(sent).toContain("refactor the auth module");
+
+    // No "dropping utterance-commit" log line was emitted.
+    const droppedLogs = h.logs.filter((l) =>
+      l.includes("dropping utterance-commit"),
+    );
+    expect(droppedLogs.length).toBe(0);
+  });
+});

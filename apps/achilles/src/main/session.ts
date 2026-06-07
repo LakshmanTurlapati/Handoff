@@ -740,7 +740,19 @@ export function createSession(deps: AchillesSessionDeps): AchillesSession {
 
   function onUtteranceCommit(payload: UtteranceCommitPayload): void {
     if (disposed) return;
-    if (mirroredState !== "listening") {
+    // CR-03 toggle-mode commit race: in toggle mode the user's second
+    // hotkey press dispatches HOTKEY_PRESS (listening → processing) BEFORE
+    // the renderer's IPC_UTTERANCE_COMMIT lands. Previously the guard
+    // here was `mirroredState !== "listening"`, which silently dropped
+    // the commit and the user's voice never reached Claude.
+    //
+    // Relax the guard to accept commits from BOTH `listening` AND
+    // `processing`. The toggle-hotkey path has already advanced the
+    // visible state but the commit is still in-flight, and the user
+    // clearly intends to commit. From `speaking` / `idle` / `error` the
+    // commit is still dropped — those states are out-of-band for a
+    // valid utterance-commit IPC.
+    if (mirroredState !== "listening" && mirroredState !== "processing") {
       log(
         `[achilles] dropping utterance-commit: state=${mirroredState}`,
       );
