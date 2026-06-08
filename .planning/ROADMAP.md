@@ -54,8 +54,8 @@
   5. Screen-reader mode (via `INK_SCREEN_READER=1` or Ink's `useIsScreenReaderEnabled()` hook) suppresses the blob + sparkline entirely and emits only state-change announcements + committed transcripts via `<Text aria-live="polite">` with explicit per-state wording (ACC-02); auto-downgrade to plain-text log lines when `process.stdout.isTTY` is false or `--plain` is passed (TUI-06); CPU sits at <10% during 10-minute animation on Windows Terminal v1.18 (TUI-05 perf budget)
 **Plans**: 4 plans
 **UI hint**: yes
-  - [ ] 16-01-PLAN.md — Audio primitives: mic-sox child + adaptive-EWMA energy VAD + canonical braille encoder (CAP-01, CAP-02, CAP-04 substrate + TUI-02 substrate)
-  - [ ] 16-02-PLAN.md — State machine port: 6-state ACHILLES_STATES (Option A: muted as 6th state) + MUTE_TOGGLE event + SPEAKING_DEBOUNCE_MS surfaced from v1.2 (CAP-03 reducer substrate)
+  - [x] 16-01-PLAN.md — Audio primitives: mic-sox child + adaptive-EWMA energy VAD + canonical braille encoder (CAP-01, CAP-02, CAP-04 substrate + TUI-02 substrate)
+  - [x] 16-02-PLAN.md — State machine port: 6-state ACHILLES_STATES (Option A: muted as 6th state) + MUTE_TOGGLE event + SPEAKING_DEBOUNCE_MS surfaced from v1.2 (CAP-03 reducer substrate)
   - [ ] 16-03-PLAN.md — UI primitives: Wave 0 ink/react/chalk/ink-testing-library deps + tsconfig/eslint/vitest .tsx coverage + Blob + Sparkline + StatusRow + ScreenReader + plain-text + mock-amplitude + colors (TUI-01..04, TUI-06, ACC-01, ACC-02 — with RESEARCH A1/A2 corrections)
   - [ ] 16-04-PLAN.md — Composition root: session.ts (EventEmitter producer wiring state-machine + VAD + mic source) + useAchillesState React adapter + VoiceShell Ink root + cli.ts voice subcommand with --mock/--debug-vad/--plain (CAP-03 + TUI-06 full wiring; INIT-07 preserved; RESEARCH A3 honored)
 
@@ -129,7 +129,7 @@ Phase 19's deletion of `apps/achilles` + `apps/achilles-cli/src/commands/launch.
 | 13. Distribution — npm CLI + Skill + Installers | v1.2 | 4/4 | Complete | 2026-06-07 |
 | 14. Hardening, Privacy, Resilience | v1.2 | 4/4 | Complete | 2026-06-07 |
 | 15. Workspace Scaffold + Bun Build Pipeline | v1.3 | 4/4 | Complete   | 2026-06-08 |
-| 16. TUI Shell + State Machine + sox + VAD | v1.3 | 0/4 | Not started | - |
+| 16. TUI Shell + State Machine + sox + VAD | v1.3 | 2/4 | In Progress|  |
 | 17. End-to-end Voice Loop + gracefulShutdown | v1.3 | 0/TBD | Not started | - |
 | 18. Init Wizard + Config + Transcripts | v1.3 | 0/TBD | Not started | - |
 | 19. Distribution + Publishing + Gatekeeper | v1.3 | 0/TBD | Not started | - |
