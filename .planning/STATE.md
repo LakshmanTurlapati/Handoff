@@ -4,14 +4,14 @@ milestone: v1.3
 milestone_name: Terminal-only Achilles
 status: executing
 stopped_at: "ROADMAP.md, REQUIREMENTS.md traceability, and STATE.md written; awaiting `/gsd:plan-phase 15`"
-last_updated: "2026-06-08T07:57:27.119Z"
-last_activity: 2026-06-08 -- Phase 15 execution started
+last_updated: "2026-06-08T09:45:27.393Z"
+last_activity: 2026-06-08 -- Phase 16 execution started
 progress:
   total_phases: 6
-  completed_phases: 0
-  total_plans: 4
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 8
+  completed_plans: 4
+  percent: 17
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** A developer can hand off intent to their terminal coding agent through the most natural surface available — phone screen (Handoff) or voice (Achilles) — without leaving their local environment behind.
-**Current focus:** Phase 15 — workspace-scaffold-bun-build-pipeline
+**Current focus:** Phase 16 — tui-shell-state-machine-sox-mic-capture-energy-vad
 
 ## Current Position
 
-Phase: 15 (workspace-scaffold-bun-build-pipeline) — EXECUTING
+Phase: 16 (tui-shell-state-machine-sox-mic-capture-energy-vad) — EXECUTING
 Plan: 1 of 4
-Status: Executing Phase 15
-Last activity: 2026-06-08 -- Phase 15 execution started
+Status: Executing Phase 16
+Last activity: 2026-06-08 -- Phase 16 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
