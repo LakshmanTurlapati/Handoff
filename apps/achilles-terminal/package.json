@@ -1,5 +1,5 @@
 {
-  "name": "achilles",
+  "name": "achilles-terminal",
   "version": "1.3.0",
   "private": false,
   "description": "Achilles voice companion for Claude Code. Terminal-only TUI that runs the full voice loop (mic capture, STT, Claude bridge, TTS playback) inside the calling terminal via a Bun-compiled single binary or a Node 22+ JS fallback.",
