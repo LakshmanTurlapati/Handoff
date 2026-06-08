@@ -101,7 +101,13 @@ describe("writeInitMarker — creates parent dir", () => {
   it("creates the parent ~/.achilles dir with 0o700 perms if missing", () => {
     const { dir, deps, cleanup } = makeTmpHome();
     try {
-      const mkdirSpy = vi.fn<(path: string, opts: { recursive: boolean; mode: number }) => void>();
+      const realMkdirSync = mkdirSync;
+      const mkdirSpy = vi.fn(
+        (path: string, opts: { recursive: boolean; mode: number }) => {
+          // Delegate to real mkdirSync so subsequent writeFileSync does not fail.
+          realMkdirSync(path, opts);
+        },
+      );
       const depsWithSpy: MarkerDeps = {
         ...deps,
         mkdirSyncImpl: mkdirSpy,
