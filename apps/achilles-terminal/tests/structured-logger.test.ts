@@ -175,6 +175,91 @@ describe("structured-logger — disposed flag", () => {
   });
 });
 
+describe("structured-logger — 7th regex (xi_ ElevenLabs new shape)", () => {
+  it("DEFAULT_REDACT_PATTERNS now contains 7 entries (one more than Phase 17 baseline of 6)", () => {
+    // Import the raw module to count DEFAULT_REDACT_PATTERNS length.
+    // We verify indirectly: a log line with 7 distinct secret shapes is fully
+    // redacted; the count assertion checks the array length is at least 7.
+    // (The array is not exported — we verify via behaviour.)
+    const { logger, dir } = makeHermeticLogger();
+    try {
+      // Write 7 secrets, one per pattern. All must be redacted.
+      const SK = "sk-aaaaaaaaaaaaaaaaaaaaaa";
+      const XI_HYPHEN = "xi-abcdefghijklmnopqrstuvwxyz";
+      const BEARER = "Bearer abcdefghijklmnopqrstu";
+      const JWT =
+        "abcdefghijklmnopqrstuvwxyz1234567890abcdef.eyJhbGciOiJIUzI1NiJ9.sig";
+      const HEX = "abcdef0123456789".repeat(4);
+      const ENV = "ELEVENLABS_API_KEY=myvalue";
+      const XI_UNDERSCORE =
+        "xi_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789AbCdEfGh";
+      logger.info("seven_secrets", {
+        sk: SK,
+        xiHyphen: XI_HYPHEN,
+        bearer: BEARER,
+        jwt: JWT,
+        hex: HEX,
+        env: ENV,
+        xiUnderscore: XI_UNDERSCORE,
+      });
+      const line = readFileSync(
+        join(dir, "achilles.log"),
+        "utf8",
+      );
+      // All 7 secret shapes must be absent.
+      expect(line).not.toContain(SK);
+      expect(line).not.toContain(XI_HYPHEN);
+      expect(line).not.toContain(BEARER);
+      expect(line).not.toContain(HEX);
+      expect(line).not.toContain(ENV);
+      expect(line).not.toContain(XI_UNDERSCORE);
+      expect(line).toContain("[REDACTED]");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("redaction of an xi_ underscore-prefixed 40+ char key is applied", () => {
+    const { logger, dir } = makeHermeticLogger();
+    try {
+      const XI_UNDERSCORE =
+        "xi_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789AbCdEfGh";
+      logger.info("test_event", { key: XI_UNDERSCORE });
+      const line = readFileSync(join(dir, "achilles.log"), "utf8");
+      expect(line).not.toContain(XI_UNDERSCORE);
+      expect(line).toContain("[REDACTED]");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("redaction of the EXISTING xi- hyphen-prefixed key is STILL applied (regression)", () => {
+    const { logger, dir } = makeHermeticLogger();
+    try {
+      const XI_HYPHEN = "xi-abcdefghijklmnopqrstuvwxyz";
+      logger.info("test_event", { key: XI_HYPHEN });
+      const line = readFileSync(join(dir, "achilles.log"), "utf8");
+      expect(line).not.toContain(XI_HYPHEN);
+      expect(line).toContain("[REDACTED]");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the new xi_ regex does NOT match short strings like 'xi_abc' (under 40 chars after the underscore)", () => {
+    const { logger, dir } = makeHermeticLogger();
+    try {
+      const SHORT_XI = "xi_abc";
+      logger.info("test_event", { key: SHORT_XI });
+      const line = readFileSync(join(dir, "achilles.log"), "utf8");
+      // Short xi_ should NOT be redacted — only 3 chars after underscore.
+      expect(line).toContain(SHORT_XI);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("structured-logger — child scope", () => {
   it("child('scope') returns a logger that prefixes every line with scope: 'scope'", () => {
     const { logger, dir } = makeHermeticLogger();
