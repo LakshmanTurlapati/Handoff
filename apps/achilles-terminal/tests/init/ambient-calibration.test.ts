@@ -136,7 +136,7 @@ describe("calibrateAmbient — abort signal", () => {
       },
       signal: ac.signal,
     });
-    await expect(promise).rejects.toMatch(/calibration_cancelled/);
+    await expect(promise).rejects.toThrow(/calibration_cancelled/);
   });
 });
 
@@ -276,8 +276,9 @@ describe("percentile10 helper", () => {
       };
     };
 
+    // 100 frames * 20ms = 2000ms window; we send exactly 100 frames.
     const result = await calibrateAmbient({
-      durationMs: 5000,
+      durationMs: 2000,
       micSoxFactory: micFactory,
     });
 
