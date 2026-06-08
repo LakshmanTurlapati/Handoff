@@ -18,7 +18,7 @@
 **Phase Numbering:** Phases 15-20 continue v1.2's sequence (last phase 14). Integer phases (15, 16, ...) are planned milestone work; decimal phases (e.g., 15.1) reserved for urgent insertions.
 
 - [x] **Phase 15: Workspace Scaffold + Bun Build Pipeline** — Stand up `apps/achilles-terminal` + 5 sibling platform-binary packages; `bun build --compile` matrix produces self-contained binaries on all 5 targets; 30-line JS bin shim falls back to Node 22 bundle; dual-runtime CI matrix (Bun + Node) green per commit (completed 2026-06-08)
-- [ ] **Phase 16: TUI Shell + State Machine + sox + VAD** — Ink 7 + React 19 TUI with reactive blob + braille sparkline; v1.2 state machine port; sox child for 16k mono PCM; energy-VAD with adaptive EWMA + self-trigger guard; accessibility floor (NO_COLOR + screen reader); 20fps perf budget; `--debug-vad` flag
+- [x] **Phase 16: TUI Shell + State Machine + sox + VAD** — Ink 7 + React 19 TUI with reactive blob + braille sparkline; v1.2 state machine port; sox child for 16k mono PCM; energy-VAD with adaptive EWMA + self-trigger guard; accessibility floor (NO_COLOR + screen reader); 20fps perf budget; `--debug-vad` flag (completed 2026-06-08)
 - [ ] **Phase 17: End-to-end Voice Loop + gracefulShutdown** — Port session.ts (~80% verbatim); wire voice-stt/voice-tts/claude-code-bridge via existing DI seams; ffplay TTS sink + half-duplex; sandwich defence + ack/spoken-summary routing; failure override; Ctrl-C cancel chain; gracefulShutdown <1.5s with detached claude process group; MOCK_LOOP=1 CI smoke gate
 - [ ] **Phase 18: Init Wizard + Config + Transcripts + Skill Rewire** — @clack/prompts wizard (API key → sox/ffmpeg preflight → ambient calibration → smoke test); API key hierarchy (env → keyring → encrypted file 0o600); parent-emulator EPERM messaging; `~/.achilles/settings.json` schema; transcripts list/purge ports; single-instance lock; typed-input fallback
 - [ ] **Phase 19: Distribution + Publishing + Gatekeeper** — npm publish parent + 5 platform packages; codesign + notarytool macOS pipeline (gated on Apple Developer ID; unsigned-beta fallback documented); SHA-256 source-of-truth CI check; tarball secret scan; per-OS GitHub Actions runners; SKILL.md `launch → voice` diff; ERR-01/03/08 hardening; publish-then-cut deletion of `apps/achilles` + `apps/achilles-cli/src/commands/launch.ts`
@@ -57,7 +57,7 @@
   - [x] 16-01-PLAN.md — Audio primitives: mic-sox child + adaptive-EWMA energy VAD + canonical braille encoder (CAP-01, CAP-02, CAP-04 substrate + TUI-02 substrate)
   - [x] 16-02-PLAN.md — State machine port: 6-state ACHILLES_STATES (Option A: muted as 6th state) + MUTE_TOGGLE event + SPEAKING_DEBOUNCE_MS surfaced from v1.2 (CAP-03 reducer substrate)
   - [x] 16-03-PLAN.md — UI primitives: Wave 0 ink/react/chalk/ink-testing-library deps + tsconfig/eslint/vitest .tsx coverage + Blob + Sparkline + StatusRow + ScreenReader + plain-text + mock-amplitude + colors (TUI-01..04, TUI-06, ACC-01, ACC-02 — with RESEARCH A1/A2 corrections)
-  - [ ] 16-04-PLAN.md — Composition root: session.ts (EventEmitter producer wiring state-machine + VAD + mic source) + useAchillesState React adapter + VoiceShell Ink root + cli.ts voice subcommand with --mock/--debug-vad/--plain (CAP-03 + TUI-06 full wiring; INIT-07 preserved; RESEARCH A3 honored)
+  - [x] 16-04-PLAN.md — Composition root: session.ts (EventEmitter producer wiring state-machine + VAD + mic source) + useAchillesState React adapter + VoiceShell Ink root + cli.ts voice subcommand with --mock/--debug-vad/--plain (CAP-03 + TUI-06 full wiring; INIT-07 preserved; RESEARCH A3 honored)
 
 ### Phase 17: End-to-end Voice Loop + gracefulShutdown
 **Goal**: Make the actual product real — port `session.ts` ~80% verbatim from v1.2 with IPC envelope wrappers stripped + replaced by direct `EventEmitter` function calls; wire `voice-stt`/`voice-tts`/`claude-code-bridge` via existing DI seams; spawn ffplay for gapless MP3 TTS sink piped via stdin; enforce half-duplex via existing `SPEAKING_DEBOUNCE_MS = 300` constant; route ack + `<spoken-summary>` extractors unchanged; failure-override authoritatively derived from claude exit code + tool_result (never LLM narration); Ctrl-C cancel chain routes through existing `claude-code-bridge` cancellation with claude detached into its own process group (anthropics/claude-code#45717 workaround); MOCK_LOOP=1 in-process smoke gate runs on every PR. This is the riskiest phase — structurally prevents v1.2 silent-launch replay.
@@ -129,7 +129,7 @@ Phase 19's deletion of `apps/achilles` + `apps/achilles-cli/src/commands/launch.
 | 13. Distribution — npm CLI + Skill + Installers | v1.2 | 4/4 | Complete | 2026-06-07 |
 | 14. Hardening, Privacy, Resilience | v1.2 | 4/4 | Complete | 2026-06-07 |
 | 15. Workspace Scaffold + Bun Build Pipeline | v1.3 | 4/4 | Complete   | 2026-06-08 |
-| 16. TUI Shell + State Machine + sox + VAD | v1.3 | 3/4 | In Progress|  |
+| 16. TUI Shell + State Machine + sox + VAD | v1.3 | 4/4 | Complete   | 2026-06-08 |
 | 17. End-to-end Voice Loop + gracefulShutdown | v1.3 | 0/TBD | Not started | - |
 | 18. Init Wizard + Config + Transcripts | v1.3 | 0/TBD | Not started | - |
 | 19. Distribution + Publishing + Gatekeeper | v1.3 | 0/TBD | Not started | - |
