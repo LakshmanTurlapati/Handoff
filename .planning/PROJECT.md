@@ -19,7 +19,23 @@ A developer can hand off intent to their terminal coding agent through the most 
 
 **v1.1 — Handoff Install & Launch (paused):** In progress at the time of the v1.2 pivot. Two phases completed (npm distribution, Codex-native `/handoff`); Phase 08.1 (authless hosted launch) was inserted and partially scoped. v1.1 artifacts remain in `.planning/phases/06-*`, `07-*`, and `08.1-*` for resumption after v1.2 ships.
 
-**v1.2 — Achilles (shipped 2026-06-07):** Voice companion for Claude Code. Three packages (`@achilles/voice-protocol`, `@achilles/voice-stt`, `@achilles/voice-tts`) + Claude Code bridge subprocess wrapper + Electron floating-UI shell + end-to-end orchestrator with embedded companion system prompt + dual-distribution surface (npm CLI + Claude Code skill from one source of truth) + signed cross-platform installers + cross-cutting hardening (latency probe, opt-in transcript persistence, circuit-breaker incident detection, stuck-thinking watchdog, suspend/resume + device-change handlers). All 30 v1.2 requirements verified code-side; audit verdict `tech_debt` with documented v1.3 followups. See `.planning/milestones/v1.2-ROADMAP.md` and `.planning/milestones/v1.2-MILESTONE-AUDIT.md`.
+**v1.2 — Achilles (shipped 2026-06-07):** Voice companion for Claude Code. Three packages (`@achilles/voice-protocol`, `@achilles/voice-stt`, `@achilles/voice-tts`) + Claude Code bridge subprocess wrapper + Electron floating-UI shell + end-to-end orchestrator with embedded companion system prompt + dual-distribution surface (npm CLI + Claude Code skill from one source of truth) + signed cross-platform installers + cross-cutting hardening (latency probe, opt-in transcript persistence, circuit-breaker incident detection, stuck-thinking watchdog, suspend/resume + device-change handlers). All 30 v1.2 requirements verified code-side; audit verdict `tech_debt` with documented v1.3 followups. Live-validation discovered the renderer voice loop never shipped end-to-end in the v1.2 binary (debug session `.planning/debug/achilles-silent-launch.md`) — root cause that triggered the v1.3 architectural pivot. See `.planning/milestones/v1.2-ROADMAP.md` and `.planning/milestones/v1.2-MILESTONE-AUDIT.md`.
+
+**v1.3 — Terminal-only Achilles (active):** Rebuild the voice companion as a single Bun-runtime (Node 22+ fallback) terminal package. Drops the Electron app + .app distribution entirely. Ink 6 + React 19 TUI rendering a reactive pulsing blob and braille waveform inside the calling terminal. sox child for 16k mono PCM mic capture, ffplay child for gapless MP3 TTS playback, energy-threshold + 300ms debounce VAD always-listening (drops the PTT hotkey). Reuses `voice-protocol`, `voice-stt`, `voice-tts`, `claude-code-bridge` packages untouched. Distribution as single npm package + per-platform Bun-compiled binaries via `optionalDependencies` + pure-JS fallback. See `.planning/research/v1.3-terminal-pivot.md` for full architecture rationale and `.planning/research/v1.2-reuse-audit.md` for the reuse map.
+
+## Current Milestone: v1.3 Terminal-only Achilles
+
+**Goal:** Rebuild the voice companion as a single Bun-runtime terminal package that runs the full voice loop inside the calling terminal, deleting the Electron .app and renderer entirely while reusing every voice + bridge package untouched.
+
+**Target features:**
+- TUI shell (Ink 6 + React 19) with reactive pulsing blob (Unicode block characters) and braille sparkline waveform (U+2800-U+28FF) rendered at 20fps inside the calling terminal
+- VAD always-listening (energy threshold + 300ms silence debounce) replacing the v1.2 Cmd+Shift+A PTT/toggle hotkey
+- `sox` child process for 16k mono PCM s16le mic capture (replaces v1.2 renderer MediaStream + AudioWorklet)
+- `ffplay` child process for gapless MP3 TTS playback piped via stdin (replaces v1.2 Web Audio PlaybackQueue)
+- Reuse of all 4 voice packages + `claude-code-bridge` untouched via existing dependency-injection seams
+- Skill manifest rewire: `achilles launch` → `achilles voice` (one-line diff to `packages/achilles-skill/skill/SKILL.md`)
+- Distribution: single `achilles` npm package + per-platform `@achilles/cli-<platform>` Bun-compiled binaries via `optionalDependencies` + 30-line JS bin shim fallback
+- Hardening parity with v1.2: suspend/resume, device hot-swap, circuit-breaker, latency probe — adapted to the terminal runtime
 
 ## Requirements
 
@@ -36,7 +52,7 @@ v1.0 and v1.1 milestones each retain their original validation status (v1.0 arch
 
 ### Active
 
-No active milestone. Run `/gsd:new-milestone` to scope v1.3.
+v1.3 Terminal-only Achilles — requirements being scoped. See `## Current Milestone` above for goal and target features.
 
 ### Paused (v1.1 — Handoff Install & Launch)
 
@@ -73,10 +89,13 @@ Per the v1.2 audit, the v1.3 candidate scope includes: (a) IN-01 ElevenLabs SDK 
 
 ## Next Milestone Goals
 
-- Deliver an installable voice companion (Claude Code skill + npm CLI) with the small reactive UI
-- Wire end-to-end voice flow: mic capture → ElevenLabs STT → Claude Code stdin → Claude Code stdout → ElevenLabs TTS playback
-- Author the minimal embedded system prompt that drives spoken acknowledgement and completion
-- Keep Handoff v1.0 audit debt and v1.1 install work deferred unless they directly block Achilles
+(Post-v1.3 candidates — not yet scoped)
+
+- Resume v1.1 Handoff install + `/handoff` command work (HOFF-01..04)
+- Voice picker UI (VOICE-01) — let users choose from a curated set of ElevenLabs voices
+- Cloud Claude Code routing (CLOUD-01) — the original v1.2 cloud target deferred to local-only
+- IN-01 ElevenLabs SDK migration if/when sandbox account is provisioned and the hand-rolled wire protocol becomes a maintenance burden
+- Silero VAD ONNX upgrade if energy-threshold VAD proves too noisy in field use
 
 ## Constraints
 
@@ -124,4 +143,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-07 after v1.2 Achilles shipped (audit verdict tech_debt; release-operator validation pending).*
+*Last updated: 2026-06-08 — v1.3 Terminal-only Achilles milestone opened after v1.2 live-validation discovered the renderer voice loop never shipped end-to-end. Architecture pivot to single Bun-runtime terminal package; Electron app deleted.*

@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: Achilles
-status: complete
-last_updated: "2026-06-07T00:00:00Z"
-last_activity: "2026-06-07 — v1.2 Achilles audit, archive, and milestone close"
+milestone: v1.3
+milestone_name: Terminal-only Achilles
+status: planning
+last_updated: "2026-06-08T05:22:04.080Z"
+last_activity: 2026-06-08
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 22
-  completed_plans: 22
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -24,16 +24,15 @@ See: .planning/PROJECT.md (updated 2026-06-07)
 
 ## Current Position
 
-Phase: All v1.2 phases (09-14) complete
-Plan: 22 of 22 complete
-Status: Milestone v1.2 shipped; awaiting v1.3 scoping or v1.1 resumption
-Last activity: 2026-06-07 — milestone audit, archive, and tag
-
-Progress: [██████████] 100%
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-08 — Milestone v1.3 started
 
 ## Accumulated Context
 
 ### Milestone v1.2 Outcomes
+
 - All 30 v1.2 requirements verified code-side (audit verdict `tech_debt` with documented v1.3 followups)
 - 1,227+ tests passing across phases 09-14 + 30 node-test build-script cases + 6/6 MOCK_LOOP=1 end-to-end integration
 - 22 plans across 6 phases (09-14)
@@ -41,6 +40,7 @@ Progress: [██████████] 100%
 - Single-day milestone delivery from audit to ship
 
 ### Locked Decisions (carried forward as constraints)
+
 - Local Claude Code only (cloud routing deferred to v1.3 CLOUD-01)
 - Subprocess `claude -p --output-format stream-json` is the Claude bridge spine
 - Both press-to-toggle AND push-to-talk hotkey modes
@@ -49,6 +49,7 @@ Progress: [██████████] 100%
 - Authoritative outcome derived from exit code + tool_result events; never LLM narration
 
 ### Tech Debt (acknowledged at audit; routed to v1.3)
+
 - IN-01: ElevenLabs SDKs declared but wire protocol hand-rolled in v1.2 for offline CI testability
 - CR-02 follow-up: renderer App.tsx binding of `createMicCapture.onDeviceChange -> bridge.sendDeviceChange` is documented composition-root follow-up
 - 13 phase-level Info findings deferred as polish
