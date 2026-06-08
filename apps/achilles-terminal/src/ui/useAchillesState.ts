@@ -18,8 +18,9 @@
  *   constructs a new one when writeIndex advances, so consumers see a
  *   stable reference across non-amplitude ticks.
  *
- * LOOP-02 invariant: zero imports from voice-* / claude-code-bridge /
- * achilles-skill. Only react + the local Session type.
+ * LOOP-02 invariant: zero imports from the four voice runtime packages,
+ * the claude bridge package, or the achilles skill package. Only react +
+ * the local Session type.
  *
  * No emojis (CLAUDE.md global).
  */

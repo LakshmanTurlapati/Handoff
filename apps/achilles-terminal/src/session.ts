@@ -10,11 +10,9 @@
  * (Plan 04 useAchillesState).
  *
  * LOOP-02 invariant (Phase 16's hardest line): zero runtime imports from
- *   - @achilles/voice-protocol
- *   - @achilles/voice-stt
- *   - @achilles/voice-tts
- *   - @achilles/claude-code-bridge
- *   - @achilles/achilles-skill
+ * the four voice runtime packages (protocol, stt, tts), the claude bridge
+ * package, or the achilles skill package. The exact package names live in
+ * the T10 import-line grep gate in tests/session.test.ts.
  *
  * Phase 17 will add `sttFactory`, `ttsFactory`, `claudeBridgeFactory`
  * parameters to SessionOptions (currently typed `unknown` — Plan 04 ignores

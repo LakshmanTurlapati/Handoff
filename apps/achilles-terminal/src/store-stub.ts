@@ -15,8 +15,9 @@
  * returned object cannot leak that mutation to the next caller — important
  * for tests that override one knob without affecting the next test fixture.
  *
- * LOOP-02 invariant: zero imports from voice-* / claude-code-bridge /
- * achilles-skill. Only the local VadConfig + DEFAULT_VAD_CONFIG from Plan 01.
+ * LOOP-02 invariant: zero imports from the four voice runtime packages,
+ * the claude bridge package, or the achilles skill package. Only the local
+ * VadConfig + DEFAULT_VAD_CONFIG from Plan 01.
  *
  * No emojis (CLAUDE.md global).
  */

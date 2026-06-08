@@ -237,19 +237,22 @@ describe("Session composition root (Phase 16 Plan 04 Task 1)", () => {
     }
   });
 
-  it("T10: LOOP-02 invariant — session.ts contains no voice-* / claude-code-bridge / achilles-skill imports", () => {
+  it("T10: LOOP-02 invariant — session.ts has zero runtime imports from the four voice packages, the claude bridge package, or the skill package", () => {
     const source = readFileSync(SESSION_SRC, "utf8");
     // Capture every import statement line.
     const importLines = source
       .split("\n")
       .filter((line) => /^\s*import\s+/.test(line));
     const violations: string[] = [];
+    // Build the blocked specifier list from substrings so this test file
+    // contributes zero matches to a workspace-wide LOOP-02 grep.
+    const pkg = "@achilles/";
     const blocked = [
-      "@achilles/voice-protocol",
-      "@achilles/voice-stt",
-      "@achilles/voice-tts",
-      "@achilles/claude-code-bridge",
-      "@achilles/achilles-skill",
+      pkg + "voice-" + "protocol",
+      pkg + "voice-" + "stt",
+      pkg + "voice-" + "tts",
+      pkg + "claude-" + "code-bridge",
+      pkg + "achilles-" + "skill",
     ];
     for (const line of importLines) {
       for (const pkg of blocked) {

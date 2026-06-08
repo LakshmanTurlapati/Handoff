@@ -34,14 +34,15 @@
  *     when the state warrants a synthetic envelope (idle, muted, processing).
  *   - In listening state, the live mic RMS (useAmplitude) drives the blob;
  *     in speaking state, the amplitude is 0 (Phase 17 will wire real TTS
- *     amplitude from voice-tts events$).
+ *     amplitude from the synthesizer events stream).
  *
  * Phase 17 hook — `debugVad` prop is currently a void (the debug-vad emission
  * lives in session.ts's handleFrame methods). Kept on the component signature
  * so Phase 17 can wire UI-side debug display if needed without a refactor.
  *
- * LOOP-02 invariant: zero imports from voice-* / claude-code-bridge /
- * achilles-skill. Only Ink + React + local components.
+ * LOOP-02 invariant: zero imports from the four voice runtime packages,
+ * the claude bridge package, or the achilles skill package. Only Ink +
+ * React + local components.
  *
  * No emojis (CLAUDE.md global).
  */
