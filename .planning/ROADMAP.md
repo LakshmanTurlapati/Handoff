@@ -17,7 +17,7 @@
 
 **Phase Numbering:** Phases 15-20 continue v1.2's sequence (last phase 14). Integer phases (15, 16, ...) are planned milestone work; decimal phases (e.g., 15.1) reserved for urgent insertions.
 
-- [ ] **Phase 15: Workspace Scaffold + Bun Build Pipeline** — Stand up `apps/achilles-terminal` + 5 sibling platform-binary packages; `bun build --compile` matrix produces self-contained binaries on all 5 targets; 30-line JS bin shim falls back to Node 22 bundle; dual-runtime CI matrix (Bun + Node) green per commit
+- [x] **Phase 15: Workspace Scaffold + Bun Build Pipeline** — Stand up `apps/achilles-terminal` + 5 sibling platform-binary packages; `bun build --compile` matrix produces self-contained binaries on all 5 targets; 30-line JS bin shim falls back to Node 22 bundle; dual-runtime CI matrix (Bun + Node) green per commit (completed 2026-06-08)
 - [ ] **Phase 16: TUI Shell + State Machine + sox + VAD** — Ink 7 + React 19 TUI with reactive blob + braille sparkline; v1.2 state machine port; sox child for 16k mono PCM; energy-VAD with adaptive EWMA + self-trigger guard; accessibility floor (NO_COLOR + screen reader); 20fps perf budget; `--debug-vad` flag
 - [ ] **Phase 17: End-to-end Voice Loop + gracefulShutdown** — Port session.ts (~80% verbatim); wire voice-stt/voice-tts/claude-code-bridge via existing DI seams; ffplay TTS sink + half-duplex; sandwich defence + ack/spoken-summary routing; failure override; Ctrl-C cancel chain; gracefulShutdown <1.5s with detached claude process group; MOCK_LOOP=1 CI smoke gate
 - [ ] **Phase 18: Init Wizard + Config + Transcripts + Skill Rewire** — @clack/prompts wizard (API key → sox/ffmpeg preflight → ambient calibration → smoke test); API key hierarchy (env → keyring → encrypted file 0o600); parent-emulator EPERM messaging; `~/.achilles/settings.json` schema; transcripts list/purge ports; single-instance lock; typed-input fallback
@@ -40,7 +40,7 @@
   - [x] 15-01-PLAN.md — Workspace skeleton: parent package.json, tsconfig, vitest/eslint configs, src/cli.ts with --version, INIT-07 seed test (DIST-01, INIT-07, GATE-04 lint half)
   - [x] 15-02-PLAN.md — 5 platform-binary sibling packages (apps/cli-<plat>-<arch>/ with package.json + README + .gitignore) (DIST-02 siblings)
   - [x] 15-03-PLAN.md — 30-line bin shim, build-binaries.mjs + build-node-bundle.mjs scripts, DIST-02 shim vitest assertion (DIST-02 shim + build)
-  - [ ] 15-04-PLAN.md — Dual-runtime CI workflow (test matrix + compile-binaries matrix) + manual hyperfine latency capture procedure (GATE-04 CI half, DIST-05)
+  - [x] 15-04-PLAN.md — Dual-runtime CI workflow (test matrix + compile-binaries matrix) + manual hyperfine latency capture procedure (GATE-04 CI half, DIST-05)
 
 ### Phase 16: TUI Shell + State Machine + sox Mic Capture + Energy VAD
 **Goal**: Build the load-bearing visible surface (Ink 7 + React 19 components rendering a reactive 7×7 pulsing blob, 40-cell braille sparkline, 5 state colors, status row) atop a verbatim port of the v1.2 state machine; spawn sox for 16k mono PCM and wire energy-threshold VAD with adaptive EWMA so the input gate is shippable without PTT. All four voice packages stay byte-for-byte unchanged — any phase needing to touch them is a roadmap red flag (LOOP-02 constraint).
@@ -124,7 +124,7 @@ Phase 19's deletion of `apps/achilles` + `apps/achilles-cli/src/commands/launch.
 | 12. End-to-End Integration & System Prompt | v1.2 | 4/4 | Complete | 2026-06-06 |
 | 13. Distribution — npm CLI + Skill + Installers | v1.2 | 4/4 | Complete | 2026-06-07 |
 | 14. Hardening, Privacy, Resilience | v1.2 | 4/4 | Complete | 2026-06-07 |
-| 15. Workspace Scaffold + Bun Build Pipeline | v1.3 | 3/4 | In Progress|  |
+| 15. Workspace Scaffold + Bun Build Pipeline | v1.3 | 4/4 | Complete   | 2026-06-08 |
 | 16. TUI Shell + State Machine + sox + VAD | v1.3 | 0/TBD | Not started | - |
 | 17. End-to-end Voice Loop + gracefulShutdown | v1.3 | 0/TBD | Not started | - |
 | 18. Init Wizard + Config + Transcripts | v1.3 | 0/TBD | Not started | - |
