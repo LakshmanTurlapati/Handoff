@@ -22,7 +22,39 @@
     "noEmit": false,
     "sourceMap": true,
     "tsBuildInfoFile": "./.tsbuildinfo",
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@achilles/achilles-skill": [
+        "../../packages/achilles-skill/dist/index.d.ts"
+      ],
+      "@achilles/achilles-skill/*": [
+        "../../packages/achilles-skill/dist/*.d.ts"
+      ],
+      "@achilles/claude-code-bridge": [
+        "../../packages/claude-code-bridge/dist/index.d.ts"
+      ],
+      "@achilles/claude-code-bridge/*": [
+        "../../packages/claude-code-bridge/dist/*.d.ts"
+      ],
+      "@achilles/voice-protocol": [
+        "../../packages/voice-protocol/dist/index.d.ts"
+      ],
+      "@achilles/voice-protocol/*": [
+        "../../packages/voice-protocol/dist/*.d.ts"
+      ],
+      "@achilles/voice-stt": [
+        "../../packages/voice-stt/dist/index.d.ts"
+      ],
+      "@achilles/voice-stt/*": [
+        "../../packages/voice-stt/dist/*.d.ts"
+      ],
+      "@achilles/voice-tts": [
+        "../../packages/voice-tts/dist/index.d.ts"
+      ],
+      "@achilles/voice-tts/*": [
+        "../../packages/voice-tts/dist/*.d.ts"
+      ]
+    }
   },
   "include": [
     "src/**/*.ts",
