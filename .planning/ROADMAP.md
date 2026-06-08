@@ -52,8 +52,12 @@
   3. Energy-threshold VAD with adaptive EWMA noise floor (α=0.05, `VOICE_THRESHOLD = noiseFloor * 3`), 60ms voice-hold + 300ms silence-hold, minimum-utterance-length floor (≥300ms), and self-trigger guard during TTS playback emits clean `speech_start`/`speech_end` signals; `--debug-vad` flag streams per-frame energy + threshold + state to stderr at 50ms cadence (CAP-02, CAP-04 — replaces v1.2 PTT/toggle hotkey entirely)
   4. `m` key toggles VAD off without exiting the session and shows visible "MUTED" indicator in the status row (CAP-03); `NO_COLOR` and `FORCE_COLOR` env vars are honored per no-color.org standard (ACC-01)
   5. Screen-reader mode (via `INK_SCREEN_READER=1` or Ink's `useIsScreenReaderEnabled()` hook) suppresses the blob + sparkline entirely and emits only state-change announcements + committed transcripts via `<Text aria-live="polite">` with explicit per-state wording (ACC-02); auto-downgrade to plain-text log lines when `process.stdout.isTTY` is false or `--plain` is passed (TUI-06); CPU sits at <10% during 10-minute animation on Windows Terminal v1.18 (TUI-05 perf budget)
-**Plans**: TBD
+**Plans**: 4 plans
 **UI hint**: yes
+  - [ ] 16-01-PLAN.md — Audio primitives: mic-sox child + adaptive-EWMA energy VAD + canonical braille encoder (CAP-01, CAP-02, CAP-04 substrate + TUI-02 substrate)
+  - [ ] 16-02-PLAN.md — State machine port: 6-state ACHILLES_STATES (Option A: muted as 6th state) + MUTE_TOGGLE event + SPEAKING_DEBOUNCE_MS surfaced from v1.2 (CAP-03 reducer substrate)
+  - [ ] 16-03-PLAN.md — UI primitives: Wave 0 ink/react/chalk/ink-testing-library deps + tsconfig/eslint/vitest .tsx coverage + Blob + Sparkline + StatusRow + ScreenReader + plain-text + mock-amplitude + colors (TUI-01..04, TUI-06, ACC-01, ACC-02 — with RESEARCH A1/A2 corrections)
+  - [ ] 16-04-PLAN.md — Composition root: session.ts (EventEmitter producer wiring state-machine + VAD + mic source) + useAchillesState React adapter + VoiceShell Ink root + cli.ts voice subcommand with --mock/--debug-vad/--plain (CAP-03 + TUI-06 full wiring; INIT-07 preserved; RESEARCH A3 honored)
 
 ### Phase 17: End-to-end Voice Loop + gracefulShutdown
 **Goal**: Make the actual product real — port `session.ts` ~80% verbatim from v1.2 with IPC envelope wrappers stripped + replaced by direct `EventEmitter` function calls; wire `voice-stt`/`voice-tts`/`claude-code-bridge` via existing DI seams; spawn ffplay for gapless MP3 TTS sink piped via stdin; enforce half-duplex via existing `SPEAKING_DEBOUNCE_MS = 300` constant; route ack + `<spoken-summary>` extractors unchanged; failure-override authoritatively derived from claude exit code + tool_result (never LLM narration); Ctrl-C cancel chain routes through existing `claude-code-bridge` cancellation with claude detached into its own process group (anthropics/claude-code#45717 workaround); MOCK_LOOP=1 in-process smoke gate runs on every PR. This is the riskiest phase — structurally prevents v1.2 silent-launch replay.
@@ -125,7 +129,7 @@ Phase 19's deletion of `apps/achilles` + `apps/achilles-cli/src/commands/launch.
 | 13. Distribution — npm CLI + Skill + Installers | v1.2 | 4/4 | Complete | 2026-06-07 |
 | 14. Hardening, Privacy, Resilience | v1.2 | 4/4 | Complete | 2026-06-07 |
 | 15. Workspace Scaffold + Bun Build Pipeline | v1.3 | 4/4 | Complete   | 2026-06-08 |
-| 16. TUI Shell + State Machine + sox + VAD | v1.3 | 0/TBD | Not started | - |
+| 16. TUI Shell + State Machine + sox + VAD | v1.3 | 0/4 | Not started | - |
 | 17. End-to-end Voice Loop + gracefulShutdown | v1.3 | 0/TBD | Not started | - |
 | 18. Init Wizard + Config + Transcripts | v1.3 | 0/TBD | Not started | - |
 | 19. Distribution + Publishing + Gatekeeper | v1.3 | 0/TBD | Not started | - |
