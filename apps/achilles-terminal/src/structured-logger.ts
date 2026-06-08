@@ -21,13 +21,14 @@
  *   - Apply the 6 default redaction regex families to the serialised line
  *   - Check the file size; if it exceeds maxBytes, rotate to .log.1
  *
- * Default redaction patterns (T-17-01 mitigation):
+ * Default redaction patterns (T-17-01 + T-18-07 mitigation):
  *   - /sk-[a-zA-Z0-9]{16,}/g                       — generic sk- prefix (OpenAI / Anthropic)
- *   - /xi-[a-zA-Z0-9-]{20,}/g                      — ElevenLabs xi- key prefix
+ *   - /xi-[a-zA-Z0-9-]{20,}/g                      — ElevenLabs xi- key prefix (hyphen)
  *   - /Bearer\s+[A-Za-z0-9._-]+/g                  — Authorization Bearer values
  *   - /[a-zA-Z0-9_-]{32,}\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g  — JWTs
  *   - /[a-f0-9]{64,}/g                             — long hex tokens (SHA-256, etc.)
  *   - /ELEVENLABS_API_KEY=\S+/g                    — env var assignments
+ *   - /xi_[a-zA-Z0-9]{40,}/g                      — ElevenLabs new xi_ key shape (T-18-07)
  *
  * The replacement marker is `[REDACTED]`. Callers can supply additional
  * patterns via the redactPatterns dep; the default list is always
@@ -155,14 +156,18 @@ export interface StructuredLogger {
 }
 
 /**
- * Default redaction patterns — 6 regex families covering the known
- * secret shapes (T-17-01 mitigation). Applied in declared order via
- * String.prototype.replaceAll; every pattern uses the `g` flag.
+ * Default redaction patterns — 7 regex families covering the known
+ * secret shapes (T-17-01 + T-18-07 mitigation). Applied in declared order
+ * via String.prototype.replaceAll; every pattern uses the `g` flag.
  *
  * Order matters: the JWT pattern is listed before the long-hex
  * pattern because a JWT's signature segment IS a long hex/base64
  * string; matching the JWT shape first preserves the structure of the
  * surrounding token in the redacted output.
+ *
+ * Pattern 7 (T-18-07): ElevenLabs new key shape (xi UNDERSCORE prefix,
+ * 40+ alphanumeric chars). Distinct from pattern 4 (xi HYPHEN prefix).
+ * Added in Phase 18 Plan 02.
  */
 const DEFAULT_REDACT_PATTERNS: ReadonlyArray<RegExp> = [
   /Bearer\s+[A-Za-z0-9._-]+/g,
@@ -171,6 +176,7 @@ const DEFAULT_REDACT_PATTERNS: ReadonlyArray<RegExp> = [
   /xi-[a-zA-Z0-9-]{20,}/g,
   /ELEVENLABS_API_KEY=\S+/g,
   /[a-f0-9]{64,}/g,
+  /xi_[a-zA-Z0-9]{40,}/g,
 ];
 
 const REDACTION_MARKER = "[REDACTED]";
