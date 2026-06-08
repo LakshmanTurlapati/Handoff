@@ -86,9 +86,7 @@ async function main(): Promise<void> {
 // launched, nothing happened, no error) is structurally prevented by
 // these handlers writing the actual error message.
 process.on("uncaughtException", (err) => {
-  process.stderr.write(
-    `achilles: fatal uncaughtException: ${(err as Error).message}\n`,
-  );
+  process.stderr.write(`achilles: fatal uncaughtException: ${err.message}\n`);
   process.exit(1);
 });
 process.on("unhandledRejection", (reason) => {

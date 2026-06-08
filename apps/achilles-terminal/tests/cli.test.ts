@@ -24,9 +24,11 @@ import { readFileSync } from "node:fs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_SRC = join(HERE, "..", "src", "cli.ts");
-const PACKAGE_VERSION = JSON.parse(
-  readFileSync(resolve(HERE, "..", "package.json"), "utf8"),
-).version as string;
+const PACKAGE_VERSION = (
+  JSON.parse(readFileSync(resolve(HERE, "..", "package.json"), "utf8")) as {
+    version: string;
+  }
+).version;
 
 describe("achilles --version", () => {
   it("prints a non-empty semver-shaped version string matching package.json", () => {

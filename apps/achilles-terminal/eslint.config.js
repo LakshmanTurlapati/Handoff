@@ -6,8 +6,12 @@ import tseslint from "typescript-eslint";
 import prettier from "eslint-config-prettier";
 
 export default tseslint.config(
-  ...tseslint.configs.recommendedTypeChecked,
+  // Type-checked rules apply only to TS source + tests covered by tsconfig.json.
+  // Loose JS/MJS config + scripts get untyped recommended only — they are not in
+  // the typecheck project graph.
   {
+    files: ["src/**/*.ts", "tests/**/*.ts"],
+    extends: tseslint.configs.recommendedTypeChecked,
     languageOptions: {
       parserOptions: {
         project: "./tsconfig.json",
@@ -33,6 +37,11 @@ export default tseslint.config(
 
       // Phase 15 baseline: no extra rules beyond typescript-eslint recommended-type-checked.
     },
+  },
+  // Untyped recommended for plain JS/MJS config + script files (outside tsconfig project).
+  {
+    files: ["*.js", "*.mjs", "scripts/**/*.mjs", "src/**/*.js", "vitest.config.ts"],
+    extends: tseslint.configs.recommended,
   },
   prettier, // MUST be last - disables ESLint rules that conflict with prettier
   {
