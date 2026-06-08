@@ -19,7 +19,7 @@
 
 - [x] **Phase 15: Workspace Scaffold + Bun Build Pipeline** — Stand up `apps/achilles-terminal` + 5 sibling platform-binary packages; `bun build --compile` matrix produces self-contained binaries on all 5 targets; 30-line JS bin shim falls back to Node 22 bundle; dual-runtime CI matrix (Bun + Node) green per commit (completed 2026-06-08)
 - [x] **Phase 16: TUI Shell + State Machine + sox + VAD** — Ink 7 + React 19 TUI with reactive blob + braille sparkline; v1.2 state machine port; sox child for 16k mono PCM; energy-VAD with adaptive EWMA + self-trigger guard; accessibility floor (NO_COLOR + screen reader); 20fps perf budget; `--debug-vad` flag (completed 2026-06-08)
-- [ ] **Phase 17: End-to-end Voice Loop + gracefulShutdown** — Port session.ts (~80% verbatim); wire voice-stt/voice-tts/claude-code-bridge via existing DI seams; ffplay TTS sink + half-duplex; sandwich defence + ack/spoken-summary routing; failure override; Ctrl-C cancel chain; gracefulShutdown <1.5s with detached claude process group; MOCK_LOOP=1 CI smoke gate
+- [x] **Phase 17: End-to-end Voice Loop + gracefulShutdown** — Port session.ts (~80% verbatim); wire voice-stt/voice-tts/claude-code-bridge via existing DI seams; ffplay TTS sink + half-duplex; sandwich defence + ack/spoken-summary routing; failure override; Ctrl-C cancel chain; gracefulShutdown <1.5s with detached claude process group; MOCK_LOOP=1 CI smoke gate (completed 2026-06-08)
 - [ ] **Phase 18: Init Wizard + Config + Transcripts + Skill Rewire** — @clack/prompts wizard (API key → sox/ffmpeg preflight → ambient calibration → smoke test); API key hierarchy (env → keyring → encrypted file 0o600); parent-emulator EPERM messaging; `~/.achilles/settings.json` schema; transcripts list/purge ports; single-instance lock; typed-input fallback
 - [ ] **Phase 19: Distribution + Publishing + Gatekeeper** — npm publish parent + 5 platform packages; codesign + notarytool macOS pipeline (gated on Apple Developer ID; unsigned-beta fallback documented); SHA-256 source-of-truth CI check; tarball secret scan; per-OS GitHub Actions runners; SKILL.md `launch → voice` diff; ERR-01/03/08 hardening; publish-then-cut deletion of `apps/achilles` + `apps/achilles-cli/src/commands/launch.ts`
 - [ ] **Phase 20: Hardening + Ship Gate (RBS Asciicasts)** — Three real-binary asciicasts (RBS-1 darwin-arm64, RBS-2 linux-x64, RBS-3 win32-x64) from fresh OS accounts committed to `.planning/milestones/v1.3-evidence/`; VS Code-integrated-terminal asciicast on macOS Sequoia; noisy-environment field test at 65 dBA; ESLint rule forbidding `stdio:"ignore"` on launch path; suspend/resume final validation
@@ -74,7 +74,7 @@
   - [x] 17-02-PLAN.md — Wave 2 audio bridges: tts-playback (ffplay) + stt-bridge + stuck-thinking-watchdog + child-exit-watchdog (PLAY-01, PLAY-02, LOOP-01, ERR-05, ERR-06)
   - [x] 17-03-PLAN.md — Wave 2 claude orchestration: claude-bridge wrapper with detached:true + sandwich-defence port + pre-TTS normalisation port (LOOP-01, LOOP-03, LOOP-04, LOOP-07)
   - [x] 17-04-PLAN.md — Wave 3 composition root: session.ts port + graceful-shutdown + resume-session + latency-probe + cli.ts flag extensions (LOOP-01, LOOP-05, LOOP-06)
-  - [ ] 17-05-PLAN.md — Wave 4 CI smoke gate: MOCK_LOOP=1 integration test + mock-clients fixtures + CI workflow update with LOOP-02 diff gate (LOOP-01, LOOP-02)
+  - [x] 17-05-PLAN.md — Wave 4 CI smoke gate: MOCK_LOOP=1 integration test + mock-clients fixtures + CI workflow update with LOOP-02 diff gate (LOOP-01, LOOP-02)
 
 ### Phase 18: Init Wizard + Config + Transcripts + Single-Instance Lock
 **Goal**: Build cold-start friction killer: linear `@clack/prompts` wizard walking API key resolution → sox/ffmpeg preflight (real device-open smoke, not just `which`) → 5-second ambient calibration seeding the VAD EWMA noise floor → 1-utterance round-trip smoke test; resolve API key from `ELEVENLABS_API_KEY` env → OS keychain via `@napi-rs/keyring` → encrypted `~/.achilles/key.enc` (libsodium secretbox, 0o600); detect parent terminal emulator on macOS EPERM and print per-emulator remediation (VS Code/Cursor → "open Terminal.app once"); single-instance `~/.achilles/voice.lock` PID file; opt-in `--save-transcripts` with `transcripts list/purge` subcommands; typed-input fallback via `@clack/prompts.text()` when STT circuit opens; `achilles latency --report` rolling-window P50/P95; `achilles config` settings menu.
@@ -135,7 +135,7 @@ Phase 19's deletion of `apps/achilles` + `apps/achilles-cli/src/commands/launch.
 | 14. Hardening, Privacy, Resilience | v1.2 | 4/4 | Complete | 2026-06-07 |
 | 15. Workspace Scaffold + Bun Build Pipeline | v1.3 | 4/4 | Complete   | 2026-06-08 |
 | 16. TUI Shell + State Machine + sox + VAD | v1.3 | 4/4 | Complete   | 2026-06-08 |
-| 17. End-to-end Voice Loop + gracefulShutdown | v1.3 | 4/5 | In Progress|  |
+| 17. End-to-end Voice Loop + gracefulShutdown | v1.3 | 5/5 | Complete   | 2026-06-08 |
 | 18. Init Wizard + Config + Transcripts | v1.3 | 0/TBD | Not started | - |
 | 19. Distribution + Publishing + Gatekeeper | v1.3 | 0/TBD | Not started | - |
 | 20. Hardening + Ship Gate (RBS Asciicasts) | v1.3 | 0/TBD | Not started | - |
