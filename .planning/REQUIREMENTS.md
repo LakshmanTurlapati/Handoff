@@ -142,30 +142,82 @@ Explicit exclusions. Anti-features from FEATURES.md captured here.
 
 ## Traceability
 
-Filled by the gsd-roadmapper. Each requirement maps to exactly one phase (15-20). Phase ranges intended:
+Each v1.3 requirement maps to exactly one phase (15-20). Filled by the gsd-roadmapper.
 
-| Category | Likely Phase(s) | Reasoning |
-|----------|----------------|-----------|
-| DIST | 15 (scaffold + build pipeline) + 19 (publish + skill rewire) | Scaffold establishes binary path; publish actually ships |
-| TUI | 16 (TUI shell) | Single phase owns the Ink + blob + sparkline + state machine port |
+| Category | Phase(s) | Reasoning |
+|----------|----------|-----------|
+| DIST | 15 (scaffold + build pipeline: DIST-01,02,05) + 19 (publish + skill rewire: DIST-03,04,06) | Scaffold establishes binary path; publish actually ships |
+| TUI | 16 (TUI shell + state machine port) | Single phase owns the Ink + blob + sparkline + state machine port |
 | ACC | 16 (TUI shell) | Shares render-tree code with TUI |
-| CAP | 16 (TUI shell + sox + VAD) | Sox child + VAD live alongside the state machine |
-| PLAY | 17 (end-to-end loop) | Ffplay sink lands with the actual TTS wiring |
-| LOOP | 17 (end-to-end loop) | Core integration milestone — riskiest phase |
-| INIT | 18 (init + config + transcripts) | Onboarding wizard + sox/ffmpeg preflight + key resolution |
-| SAFE | 18-20 (init + hardening) | Most are ports; new ones (single-instance lock) bundle with init |
-| ERR | 17 (loop wiring) + 20 (hardening) | Circuit breaker + watchdog ports happen during loop wiring; resilience polish in hardening |
-| GATE | 20 (ship gate) | Real-binary asciicasts captured last |
+| CAP | 16 (sox child + adaptive VAD) | Sox child + VAD live alongside the state machine |
+| PLAY | 17 (end-to-end loop) | ffplay sink lands with the actual TTS wiring |
+| LOOP | 17 (end-to-end loop) | Core integration milestone — riskiest phase; MOCK_LOOP=1 smoke gate ships here |
+| INIT | 18 (init + config + transcripts) + 15 (INIT-07 argv parse) | Onboarding wizard + sox/ffmpeg preflight + key resolution; INIT-07 (`--version`) belongs with the scaffold to gate everything else |
+| SAFE | 18 (init/safety bundle: SAFE-01,02,03,04) | All four port together with the init wizard surface; single-instance lock is new but bundles with init |
+| ERR | 17 (loop-time resilience: ERR-02,05,06) + 18 (init/observability: ERR-04,07) + 19 (hardening polish: ERR-01,03,08) | Circuit breaker + stuck-thinking + suspend/resume port during loop wiring; typed-input fallback + debug logging bundle with init; inline error banner + child-exit watchdog + unconditional structured logger close v1.2 silent-stdio gap at the ship pipeline |
+| GATE | 20 (ship gate: GATE-01,02,03) + 15 (CI matrix half of GATE-04) | Real-binary asciicasts captured last; dual-runtime CI matrix MUST start at scaffold |
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmapper) | | Pending |
+| DIST-01 | Phase 15 | Pending |
+| DIST-02 | Phase 15 | Pending |
+| DIST-03 | Phase 19 | Pending |
+| DIST-04 | Phase 19 | Pending |
+| DIST-05 | Phase 15 | Pending |
+| DIST-06 | Phase 19 | Pending |
+| TUI-01 | Phase 16 | Pending |
+| TUI-02 | Phase 16 | Pending |
+| TUI-03 | Phase 16 | Pending |
+| TUI-04 | Phase 16 | Pending |
+| TUI-05 | Phase 16 | Pending |
+| TUI-06 | Phase 16 | Pending |
+| ACC-01 | Phase 16 | Pending |
+| ACC-02 | Phase 16 | Pending |
+| CAP-01 | Phase 16 | Pending |
+| CAP-02 | Phase 16 | Pending |
+| CAP-03 | Phase 16 | Pending |
+| CAP-04 | Phase 16 | Pending |
+| PLAY-01 | Phase 17 | Pending |
+| PLAY-02 | Phase 17 | Pending |
+| LOOP-01 | Phase 17 | Pending |
+| LOOP-02 | Phase 17 | Pending |
+| LOOP-03 | Phase 17 | Pending |
+| LOOP-04 | Phase 17 | Pending |
+| LOOP-05 | Phase 17 | Pending |
+| LOOP-06 | Phase 17 | Pending |
+| LOOP-07 | Phase 17 | Pending |
+| INIT-01 | Phase 18 | Pending |
+| INIT-02 | Phase 18 | Pending |
+| INIT-03 | Phase 18 | Pending |
+| INIT-04 | Phase 18 | Pending |
+| INIT-05 | Phase 18 | Pending |
+| INIT-06 | Phase 18 | Pending |
+| INIT-07 | Phase 15 | Pending |
+| SAFE-01 | Phase 18 | Pending |
+| SAFE-02 | Phase 18 | Pending |
+| SAFE-03 | Phase 18 | Pending |
+| SAFE-04 | Phase 18 | Pending |
+| ERR-01 | Phase 19 | Pending |
+| ERR-02 | Phase 17 | Pending |
+| ERR-03 | Phase 19 | Pending |
+| ERR-04 | Phase 18 | Pending |
+| ERR-05 | Phase 17 | Pending |
+| ERR-06 | Phase 17 | Pending |
+| ERR-07 | Phase 18 | Pending |
+| ERR-08 | Phase 19 | Pending |
+| GATE-01 | Phase 20 | Pending |
+| GATE-02 | Phase 20 | Pending |
+| GATE-03 | Phase 20 | Pending |
+| GATE-04 | Phase 15 + Phase 20 | Pending (dual-runtime CI matrix starts at Phase 15 scaffold; final-green gate validated at Phase 20 + ESLint `stdio:"ignore"` forbid rule active throughout) |
 
 **Coverage:**
-- v1.3 requirements: 48 total
-- Mapped to phases: 0 (pending roadmapper)
-- Unmapped: 48
+- v1.3 requirements: 50 total
+- Mapped to phases: 50 (100% coverage)
+- Unmapped: 0
+- Phase distribution: Phase 15 (5 reqs: DIST-01, DIST-02, DIST-05, INIT-07, GATE-04 half) + Phase 16 (12 reqs: TUI-01..06, ACC-01,02, CAP-01..04) + Phase 17 (12 reqs: PLAY-01,02, LOOP-01..07, ERR-02, ERR-05, ERR-06) + Phase 18 (12 reqs: INIT-01..06, SAFE-01..04, ERR-04, ERR-07) + Phase 19 (6 reqs: DIST-03, DIST-04, DIST-06, ERR-01, ERR-03, ERR-08) + Phase 20 (3 reqs: GATE-01, GATE-02, GATE-03) + GATE-04 spans Phase 15 (CI matrix scaffold) and Phase 20 (final-green ship gate)
+
+**Note on count:** Initial scoping document referred to "48 requirements"; the actual v1.3 requirement set as enumerated above is 50 (DIST × 6, TUI × 6, ACC × 2, CAP × 4, PLAY × 2, LOOP × 7, INIT × 7, SAFE × 4, ERR × 8, GATE × 4 = 50). All 50 are mapped.
 
 ---
 *Requirements defined: 2026-06-08*
-*Last updated: 2026-06-08 after initial v1.3 milestone scoping*
+*Last updated: 2026-06-08 after roadmap creation + traceability fill (Phases 15-20)*
