@@ -54,7 +54,6 @@ import {
 import {
   writeInitMarker,
   readInitMarker,
-  hasInitMarker,
   type InitMarker,
 } from "./marker.js";
 import { runSmokeTest, type SmokeTestResult } from "./smoke-test.js";
@@ -184,15 +183,16 @@ export async function runInitWizard(deps: WizardDeps = {}): Promise<WizardOutcom
   const isCancelImpl = deps.isCancel ?? ((v) => typeof v === "symbol");
 
   // Lazy-load @clack/prompts in production; tests inject directly.
-  let _clack: {
+  type ClackShape = {
     text: (opts: { message: string; placeholder?: string }) => Promise<string | symbol>;
     select: (opts: { message: string; options: Array<{ value: string; label: string }> }) => Promise<string | symbol>;
     confirm: (opts: { message: string }) => Promise<boolean | symbol>;
     note: (message: string, title?: string) => void;
     spinner: () => { start: (msg?: string) => void; stop: (msg?: string) => void };
-  } | null = null;
+  };
+  let _clack: ClackShape | null = null;
 
-  async function getClack() {
+  async function getClack(): Promise<ClackShape | null> {
     if (_clack !== null) return _clack;
     if (
       deps.promptText !== undefined &&
@@ -204,7 +204,9 @@ export async function runInitWizard(deps: WizardDeps = {}): Promise<WizardOutcom
       // All seams injected — no need to import @clack/prompts
       return null;
     }
-    _clack = await import("@clack/prompts") as typeof _clack;
+    const clackImported = await import("@clack/prompts");
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    _clack = clackImported as unknown as ClackShape;
     return _clack;
   }
 

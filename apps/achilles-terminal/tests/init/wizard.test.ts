@@ -6,7 +6,7 @@
  * never called from vitest directly. No emojis.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   runInitWizard,
   type WizardDeps,
@@ -23,26 +23,31 @@ function isCancel(v: unknown): boolean {
   return v === CANCEL_SYMBOL;
 }
 
+// Helper to reduce lint noise: wrap a value in a resolved promise
+function pr<T>(value: T): Promise<T> {
+  return Promise.resolve(value);
+}
+
 /** Build a minimal WizardDeps that succeeds all steps with sensible defaults. */
 function makeHappyPathDeps(overrides: Partial<WizardDeps> = {}): WizardDeps {
   return {
-    resolveApiKeyImpl: async () => ({ source: "env", key: "xi_testkey" }),
-    writeApiKeyImpl: async () => {},
-    checkPreflightImpl: async () => ({
-      sox: { name: "sox", status: "ok", path: "/usr/bin/sox" },
-      ffmpeg: { name: "ffmpeg", status: "ok", path: "/usr/bin/ffmpeg" },
-      claude: { name: "claude", status: "ok", path: "/usr/local/bin/claude" },
+    resolveApiKeyImpl: () => pr({ source: "env" as const, key: "xi_testkey" }),
+    writeApiKeyImpl: () => pr(undefined),
+    checkPreflightImpl: () => pr({
+      sox: { name: "sox" as const, status: "ok" as const, path: "/usr/bin/sox" },
+      ffmpeg: { name: "ffmpeg" as const, status: "ok" as const, path: "/usr/bin/ffmpeg" },
+      claude: { name: "claude" as const, status: "ok" as const, path: "/usr/local/bin/claude" },
       allOk: true,
     }),
-    calibrateAmbientImpl: async () => ({ noiseFloor: 0.012, sampleCount: 250, durationMs: 5000 }),
-    writeNoiseFloorImpl: async () => {},
+    calibrateAmbientImpl: () => pr({ noiseFloor: 0.012, sampleCount: 250, durationMs: 5000 }),
+    writeNoiseFloorImpl: () => pr(undefined),
     resolveParentEmulatorImpl: () => "iTerm2" as const,
     writeInitMarkerImpl: () => {},
     readInitMarkerImpl: () => null,
-    runSmokeTestImpl: async () => ({ passed: true, elapsedMs: 1200 }),
-    promptText: async () => "some-api-key",
-    promptSelect: async () => "keychain",
-    promptConfirm: async () => true,
+    runSmokeTestImpl: () => pr({ passed: true, elapsedMs: 1200 }),
+    promptText: () => pr("some-api-key"),
+    promptSelect: () => pr("keychain"),
+    promptConfirm: () => pr(true),
     noteImpl: () => {},
     spinnerImpl: () => ({ start: () => {}, stop: () => {} }),
     isCancel,
@@ -69,8 +74,8 @@ describe("runInitWizard", () => {
 
   it("outcome.cancelled === true when the api-key promptText returns the clack cancel symbol", async () => {
     const deps = makeHappyPathDeps({
-      resolveApiKeyImpl: async () => ({ source: "missing", key: null }),
-      promptText: async () => CANCEL_SYMBOL,
+      resolveApiKeyImpl: () => pr({ source: "missing" as const, key: null }),
+      promptText: () => pr(CANCEL_SYMBOL),
     });
 
     const outcome = await runInitWizard(deps);
@@ -83,10 +88,10 @@ describe("runInitWizard", () => {
     const deps = makeHappyPathDeps({
       // Happy path has source=env, so confirm order is:
       // 1: keep-env? yes, 2: run-smoke-test? yes, 3: save-summary? NO
-      promptConfirm: async () => {
+      promptConfirm: () => {
         confirmCallCount++;
-        if (confirmCallCount === 3) return false;
-        return true;
+        if (confirmCallCount === 3) return pr(false);
+        return pr(true);
       },
     });
 
@@ -101,10 +106,10 @@ describe("runInitWizard", () => {
 
     const deps = makeHappyPathDeps({
       // source=env, confirm order: 1: keep-env? yes, 2: run-smoke-test? yes, 3: save-summary? NO
-      promptConfirm: async () => {
+      promptConfirm: () => {
         confirmCallCount++;
-        if (confirmCallCount === 3) return false;
-        return true;
+        if (confirmCallCount === 3) return pr(false);
+        return pr(true);
       },
       writeInitMarkerImpl: (marker) => {
         writeMarkerCalls.push(marker);
@@ -119,12 +124,13 @@ describe("runInitWizard", () => {
     const writeApiKeyCalls: unknown[] = [];
 
     const deps = makeHappyPathDeps({
-      resolveApiKeyImpl: async () => ({ source: "env", key: "xi_envkeytest" }),
-      writeApiKeyImpl: async (...args) => {
+      resolveApiKeyImpl: () => pr({ source: "env" as const, key: "xi_envkeytest" }),
+      writeApiKeyImpl: (...args) => {
         writeApiKeyCalls.push(args);
+        return pr(undefined);
       },
       // User confirms 'keep env key' (first promptConfirm is env-keep confirm)
-      promptConfirm: async () => true,
+      promptConfirm: () => pr(true),
     });
 
     await runInitWizard(deps);
@@ -136,21 +142,21 @@ describe("runInitWizard", () => {
     const invokeCalls: unknown[] = [];
 
     const deps = makeHappyPathDeps({
-      checkPreflightImpl: async () => ({
-        sox: { name: "sox", status: "missing" as const, path: null },
-        ffmpeg: { name: "ffmpeg", status: "ok" as const, path: "/usr/bin/ffmpeg" },
-        claude: { name: "claude", status: "ok" as const, path: "/usr/local/bin/claude" },
+      checkPreflightImpl: () => pr({
+        sox: { name: "sox" as const, status: "missing" as const, path: null },
+        ffmpeg: { name: "ffmpeg" as const, status: "ok" as const, path: "/usr/bin/ffmpeg" },
+        claude: { name: "claude" as const, status: "ok" as const, path: "/usr/local/bin/claude" },
         allOk: false,
       }),
       suggestInstallCommandImpl: (platform, missing) => {
         suggestCalls.push({ platform, missing });
         return { cmd: "brew install sox", canAutoInvoke: true };
       },
-      invokePackageManagerImpl: async (cmd) => {
+      invokePackageManagerImpl: (cmd) => {
         invokeCalls.push(cmd);
-        return { exitCode: 0, stderr: "" };
+        return pr({ exitCode: 0, stderr: "" });
       },
-      promptConfirm: async () => true,
+      promptConfirm: () => pr(true),
     });
 
     await runInitWizard(deps);
@@ -163,10 +169,10 @@ describe("runInitWizard", () => {
     const noteCalls: string[] = [];
 
     const deps = makeHappyPathDeps({
-      checkPreflightImpl: async () => ({
-        sox: { name: "sox", status: "device-failed" as const, path: "/usr/bin/sox", stderr: "EPERM" },
-        ffmpeg: { name: "ffmpeg", status: "ok" as const, path: "/usr/bin/ffmpeg" },
-        claude: { name: "claude", status: "ok" as const, path: "/usr/local/bin/claude" },
+      checkPreflightImpl: () => pr({
+        sox: { name: "sox" as const, status: "device-failed" as const, path: "/usr/bin/sox", stderr: "EPERM" },
+        ffmpeg: { name: "ffmpeg" as const, status: "ok" as const, path: "/usr/bin/ffmpeg" },
+        claude: { name: "claude" as const, status: "ok" as const, path: "/usr/local/bin/claude" },
         allOk: false,
       }),
       resolveParentEmulatorImpl: () => {
@@ -190,10 +196,10 @@ describe("runInitWizard", () => {
     let resolveParentCalled = false;
 
     const deps = makeHappyPathDeps({
-      checkPreflightImpl: async () => ({
-        sox: { name: "sox", status: "device-failed" as const, path: "/usr/bin/sox", stderr: "EPERM" },
-        ffmpeg: { name: "ffmpeg", status: "ok" as const, path: "/usr/bin/ffmpeg" },
-        claude: { name: "claude", status: "ok" as const, path: "/usr/local/bin/claude" },
+      checkPreflightImpl: () => pr({
+        sox: { name: "sox" as const, status: "device-failed" as const, path: "/usr/bin/sox", stderr: "EPERM" },
+        ffmpeg: { name: "ffmpeg" as const, status: "ok" as const, path: "/usr/bin/ffmpeg" },
+        claude: { name: "claude" as const, status: "ok" as const, path: "/usr/local/bin/claude" },
         allOk: false,
       }),
       resolveParentEmulatorImpl: () => {
@@ -211,7 +217,7 @@ describe("runInitWizard", () => {
     const noteCalls: string[] = [];
 
     const deps = makeHappyPathDeps({
-      calibrateAmbientImpl: async () => ({ noiseFloor: 0.012, sampleCount: 250, durationMs: 5000 }),
+      calibrateAmbientImpl: () => pr({ noiseFloor: 0.012, sampleCount: 250, durationMs: 5000 }),
       noteImpl: (msg) => {
         noteCalls.push(msg);
       },
@@ -232,11 +238,11 @@ describe("runInitWizard", () => {
         version: "1.3.0",
         apiKeySource: "keychain" as const,
       }),
-      resolveApiKeyImpl: async () => ({ source: "keychain", key: "xi_existingkeyvalue0000" }),
+      resolveApiKeyImpl: () => pr({ source: "keychain" as const, key: "xi_existingkeyvalue0000" }),
       noteImpl: (msg) => noteCalls.push(msg),
-      promptConfirm: async (msg) => {
+      promptConfirm: (msg) => {
         if (msg) promptConfirmMessages.push(msg);
-        return true;
+        return pr(true);
       },
     });
 

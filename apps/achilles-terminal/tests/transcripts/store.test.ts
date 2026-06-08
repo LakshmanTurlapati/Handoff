@@ -46,10 +46,10 @@ describe("createTranscriptStore", () => {
     const lines = content.split("\n").filter((l) => l.trim().length > 0);
     // At least 3 lines: 2 user entries + 1 session_end system entry
     expect(lines.length).toBeGreaterThanOrEqual(2);
-    const parsed = JSON.parse(lines[0]!);
-    expect(parsed.t).toBe(1000);
-    expect(parsed.type).toBe("user");
-    expect(parsed.text).toBe("hello");
+    const parsed = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(parsed["t"]).toBe(1000);
+    expect(parsed["type"]).toBe("user");
+    expect(parsed["text"]).toBe("hello");
   });
 
   it("apply the xi_-prefix redaction (Plan 02 7th regex) to text", () => {

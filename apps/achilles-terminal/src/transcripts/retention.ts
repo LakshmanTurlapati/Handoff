@@ -62,7 +62,7 @@ export interface RetentionDeps {
  *
  * @public
  */
-export async function cleanupOldTranscripts(
+export function cleanupOldTranscripts(
   days: number = DEFAULT_RETENTION_DAYS,
   deps: RetentionDeps = {},
 ): Promise<{ deletedCount: number; keptCount: number }> {
@@ -75,14 +75,14 @@ export async function cleanupOldTranscripts(
 
   const dir = join(homedirImpl(), ".achilles", "transcripts");
   if (!existsSync(dir)) {
-    return { deletedCount: 0, keptCount: 0 };
+    return Promise.resolve({ deletedCount: 0, keptCount: 0 });
   }
 
   let entries: string[];
   try {
     entries = readdirImpl(dir);
   } catch {
-    return { deletedCount: 0, keptCount: 0 };
+    return Promise.resolve({ deletedCount: 0, keptCount: 0 });
   }
 
   const cutoffMs = nowImpl() - days * 24 * 3600 * 1000;
@@ -112,5 +112,5 @@ export async function cleanupOldTranscripts(
     }
   }
 
-  return { deletedCount, keptCount };
+  return Promise.resolve({ deletedCount, keptCount });
 }

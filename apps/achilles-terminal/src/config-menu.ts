@@ -268,11 +268,12 @@ export async function runConfigMenu(deps: ConfigMenuDeps = {}): Promise<void> {
       return deps.selectImpl;
     }
     const clack = await import("@clack/prompts");
-    return async (options) =>
+    return (options): Promise<string | symbol> =>
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       clack.select({
         message: "Configure Achilles settings:",
         options,
-      }) as Promise<string | symbol>;
+      }) as unknown as Promise<string | symbol>;
   }
 
   async function resolveText(): Promise<(msg: string) => Promise<string | symbol>> {
@@ -280,8 +281,9 @@ export async function runConfigMenu(deps: ConfigMenuDeps = {}): Promise<void> {
       return deps.textImpl;
     }
     const clack = await import("@clack/prompts");
-    return async (msg) =>
-      clack.text({ message: msg }) as Promise<string | symbol>;
+    return (msg): Promise<string | symbol> =>
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+      clack.text({ message: msg }) as unknown as Promise<string | symbol>;
   }
 
   const [selectFn, textFn] = await Promise.all([resolveSelect(), resolveText()]);

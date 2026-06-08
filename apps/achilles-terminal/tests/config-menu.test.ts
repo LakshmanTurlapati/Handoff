@@ -34,7 +34,7 @@ describe("CONFIGURABLE_FIELDS", () => {
   it("CONFIGURABLE_FIELDS validator for voiceThresholdRatio rejects 6 (out of range)", () => {
     const field = CONFIGURABLE_FIELDS.find((f) => f.key === "vad.voiceThresholdRatio");
     expect(field).toBeDefined();
-    const result = field!.validator?.(6);
+    const result = field!.validator(6);
     expect(result).not.toBeNull();
     expect(typeof result).toBe("string");
   });
@@ -42,7 +42,7 @@ describe("CONFIGURABLE_FIELDS", () => {
   it("CONFIGURABLE_FIELDS validator for voiceThresholdRatio accepts 2.5", () => {
     const field = CONFIGURABLE_FIELDS.find((f) => f.key === "vad.voiceThresholdRatio");
     expect(field).toBeDefined();
-    const result = field!.validator?.(2.5);
+    const result = field!.validator(2.5);
     expect(result).toBeNull();
   });
 });
@@ -66,12 +66,12 @@ describe("runConfigMenu", () => {
     let selectCallCount = 0;
     const deps: ConfigMenuDeps = {
       homedirImpl: () => tmpDir,
-      selectImpl: async () => {
+      selectImpl: (): Promise<string | symbol> => {
         selectCallCount++;
-        if (selectCallCount === 1) return "vad.voiceThresholdRatio";
-        return "__save__";
+        if (selectCallCount === 1) return Promise.resolve("vad.voiceThresholdRatio");
+        return Promise.resolve("__save__");
       },
-      textImpl: async () => "2.5",
+      textImpl: (): Promise<string | symbol> => Promise.resolve("2.5"),
     };
 
     await runConfigMenu(deps);
@@ -102,12 +102,12 @@ describe("runConfigMenu", () => {
     let selectCallCount = 0;
     const deps: ConfigMenuDeps = {
       homedirImpl: () => tmpDir,
-      selectImpl: async () => {
+      selectImpl: (): Promise<string | symbol> => {
         selectCallCount++;
-        if (selectCallCount === 1) return "vad.voiceHoldMs";
-        return "__save__";
+        if (selectCallCount === 1) return Promise.resolve("vad.voiceHoldMs");
+        return Promise.resolve("__save__");
       },
-      textImpl: async () => "80",
+      textImpl: (): Promise<string | symbol> => Promise.resolve("80"),
     };
 
     await runConfigMenu(deps);
@@ -123,8 +123,8 @@ describe("runConfigMenu", () => {
 
     const deps: ConfigMenuDeps = {
       homedirImpl: () => tmpDir,
-      selectImpl: async () => "__cancel__",
-      textImpl: async () => "value",
+      selectImpl: (): Promise<string | symbol> => Promise.resolve("__cancel__"),
+      textImpl: (): Promise<string | symbol> => Promise.resolve("value"),
     };
 
     await runConfigMenu(deps);
@@ -145,16 +145,16 @@ describe("runConfigMenu", () => {
     const selectOptions: string[] = [];
     const deps: ConfigMenuDeps = {
       homedirImpl: () => tmpDir,
-      selectImpl: async (opts) => {
+      selectImpl: (opts): Promise<string | symbol> => {
         // Capture the labels to verify they show current values
         if (opts) {
           for (const opt of opts) {
             selectOptions.push(JSON.stringify(opt));
           }
         }
-        return "__cancel__";
+        return Promise.resolve("__cancel__");
       },
-      textImpl: async () => "value",
+      textImpl: (): Promise<string | symbol> => Promise.resolve("value"),
     };
 
     await runConfigMenu(deps);

@@ -122,7 +122,7 @@ describe("transcriptsPurge", () => {
     const deps: TranscriptsCliDeps = {
       homedirImpl: () => tmpDir,
       writeLineImpl: writeLine,
-      selectImpl: async () => "all",
+      selectImpl: () => Promise.resolve("all" as string | symbol),
     };
     await transcriptsPurge(deps);
 
@@ -131,16 +131,16 @@ describe("transcriptsPurge", () => {
   });
 
   it("with select returning '30d' calls cleanupOldTranscripts(30)", async () => {
-    const transcriptsDir = makeTranscriptsDir(tmpDir);
+    makeTranscriptsDir(tmpDir);
     let cleanupDays: number | undefined;
 
     const deps: TranscriptsCliDeps = {
       homedirImpl: () => tmpDir,
       writeLineImpl: writeLine,
-      selectImpl: async () => "30d",
-      cleanupImpl: async (days) => {
+      selectImpl: () => Promise.resolve("30d" as string | symbol),
+      cleanupImpl: (days) => {
         cleanupDays = days;
-        return { deletedCount: 0, keptCount: 0 };
+        return Promise.resolve({ deletedCount: 0, keptCount: 0 });
       },
     };
     await transcriptsPurge(deps);
@@ -156,7 +156,7 @@ describe("transcriptsPurge", () => {
     const deps: TranscriptsCliDeps = {
       homedirImpl: () => tmpDir,
       writeLineImpl: writeLine,
-      selectImpl: async () => "cancel",
+      selectImpl: () => Promise.resolve("cancel" as string | symbol),
     };
     await transcriptsPurge(deps);
 
@@ -176,7 +176,7 @@ describe("transcriptsPurge", () => {
     const deps: TranscriptsCliDeps = {
       homedirImpl: () => tmpDir,
       writeLineImpl: writeLine,
-      selectImpl: async () => cancelSymbol as unknown as string,
+      selectImpl: () => Promise.resolve(cancelSymbol as unknown as string),
       isCancelImpl: (v: unknown) => v === cancelSymbol,
     };
     await transcriptsPurge(deps);

@@ -93,7 +93,7 @@ function extractFirstUserLine(filePath: string): string | undefined {
     try {
       const parsed = JSON.parse(line) as Record<string, unknown>;
       if (parsed["type"] === "user" && typeof parsed["text"] === "string") {
-        const text = parsed["text"] as string;
+        const text = parsed["text"];
         return text.length > 80 ? text.slice(0, 80) : text;
       }
     } catch {
@@ -112,14 +112,14 @@ function extractFirstUserLine(filePath: string): string | undefined {
  *
  * @public
  */
-export async function transcriptsList(
+export function transcriptsList(
   deps: TranscriptsCliDeps = {},
 ): Promise<void> {
   const dir = getTranscriptsDir(deps);
 
   if (!existsSync(dir)) {
     writeLine(deps, "No transcripts on disk.");
-    return;
+    return Promise.resolve();
   }
 
   let entries: string[];
@@ -127,14 +127,14 @@ export async function transcriptsList(
     entries = readdirSync(dir);
   } catch {
     writeLine(deps, "No transcripts on disk.");
-    return;
+    return Promise.resolve();
   }
 
   const jsonlFiles = entries.filter((e) => e.endsWith(".jsonl"));
 
   if (jsonlFiles.length === 0) {
     writeLine(deps, "No transcripts on disk.");
-    return;
+    return Promise.resolve();
   }
 
   for (const filename of jsonlFiles) {
@@ -146,6 +146,7 @@ export async function transcriptsList(
       writeLine(deps, `${filename}: (no user transcripts)`);
     }
   }
+  return Promise.resolve();
 }
 
 /**
@@ -164,7 +165,7 @@ export async function transcriptsPurge(
     selection = await deps.selectImpl();
   } else {
     const clack = await import("@clack/prompts");
-    selection = await clack.select({
+    const clackResult = await clack.select({
       message: "Purge transcripts?",
       options: [
         { value: "all", label: "Delete all" },
@@ -172,7 +173,9 @@ export async function transcriptsPurge(
         { value: "7d", label: "Delete older than 7 days" },
         { value: "cancel", label: "Cancel" },
       ],
-    }) as string | symbol;
+    });
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    selection = clackResult as unknown as string | symbol;
   }
 
   // Check for cancel

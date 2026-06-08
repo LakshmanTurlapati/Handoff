@@ -87,8 +87,9 @@ export function createTypedInputFallback(
       return deps.promptText;
     }
     const clack = await import("@clack/prompts");
-    return (msg: string) =>
-      clack.text({ message: msg }) as Promise<string | symbol>;
+    return (msg: string): Promise<string | symbol> =>
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+      clack.text({ message: msg }) as unknown as Promise<string | symbol>;
   }
 
   async function resolveIsCancel(): Promise<(v: unknown) => boolean> {
@@ -96,7 +97,8 @@ export function createTypedInputFallback(
       return deps.isCancel;
     }
     const clack = await import("@clack/prompts");
-    return clack.isCancel as (v: unknown) => boolean;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    return clack.isCancel as unknown as (v: unknown) => boolean;
   }
 
   async function onPoll(): Promise<void> {

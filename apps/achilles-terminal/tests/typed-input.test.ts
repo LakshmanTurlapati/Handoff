@@ -22,7 +22,7 @@ type CircuitState = "closed" | "open" | "half-open";
 
 function makeBreaker(state: CircuitState): CircuitBreaker {
   return {
-    attempt: async (fn) => fn() as never,
+    attempt: (fn) => Promise.resolve(fn() as never),
     status: (): CircuitStatus => ({
       state,
       consecutiveFailures: 0,
@@ -37,7 +37,7 @@ function makeDynamicBreaker(initialState: CircuitState): {
 } {
   let currentState: CircuitState = initialState;
   const breaker: CircuitBreaker = {
-    attempt: async (fn) => fn() as never,
+    attempt: (fn) => Promise.resolve(fn() as never),
     status: (): CircuitStatus => ({
       state: currentState,
       consecutiveFailures: 0,
@@ -69,11 +69,11 @@ function makeManualDeps(
 
   const deps: TypedInputDeps = {
     pollIntervalMs: 500,
-    setIntervalImpl: (fn, _ms) => {
+    setIntervalImpl: (fn) => {
       pollCallback = fn;
       return 0 as unknown as ReturnType<typeof setInterval>;
     },
-    clearIntervalImpl: (_id) => {
+    clearIntervalImpl: () => {
       cleared = true;
       pollCallback = undefined;
     },
@@ -101,16 +101,16 @@ describe("createTypedInputFallback", () => {
     const promptCalls: string[] = [];
 
     const { deps, fire } = makeManualDeps({
-      promptText: async (msg: string) => {
+      promptText: (msg: string) => {
         promptCalls.push(msg);
-        return "typed text";
+        return Promise.resolve("typed text" as string | symbol);
       },
       isCancel: () => false,
     });
 
     const handle: TypedInputHandle = createTypedInputFallback(
       breaker,
-      async () => {},
+      () => Promise.resolve(),
       deps,
     );
 
@@ -126,16 +126,16 @@ describe("createTypedInputFallback", () => {
     const promptCalls: string[] = [];
 
     const { deps, fire } = makeManualDeps({
-      promptText: async (msg: string) => {
+      promptText: (msg: string) => {
         promptCalls.push(msg);
-        return "typed reply";
+        return Promise.resolve("typed reply" as string | symbol);
       },
       isCancel: () => false,
     });
 
     const handle: TypedInputHandle = createTypedInputFallback(
       breaker,
-      async () => {},
+      () => Promise.resolve(),
       deps,
     );
 
@@ -156,14 +156,15 @@ describe("createTypedInputFallback", () => {
     const typedValues: string[] = [];
 
     const { deps, fire } = makeManualDeps({
-      promptText: async () => "hello world",
+      promptText: () => Promise.resolve("hello world" as string | symbol),
       isCancel: () => false,
     });
 
     const handle: TypedInputHandle = createTypedInputFallback(
       breaker,
-      async (text) => {
+      (text) => {
         typedValues.push(text);
+        return Promise.resolve();
       },
       deps,
     );
@@ -180,14 +181,15 @@ describe("createTypedInputFallback", () => {
     const typedValues: string[] = [];
 
     const { deps, fire } = makeManualDeps({
-      promptText: async () => cancelSymbol,
+      promptText: () => Promise.resolve(cancelSymbol as string | symbol),
       isCancel: (v) => v === cancelSymbol,
     });
 
     const handle: TypedInputHandle = createTypedInputFallback(
       breaker,
-      async (text) => {
+      (text) => {
         typedValues.push(text);
+        return Promise.resolve();
       },
       deps,
     );
@@ -198,21 +200,21 @@ describe("createTypedInputFallback", () => {
     handle.dispose();
   });
 
-  it("dispose() stops the poller", async () => {
+  it("dispose() stops the poller", () => {
     const breaker = makeBreaker("closed");
     let callbackCleared = false;
 
     const deps: TypedInputDeps = {
       pollIntervalMs: 500,
-      promptText: async () => "typed",
+      promptText: () => Promise.resolve("typed" as string | symbol),
       isCancel: () => false,
-      setIntervalImpl: (_fn, _ms) => 0 as unknown as ReturnType<typeof setInterval>,
-      clearIntervalImpl: (_id) => {
+      setIntervalImpl: () => 0 as unknown as ReturnType<typeof setInterval>,
+      clearIntervalImpl: () => {
         callbackCleared = true;
       },
     };
 
-    const handle = createTypedInputFallback(breaker, async () => {}, deps);
+    const handle = createTypedInputFallback(breaker, () => Promise.resolve(), deps);
     expect(callbackCleared).toBe(false);
 
     handle.dispose();
@@ -224,18 +226,16 @@ describe("createTypedInputFallback", () => {
     let promptCallCount = 0;
 
     const { deps, fire } = makeManualDeps({
-      promptText: async () => {
+      promptText: () => {
         promptCallCount++;
-        return "text";
+        return Promise.resolve("text" as string | symbol);
       },
       isCancel: () => false,
     });
 
     const handle = createTypedInputFallback(
       breaker,
-      async () => {
-        // onTyped resolves but breaker stays open
-      },
+      () => Promise.resolve(), // onTyped resolves but breaker stays open
       deps,
     );
 

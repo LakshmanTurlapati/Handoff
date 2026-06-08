@@ -31,13 +31,14 @@ function makeFakeSession(): {
   emit: (type: string, payload?: unknown) => void;
   disposeCallCount: () => number;
 } {
-  const emitter = new EventEmitter();
+  const emitter = new EventEmitter() as EventEmitter & { dispose?: () => void };
   let disposeCount = 0;
 
-  const fakeSession = emitter as unknown as Session;
-  (fakeSession as unknown as { dispose: () => void }).dispose = () => {
+  emitter.dispose = () => {
     disposeCount++;
   };
+
+  const fakeSession = emitter as unknown as Session;
 
   return {
     session: fakeSession,
@@ -55,7 +56,7 @@ describe("runSmokeTest", () => {
   });
 
   it("passes when the injected session emits claude_done(success) AND tts_drained", async () => {
-    const { session, emit, disposeCallCount } = makeFakeSession();
+    const { session, emit } = makeFakeSession();
 
     const deps: SmokeTestDeps = {
       sessionFactoryImpl: () => session,
@@ -82,7 +83,7 @@ describe("runSmokeTest", () => {
     const deps: SmokeTestDeps = {
       sessionFactoryImpl: () => session,
       timeoutMs: 30000,
-      setTimeoutImpl: (fn, ms) => setTimeout(fn, ms) as unknown as ReturnType<typeof setTimeout>,
+      setTimeoutImpl: (fn, ms) => setTimeout(fn, ms),
       clearTimeoutImpl: clearTimeout,
     };
 
@@ -121,7 +122,7 @@ describe("runSmokeTest", () => {
     const deps: SmokeTestDeps = {
       sessionFactoryImpl: () => session,
       timeoutMs: 30000,
-      setTimeoutImpl: (fn, ms) => setTimeout(fn, ms) as unknown as ReturnType<typeof setTimeout>,
+      setTimeoutImpl: (fn, ms) => setTimeout(fn, ms),
       clearTimeoutImpl: clearTimeout,
     };
 
@@ -140,7 +141,7 @@ describe("runSmokeTest", () => {
     const deps: SmokeTestDeps = {
       sessionFactoryImpl: () => session,
       timeoutMs: 10000, // custom: 10 seconds instead of 30
-      setTimeoutImpl: (fn, ms) => setTimeout(fn, ms) as unknown as ReturnType<typeof setTimeout>,
+      setTimeoutImpl: (fn, ms) => setTimeout(fn, ms),
       clearTimeoutImpl: clearTimeout,
     };
 
