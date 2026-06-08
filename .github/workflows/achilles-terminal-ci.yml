@@ -1,0 +1,194 @@
+# achilles-terminal CI workflow.
+#
+# Wired by Phase 15 Plan 04 of milestone v1.3 Terminal-only Achilles.
+# Two jobs:
+#   1. test            - dual-runtime (Bun 1.3.14, Node 22) x cross-OS
+#                        (ubuntu-latest, macos-latest, windows-latest)
+#                        matrix running typecheck + lint + vitest against
+#                        apps/achilles-terminal. Catches runtime drift
+#                        between Bun and Node at the boundary it was
+#                        introduced.
+#   2. compile-binaries - 5 native-OS runners (macos-latest, macos-13,
+#                        ubuntu-latest, ubuntu-22.04-arm, windows-latest)
+#                        each invoking `bun build --compile` and then
+#                        running the produced binary's `--version` as a
+#                        gating smoke test. The smoke step is the third
+#                        layer of the v1.2 silent-launch defence: a
+#                        binary that exits 0 with empty stdout fails the
+#                        grep -E semver check and breaks the build.
+#
+# IMPORTANT INSTALL NOTE (Phase 15 deviation D-15-02):
+#   npm 10.9.3 strictly enforces os/cpu constraints on workspace
+#   packages, not only on registry-fetched optionalDependencies. Plain
+#   `npm ci` at the repo root fails with EBADPLATFORM for the
+#   `@achilles/cli-<platform>-<arch>` siblings on any host whose
+#   platform-arch does not match one of the 5 siblings. The CI install
+#   step therefore uses `npm ci --include=optional --force` so the
+#   siblings are skipped silently rather than aborting the install.
+#   Phase 19 will rewire siblings to real registry-fetched
+#   optionalDependencies; at that point this workaround can drop the
+#   --force flag.
+#
+# REQUIRED GITHUB ACTIONS SECRETS / VARIABLES: none. This workflow runs
+# install + test + compile only; it does not publish, deploy, or call
+# any external service. The GITHUB_TOKEN provided to every workflow run
+# is sufficient and is scoped down to contents: read by the permissions
+# block below.
+
+name: achilles-terminal CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/achilles-terminal/**"
+      - "apps/cli-*/**"
+      - ".github/workflows/achilles-terminal-ci.yml"
+      - "package.json"
+      - "package-lock.json"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/achilles-terminal/**"
+      - "apps/cli-*/**"
+      - ".github/workflows/achilles-terminal-ci.yml"
+      - "package.json"
+      - "package-lock.json"
+
+concurrency:
+  # A later push to the same ref cancels an in-flight run so the most
+  # recent commit on the branch is always the one being validated.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Minimum privilege: install + test + compile only. No repo writes, no
+# image pushes, no comments. Scoping to contents: read prevents a
+# compromised step from abusing GITHUB_TOKEN.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, ${{ matrix.runtime }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        runtime: [bun, node]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Set up Bun 1.3.14
+        if: matrix.runtime == 'bun'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Install workspace dependencies
+        # See D-15-02: --include=optional --force is mandatory; plain
+        # `npm ci` fails with EBADPLATFORM on every matrix entry because
+        # npm 10.9.3 enforces os/cpu on workspace packages.
+        run: npm ci --include=optional --force
+
+      - name: Typecheck apps/achilles-terminal
+        run: npm run typecheck --workspace apps/achilles-terminal
+
+      - name: Lint apps/achilles-terminal
+        run: npm run lint --workspace apps/achilles-terminal -- --max-warnings 0
+
+      - name: Vitest under Node
+        # --pool=forks is mandatory under both Bun and Node per
+        # Phase 15 Pitfall 9 (Bun + vitest thread pool emits
+        # worker_threads warnings that obscure real failures, and the
+        # Node side runs identically for parity).
+        if: matrix.runtime == 'node'
+        run: npm test --workspace apps/achilles-terminal -- --pool=forks
+
+      - name: Vitest under Bun
+        if: matrix.runtime == 'bun'
+        working-directory: apps/achilles-terminal
+        run: bunx vitest run --pool=forks
+
+  compile-binaries:
+    name: compile (${{ matrix.target.name }})
+    runs-on: ${{ matrix.target.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: darwin-arm64
+            runner: macos-latest
+            bunTarget: bun-darwin-arm64
+            out: cli-darwin-arm64/bin/achilles
+          - name: darwin-x64
+            runner: macos-13
+            bunTarget: bun-darwin-x64
+            out: cli-darwin-x64/bin/achilles
+          - name: linux-x64
+            runner: ubuntu-latest
+            bunTarget: bun-linux-x64
+            out: cli-linux-x64/bin/achilles
+          - name: linux-arm64
+            runner: ubuntu-22.04-arm
+            bunTarget: bun-linux-arm64
+            out: cli-linux-arm64/bin/achilles
+          - name: win32-x64
+            runner: windows-latest
+            bunTarget: bun-windows-x64
+            out: cli-win32-x64/bin/achilles.exe
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun 1.3.14
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install workspace dependencies
+        # See D-15-02: --include=optional --force is mandatory.
+        run: npm ci --include=optional --force
+
+      - name: Compile binary
+        working-directory: apps/achilles-terminal
+        run: |
+          mkdir -p ../$(dirname '${{ matrix.target.out }}')
+          bun build src/cli.ts --compile --target=${{ matrix.target.bunTarget }} --outfile=../${{ matrix.target.out }} --minify
+
+      - name: Smoke test - achilles --version
+        # GATING smoke per Phase 15 CONTEXT.md item 7 (silent-launch
+        # defence). The step (a) confirms the file exists, (b) executes
+        # it with --version, (c) asserts non-zero exit fails the step
+        # via `set -e` semantics, (d) asserts stdout matches semver via
+        # grep -E. A v1.2-shape silent launch (binary exits 0 with empty
+        # stdout) fails the grep check.
+        #
+        # shell: bash works on all GitHub-hosted Windows runners via Git
+        # Bash; using a single shell across the matrix keeps the script
+        # portable.
+        working-directory: apps/achilles-terminal
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN_PATH="../${{ matrix.target.out }}"
+          if [ ! -f "$BIN_PATH" ]; then
+            echo "[ci] FAIL: compiled binary missing at $BIN_PATH" >&2
+            exit 1
+          fi
+          OUTPUT=$("$BIN_PATH" --version)
+          echo "[ci] version output: ${OUTPUT}"
+          echo "${OUTPUT}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+'
