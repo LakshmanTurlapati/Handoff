@@ -10,7 +10,12 @@ export default tseslint.config(
   // Loose JS/MJS config + scripts get untyped recommended only — they are not in
   // the typecheck project graph.
   {
-    files: ["src/**/*.ts", "tests/**/*.ts"],
+    files: [
+      "src/**/*.ts",
+      "src/**/*.tsx",
+      "tests/**/*.ts",
+      "tests/**/*.tsx",
+    ],
     extends: tseslint.configs.recommendedTypeChecked,
     languageOptions: {
       parserOptions: {
