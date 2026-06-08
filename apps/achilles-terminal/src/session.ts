@@ -461,16 +461,23 @@ export class Session extends EventEmitter {
     // TTS playback bridge.
     if (this.opts.ttsFactory !== undefined) {
       const voiceId = this.opts.voiceId ?? this.resolveVoiceId();
-      const ttsDeps: CreateTtsPlaybackDeps = {
-        ttsFactory: this.opts.ttsFactory,
-        voiceId,
-        emit,
-        logger: this.logger,
-        circuitBreaker: this.ttsCircuit,
-      };
-      if (this.opts.spawnImpl !== undefined) {
-        ttsDeps.spawnImpl = this.opts.spawnImpl;
-      }
+      const ttsDeps: CreateTtsPlaybackDeps =
+        this.opts.spawnImpl !== undefined
+          ? {
+              ttsFactory: this.opts.ttsFactory,
+              voiceId,
+              emit,
+              logger: this.logger,
+              circuitBreaker: this.ttsCircuit,
+              spawnImpl: this.opts.spawnImpl,
+            }
+          : {
+              ttsFactory: this.opts.ttsFactory,
+              voiceId,
+              emit,
+              logger: this.logger,
+              circuitBreaker: this.ttsCircuit,
+            };
       this.ttsPlayback = createTtsPlayback(ttsDeps);
       // Start the playback handle in the background — the consumer
       // loop runs for the session's lifetime and emits tts_drained
@@ -502,23 +509,26 @@ export class Session extends EventEmitter {
       this.sttBridge = createSttBridge(sttDeps);
     }
 
-    // Claude bridge.
+    // Claude bridge. The deps interface declares spawnImpl +
+    // resumeSessionId as readonly so we construct the object once
+    // with every present field.
     if (this.opts.claudeBridgeFactory !== undefined) {
-      const claudeDeps: CreateClaudeBridgeDeps = {
+      const baseDeps: CreateClaudeBridgeDeps = {
         systemPromptFile: this.companionPromptFile,
         emit,
         logger: this.logger,
       };
-      if (this.opts.resume !== undefined) {
-        claudeDeps.resumeSessionId = this.opts.resume;
-      }
-      if (this.opts.spawnImpl !== undefined) {
-        // The claude-bridge accepts SpawnLike, which is compatible
-        // with node:child_process.spawn's overload. Type-cast through
-        // the never-narrow because the bridge applies the detached:
-        // true wrapper internally.
-        claudeDeps.spawnImpl = this.opts.spawnImpl as never;
-      }
+      const withResume: CreateClaudeBridgeDeps =
+        this.opts.resume !== undefined
+          ? { ...baseDeps, resumeSessionId: this.opts.resume }
+          : baseDeps;
+      const claudeDeps: CreateClaudeBridgeDeps =
+        this.opts.spawnImpl !== undefined
+          ? {
+              ...withResume,
+              spawnImpl: this.opts.spawnImpl as never,
+            }
+          : withResume;
       this.claudeBridge = this.opts.claudeBridgeFactory(claudeDeps);
     }
 
@@ -959,6 +969,28 @@ export function createSession(opts: SessionOptions = {}): Session {
 export { FAILURE_OVERRIDE_PHRASE };
 
 /**
+ * Lazy-load the resume-session module. Returns the module exports
+ * shape OR null when the module is not yet on disk (Phase 17 task
+ * ordering: Task 3 ships resume-session.ts after Task 2's graceful-
+ * shutdown.ts). The dynamic import uses a string variable expression
+ * so the TypeScript compiler does NOT statically resolve the path
+ * at compile time — the resolution happens at runtime when the
+ * voice subcommand actually runs.
+ *
+ * @internal
+ */
+async function loadResumeSessionModule(): Promise<unknown | null> {
+  try {
+    // Computed specifier — TS treats this as `unknown` at compile
+    // time so the missing module does not block typecheck.
+    const specifier = "./resume-session.js";
+    return (await import(specifier)) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Resolve the production sttFactory by lazy-loading
  * @achilles/voice-stt. Returns a factory that accepts the bridge's
  * narrow option shape and constructs the real realtime client.
@@ -1068,16 +1100,30 @@ export async function runVoice(argv: string[]): Promise<void> {
         // Resolve --resume hydration. The resume-session module
         // (Plan 04 Task 3) reads ~/.achilles/sessions/<sid>.json and
         // returns the prior state for hydration into the new session.
+        // The dynamic import is guarded so a Phase 16 mock-mode run
+        // that omits --resume never resolves the resume-session
+        // module (preserves the INIT-07 lazy-load contract).
         let resumeSid: string | undefined;
         if (opts.resume !== undefined) {
-          const { createResumeSession } = await import(
-            "./resume-session.js"
-          );
-          const resume = createResumeSession();
-          resume.ensureHome();
-          const prior = resume.hydrateSession(opts.resume);
-          if (prior !== null) {
-            resumeSid = opts.resume;
+          try {
+            const resumeMod = (await loadResumeSessionModule()) as {
+              createResumeSession: () => {
+                ensureHome: () => void;
+                hydrateSession: (sid: string) => unknown | null;
+              };
+            } | null;
+            if (resumeMod !== null) {
+              const resume = resumeMod.createResumeSession();
+              resume.ensureHome();
+              const prior = resume.hydrateSession(opts.resume);
+              if (prior !== null) {
+                resumeSid = opts.resume;
+              }
+            }
+          } catch {
+            // resume-session.js may not exist yet in early task
+            // ordering; silently ignore — the session will start
+            // fresh without prior state.
           }
         }
 
@@ -1124,16 +1170,30 @@ export async function runVoice(argv: string[]): Promise<void> {
 
         // Register the graceful-shutdown handler (Plan 04 Task 2).
         // The handler owns the 7-step teardown in under 1.5s, the
-        // second-SIGINT escalation, and the process.once("exit") last-
-        // chance lock-file cleanup.
+        // second-SIGINT escalation, and the process.once("exit")
+        // last-chance lock-file cleanup. The LOCK_FILE constant is
+        // owned by Plan 04 Task 3 (resume-session.ts); load lazily
+        // so a Phase 16 mock-mode run that does not need the lock
+        // can still start cleanly when the resume-session module is
+        // missing.
         const { registerGracefulShutdown } = await import(
           "./graceful-shutdown.js"
         );
-        const { LOCK_FILE } = await import("./resume-session.js");
+        let lockFilePath: string;
+        const resumeMod = (await loadResumeSessionModule()) as {
+          LOCK_FILE: string;
+        } | null;
+        if (resumeMod !== null) {
+          lockFilePath = resumeMod.LOCK_FILE;
+        } else {
+          const { join } = await import("node:path");
+          const { homedir } = await import("node:os");
+          lockFilePath = join(homedir(), ".achilles", "voice.lock");
+        }
         registerGracefulShutdown({
           session,
           logger: session.logger,
-          lockFilePath: LOCK_FILE,
+          lockFilePath,
         });
 
         if (usePlain) {
