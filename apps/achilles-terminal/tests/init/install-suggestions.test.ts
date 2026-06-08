@@ -9,19 +9,26 @@
 import { describe, it, expect, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
+import type { SpawnOptions } from "node:child_process";
 import {
   suggestInstallCommand,
   invokePackageManager,
   type InvokeDeps,
 } from "../../src/init/install-suggestions.js";
 
+type SpawnImplFn = (
+  cmd: string,
+  args: string[],
+  opts: SpawnOptions,
+) => ChildProcess;
+
 /** Build a fake ChildProcess that exits with exitCode after processing. */
 function makeFakeInvokeProc(exitCode: number, stderrData: string): ChildProcess {
   const ee = new EventEmitter() as unknown as ChildProcess;
   const stderrEe = new EventEmitter();
-  (ee as unknown as Record<string, unknown>).stderr = stderrEe;
-  (ee as unknown as Record<string, unknown>).stdout = null;
-  (ee as unknown as Record<string, unknown>).stdin = null;
+  (ee as unknown as Record<string, unknown>)["stderr"] = stderrEe;
+  (ee as unknown as Record<string, unknown>)["stdout"] = null;
+  (ee as unknown as Record<string, unknown>)["stdin"] = null;
   process.nextTick(() => {
     stderrEe.emit("data", Buffer.from(stderrData));
     (ee as unknown as EventEmitter).emit("exit", exitCode, null);
@@ -78,11 +85,9 @@ describe("suggestInstallCommand — claude missing", () => {
 
 describe("invokePackageManager — spawns and resolves", () => {
   it("spawns the supplied command via the injected spawnImpl seam and resolves with { exitCode, stderr }", async () => {
-    const spawnSpy = vi.fn((_cmd: string, _args: string[]) =>
-      makeFakeInvokeProc(0, ""),
-    );
+    const spawnSpy = vi.fn<SpawnImplFn>(() => makeFakeInvokeProc(0, ""));
     const deps: InvokeDeps = {
-      spawnImpl: spawnSpy as unknown as InvokeDeps["spawnImpl"],
+      spawnImpl: spawnSpy,
     };
     const result = await invokePackageManager("brew install sox", deps);
     expect(result.exitCode).toBe(0);

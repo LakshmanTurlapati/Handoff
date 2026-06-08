@@ -8,12 +8,19 @@
  * No emojis (CLAUDE.md global).
  */
 import { describe, it, expect, vi } from "vitest";
+import type { SpawnOptions } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
   checkPreflight,
   type PreflightDeps,
 } from "../../src/init/preflight.js";
+
+type SpawnImplFn = (
+  cmd: string,
+  args: string[],
+  opts: SpawnOptions,
+) => ChildProcess;
 
 /**
  * Build a fake ChildProcess-like EventEmitter that exits with a given code
@@ -26,9 +33,9 @@ function makeFakeProc(
 ): ChildProcess {
   const ee = new EventEmitter() as unknown as ChildProcess;
   const stderrEe = new EventEmitter();
-  (ee as unknown as Record<string, unknown>).stderr = stderrEe;
-  (ee as unknown as Record<string, unknown>).stdout = null;
-  (ee as unknown as Record<string, unknown>).kill = vi.fn();
+  (ee as unknown as Record<string, unknown>)["stderr"] = stderrEe;
+  (ee as unknown as Record<string, unknown>)["stdout"] = null;
+  (ee as unknown as Record<string, unknown>)["kill"] = vi.fn();
 
   if (delayMs > 0) {
     setTimeout(() => {
@@ -47,20 +54,27 @@ function makeFakeProc(
 }
 
 /**
- * Build a fake that never exits (for timeout tests).
+ * Build a fake that never exits (for timeout tests). When kill() is called
+ * (from the SIGTERM timeout path), emit an exit with null code.
  */
 function makeHangingProc(): ChildProcess {
   const ee = new EventEmitter() as unknown as ChildProcess;
   const stderrEe = new EventEmitter();
-  (ee as unknown as Record<string, unknown>).stderr = stderrEe;
-  (ee as unknown as Record<string, unknown>).stdout = null;
-  (ee as unknown as Record<string, unknown>).kill = vi.fn(() => {
-    // When kill is called (SIGTERM from timeout), emit exit.
+  (ee as unknown as Record<string, unknown>)["stderr"] = stderrEe;
+  (ee as unknown as Record<string, unknown>)["stdout"] = null;
+  (ee as unknown as Record<string, unknown>)["kill"] = vi.fn(() => {
     process.nextTick(() => {
       (ee as unknown as EventEmitter).emit("exit", null, "SIGTERM");
     });
   });
   return ee;
+}
+
+/**
+ * A spawnImpl that always returns exit-0 procs (for the "allOk" deps).
+ */
+function makeOkSpawn(): SpawnImplFn {
+  return vi.fn<SpawnImplFn>(() => makeFakeProc(0, "", 0));
 }
 
 /** Build basic deps where all three binaries are found + smoke exits 0. */
@@ -75,9 +89,35 @@ function makeAllOkDeps(): PreflightDeps {
       if (cmd.includes("where.exe claude")) return "C:\\claude.exe\n";
       return "";
     },
-    spawnImpl: (_cmd, _args, _opts) => makeFakeProc(0, "", 0),
+    spawnImpl: makeOkSpawn(),
     timeoutMs: 3000,
   };
+}
+
+/**
+ * Helper: a spawnImpl that fails the sox/rec command and succeeds for others.
+ * On POSIX, sox smoke uses "rec"; on win32 it would be "sox.exe".
+ */
+function makeSoxFailSpawn(
+  exitCode: number,
+  stderrMsg: string,
+): SpawnImplFn {
+  return vi.fn<SpawnImplFn>((cmd) => {
+    if (cmd === "rec" || cmd.includes("sox")) {
+      return makeFakeProc(exitCode, stderrMsg);
+    }
+    return makeFakeProc(0, "");
+  });
+}
+
+/**
+ * Helper: a spawnImpl that hangs the sox/rec command and succeeds for others.
+ */
+function makeSoxHangSpawn(hangingProc: ChildProcess): SpawnImplFn {
+  return vi.fn<SpawnImplFn>((cmd) => {
+    if (cmd === "rec" || cmd.includes("sox")) return hangingProc;
+    return makeFakeProc(0, "");
+  });
 }
 
 describe("checkPreflight — sox ok", () => {
@@ -112,12 +152,7 @@ describe("checkPreflight — sox device-failed (non-zero exit)", () => {
   it("returns sox.status='device-failed' with stderr when device-open smoke exits non-zero", async () => {
     const deps: PreflightDeps = {
       ...makeAllOkDeps(),
-      spawnImpl: (cmd, _args, _opts) => {
-        if (typeof cmd === "string" && cmd.includes("sox")) {
-          return makeFakeProc(1, "rec FAIL formats: can't open input");
-        }
-        return makeFakeProc(0, "");
-      },
+      spawnImpl: makeSoxFailSpawn(1, "rec FAIL formats: can't open input"),
     };
     const result = await checkPreflight(deps);
     expect(result.sox.status).toBe("device-failed");
@@ -131,12 +166,7 @@ describe("checkPreflight — sox device-failed (timeout)", () => {
     const hangingProc = makeHangingProc();
     const deps: PreflightDeps = {
       ...makeAllOkDeps(),
-      spawnImpl: (cmd, _args, _opts) => {
-        if (typeof cmd === "string" && (cmd.includes("rec") || cmd.includes("sox"))) {
-          return hangingProc;
-        }
-        return makeFakeProc(0, "");
-      },
+      spawnImpl: makeSoxHangSpawn(hangingProc),
       timeoutMs: 50, // Very short for testing
     };
     const result = await checkPreflight(deps);
@@ -178,12 +208,7 @@ describe("checkPreflight — EPERM stderr captured", () => {
       "rec FAIL formats: can't open input `default': Permission denied";
     const deps: PreflightDeps = {
       ...makeAllOkDeps(),
-      spawnImpl: (cmd, _args, _opts) => {
-        if (typeof cmd === "string" && (cmd.includes("rec") || cmd.includes("sox"))) {
-          return makeFakeProc(1, epermMsg);
-        }
-        return makeFakeProc(0, "");
-      },
+      spawnImpl: makeSoxFailSpawn(1, epermMsg),
     };
     const result = await checkPreflight(deps);
     expect(result.sox.status).toBe("device-failed");
