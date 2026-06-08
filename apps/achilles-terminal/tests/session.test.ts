@@ -78,7 +78,7 @@ function makeStubVad(): VadHandle & {
       warmupRemaining: 25,
     })),
   };
-  return stub as unknown as VadHandle & typeof stub;
+  return stub;
 }
 
 describe("Session composition root (Phase 16 Plan 04 Task 1)", () => {

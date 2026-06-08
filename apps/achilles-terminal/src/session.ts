@@ -21,8 +21,9 @@
  * them) so the factory-injection shape is ready without a constructor
  * refactor at Phase 17 time.
  *
- * Per RESEARCH.md A3 (CRITICAL) — runVoice() does NOT pass
- * `{ exitOnCtrlC: false }` to render(). Ink's default true is preserved.
+ * Per RESEARCH.md A3 (CRITICAL) — runVoice() does NOT override Ink's
+ * default Ctrl-C handler when calling render(); the default true is
+ * preserved so Phase 17's gracefulShutdown chain can wrap it.
  *
  * Pattern source: 16-RESEARCH.md §"Pattern 1" lines 305-322 (composition
  * root EventEmitter), §"TTY detection precedence" lines 854-893 (--plain /
@@ -400,9 +401,10 @@ export async function runVoice(argv: string[]): Promise<void> {
           return;
         }
 
-        // TTY mode: mount Ink. CRITICAL — do NOT pass `{ exitOnCtrlC: false }`
-        // to render(). Ink's default true is what we want; Phase 17 will wrap
-        // Ink's default handler in the gracefulShutdown chain.
+        // TTY mode: mount Ink. CRITICAL — do NOT override Ink's default
+        // Ctrl-C handler when calling render(). The default true is what we
+        // want; Phase 17 will wrap Ink's default handler in the
+        // gracefulShutdown chain.
         const { render } = await import("ink");
         const { VoiceShell } = await import("./ui/VoiceShell.js");
         const { jsx } = await import("react/jsx-runtime");

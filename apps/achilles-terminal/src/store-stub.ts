@@ -39,6 +39,6 @@ export interface AchillesSettings {
  */
 export function loadSettings(): AchillesSettings {
   return {
-    vad: structuredClone(DEFAULT_VAD_CONFIG) as VadConfig,
+    vad: structuredClone(DEFAULT_VAD_CONFIG),
   };
 }
