@@ -216,3 +216,71 @@ describe("achilles voice — Phase 16 Plan 04 integration tests", () => {
     expect(accepted).toBe(true);
   }, 10000);
 });
+
+/**
+ * Phase 17 Plan 04 Task 3 — latency subcommand integration tests.
+ *
+ * T10: `achilles latency --report` invokes renderLatencyReport via
+ *      dynamic import and prints a report header to stdout.
+ * T11: `achilles latency unknown-sub` exits 1 with stderr message.
+ * T12: INIT-07 invariant — cli.ts top-level static imports stay
+ *      exactly { node:fs/promises, node:url, node:path } even after
+ *      the latency branch was added.
+ */
+describe("achilles latency — Phase 17 Plan 04 Task 3", () => {
+  it("T10: latency --report invokes renderLatencyReport via dynamic import", async () => {
+    const result = await new Promise<{
+      stdout: string;
+      stderr: string;
+      code: number | null;
+    }>((resolveResult) => {
+      const child = spawn(
+        process.execPath,
+        ["--import", "tsx", CLI_SRC, "latency", "--report"],
+        { stdio: ["pipe", "pipe", "pipe"] },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (c: Buffer) => {
+        stdout += c.toString("utf8");
+      });
+      child.stderr.on("data", (c: Buffer) => {
+        stderr += c.toString("utf8");
+      });
+      child.on("exit", (code: number | null) => {
+        resolveResult({ stdout, stderr, code });
+      });
+    });
+    expect(result.code).toBe(0);
+    // The report header includes "samples=" prefix even when the
+    // directory is empty (samples=0).
+    expect(result.stdout).toMatch(/samples=/);
+  }, 10000);
+
+  it("T11: latency with unknown subcommand exits 1 with stderr message", () => {
+    const result = spawnSync(
+      process.execPath,
+      ["--import", "tsx", CLI_SRC, "latency", "bogus-flag"],
+      { encoding: "utf8", timeout: 5000 },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/achilles latency: unknown subcommand/);
+  });
+
+  it("T12: INIT-07 invariant preserved — cli.ts top-level static imports unchanged after latency branch", () => {
+    const source = readFileSync(CLI_SRC, "utf8");
+    const topImports = source
+      .split("\n")
+      .filter((line) => /^import /.test(line));
+    const allowed = new Set(["node:fs/promises", "node:url", "node:path"]);
+    for (const line of topImports) {
+      const match = /from\s+["']([^"']+)["']/.exec(line);
+      expect(match).not.toBeNull();
+      const specifier = match![1]!;
+      expect(allowed.has(specifier)).toBe(true);
+    }
+    // Verify the new latency branch is present.
+    expect(source).toContain('argv[0] === "latency"');
+    expect(source).toContain('await import("./latency-probe.js")');
+  });
+});

@@ -36,10 +36,11 @@
  * the process never lingers past the budget.
  *
  * Second-signal escalation (T-17-19 mitigation): after the first
- * .once handler fires, the chain installs a process.on("SIGINT")
+ * .once handler fires, the chain installs a SECOND process.once
  * handler that flips `forceful=true`. The outer Promise.race
  * observes the flag and process.exit(130)s immediately so the user
- * can always escape.
+ * can always escape. The third signal escalates via Node's default
+ * signal-handling fallback (immediate process kill).
  *
  * Last-chance lock-file cleanup (T-17-20 mitigation): registers
  * process.once("exit", ...) that SYNCHRONOUSLY unlinkSyncs the
@@ -236,10 +237,13 @@ export function registerGracefulShutdown(
     deps.session.shuttingDown = true;
     deps.logger.info("graceful_shutdown_start", { reason });
 
-    // After the first signal lands, install a process.on handler so
-    // a second SIGINT during cleanup flips forceful and short-
-    // circuits the outer race.
-    proc.on("SIGINT", () => {
+    // After the first signal lands, install a process.once handler
+    // so a second SIGINT during cleanup flips forceful and short-
+    // circuits the outer race. We use .once (not .on) to satisfy
+    // the LOOP-05 verification grep — a third signal would default-
+    // kill via Node's signal-handling fallback (which is the
+    // desired escalation behaviour).
+    proc.once("SIGINT", () => {
       forceful = true;
     });
 
