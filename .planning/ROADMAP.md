@@ -37,8 +37,8 @@
   4. Dual-runtime CI matrix (every test under both `bun test` and `vitest` on Node 22) is green for the seed test suite ported from v1.2; ESLint rule scaffolding in place so Phase 17/19 can wire the `stdio:"ignore"` forbid rule (GATE-04 dual-runtime half)
   5. Cold-start latency probe demonstrates <50ms first TUI render on supported native-binary platforms and <200ms on the JS fallback path (DIST-05 baseline measurement, sets the regression budget every later phase must respect)
 **Plans**: 4 plans
-  - [ ] 15-01-PLAN.md — Workspace skeleton: parent package.json, tsconfig, vitest/eslint configs, src/cli.ts with --version, INIT-07 seed test (DIST-01, INIT-07, GATE-04 lint half)
-  - [ ] 15-02-PLAN.md — 5 platform-binary sibling packages (apps/cli-<plat>-<arch>/ with package.json + README + .gitignore) (DIST-02 siblings)
+  - [x] 15-01-PLAN.md — Workspace skeleton: parent package.json, tsconfig, vitest/eslint configs, src/cli.ts with --version, INIT-07 seed test (DIST-01, INIT-07, GATE-04 lint half)
+  - [x] 15-02-PLAN.md — 5 platform-binary sibling packages (apps/cli-<plat>-<arch>/ with package.json + README + .gitignore) (DIST-02 siblings)
   - [ ] 15-03-PLAN.md — 30-line bin shim, build-binaries.mjs + build-node-bundle.mjs scripts, DIST-02 shim vitest assertion (DIST-02 shim + build)
   - [ ] 15-04-PLAN.md — Dual-runtime CI workflow (test matrix + compile-binaries matrix) + manual hyperfine latency capture procedure (GATE-04 CI half, DIST-05)
 
@@ -124,7 +124,7 @@ Phase 19's deletion of `apps/achilles` + `apps/achilles-cli/src/commands/launch.
 | 12. End-to-End Integration & System Prompt | v1.2 | 4/4 | Complete | 2026-06-06 |
 | 13. Distribution — npm CLI + Skill + Installers | v1.2 | 4/4 | Complete | 2026-06-07 |
 | 14. Hardening, Privacy, Resilience | v1.2 | 4/4 | Complete | 2026-06-07 |
-| 15. Workspace Scaffold + Bun Build Pipeline | v1.3 | 0/4 | Planned | - |
+| 15. Workspace Scaffold + Bun Build Pipeline | v1.3 | 2/4 | In Progress|  |
 | 16. TUI Shell + State Machine + sox + VAD | v1.3 | 0/TBD | Not started | - |
 | 17. End-to-end Voice Loop + gracefulShutdown | v1.3 | 0/TBD | Not started | - |
 | 18. Init Wizard + Config + Transcripts | v1.3 | 0/TBD | Not started | - |
