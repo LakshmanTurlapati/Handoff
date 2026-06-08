@@ -72,6 +72,26 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Phase 17, Plan 04, Task 3: `latency` subcommand dynamic-import
+  // gate. The renderLatencyReport reader lives in latency-probe.js;
+  // INIT-07 invariant preserved — the static top-level imports
+  // continue to be exactly { node:fs/promises, node:url, node:path }
+  // (this branch uses ONLY dynamic imports).
+  if (argv[0] === "latency") {
+    const sub = argv[1];
+    if (sub === "--report" || sub === "report") {
+      const { renderLatencyReport } = await import("./latency-probe.js");
+      const report = await renderLatencyReport();
+      process.stdout.write(report, () => process.exit(0));
+      return;
+    }
+    process.stderr.write(
+      "achilles latency: unknown subcommand. Try --report.\n",
+    );
+    process.exit(1);
+    return;
+  }
+
   // Phase 16: `voice` subcommand dynamic-import gate. The runVoice
   // function in session.ts owns commander parsing, isTTY routing,
   // Ink mount or plain-text fallback, and the minimum SIGINT handler.
