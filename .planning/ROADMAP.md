@@ -70,7 +70,7 @@
   4. Ctrl-C in the user's terminal cancels in <1.5s: SIGINT routes through existing `claude-code-bridge` cancellation chain (SIGINT → SIGTERM → SIGKILL with 300ms tail) + `voice-tts.close()` + ffplay child kill via `stdin.end()` + 200ms SIGTERM; `gracefulShutdown(reason)` registered via `process.once` (not `on`) so second SIGINT escalates rather than re-triggers; `claude` child detached into its own process group via `posix_spawn(detached:true)` so Bash-tool SIGTERM from Claude Code does not propagate (LOOP-05, LOOP-07)
   5. STT + TTS WSS connects guarded by circuit breaker (threshold + cooldown + full-jitter backoff, ported from v1.2 SAFE-05); ElevenLabs 429 produces "ElevenLabs rate limit — retrying in Ns" via existing `classifyHttpError` (ERR-02); stuck-thinking watchdog surfaces "Claude has been thinking for 60s — Ctrl-C to cancel" if `claude -p` emits no stream-json line for 60s (ERR-05); suspend/resume + device hot-swap recovery via sox/ffplay child-exit-code polling with bounded respawn (3-in-10s cap) resets state machine to idle without process restart (ERR-06); `achilles voice --resume <sid>` resumes a prior session with lock-file semantics respected (LOOP-06)
 **Plans**: 5 plans
-  - [ ] 17-01-PLAN.md — Wave 1 foundation: workspace deps + session-events discriminated union + structured-logger + circuit-breaker port + companion.md SHA-256 source-of-truth (LOOP-02, ERR-02)
+  - [x] 17-01-PLAN.md — Wave 1 foundation: workspace deps + session-events discriminated union + structured-logger + circuit-breaker port + companion.md SHA-256 source-of-truth (LOOP-02, ERR-02)
   - [ ] 17-02-PLAN.md — Wave 2 audio bridges: tts-playback (ffplay) + stt-bridge + stuck-thinking-watchdog + child-exit-watchdog (PLAY-01, PLAY-02, LOOP-01, ERR-05, ERR-06)
   - [ ] 17-03-PLAN.md — Wave 2 claude orchestration: claude-bridge wrapper with detached:true + sandwich-defence port + pre-TTS normalisation port (LOOP-01, LOOP-03, LOOP-04, LOOP-07)
   - [ ] 17-04-PLAN.md — Wave 3 composition root: session.ts port + graceful-shutdown + resume-session + latency-probe + cli.ts flag extensions (LOOP-01, LOOP-05, LOOP-06)
@@ -135,7 +135,7 @@ Phase 19's deletion of `apps/achilles` + `apps/achilles-cli/src/commands/launch.
 | 14. Hardening, Privacy, Resilience | v1.2 | 4/4 | Complete | 2026-06-07 |
 | 15. Workspace Scaffold + Bun Build Pipeline | v1.3 | 4/4 | Complete   | 2026-06-08 |
 | 16. TUI Shell + State Machine + sox + VAD | v1.3 | 4/4 | Complete   | 2026-06-08 |
-| 17. End-to-end Voice Loop + gracefulShutdown | v1.3 | 0/5 | Not started | - |
+| 17. End-to-end Voice Loop + gracefulShutdown | v1.3 | 1/5 | In Progress|  |
 | 18. Init Wizard + Config + Transcripts | v1.3 | 0/TBD | Not started | - |
 | 19. Distribution + Publishing + Gatekeeper | v1.3 | 0/TBD | Not started | - |
 | 20. Hardening + Ship Gate (RBS Asciicasts) | v1.3 | 0/TBD | Not started | - |
