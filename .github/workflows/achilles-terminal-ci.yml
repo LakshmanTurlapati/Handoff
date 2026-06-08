@@ -117,6 +117,119 @@ jobs:
         working-directory: apps/achilles-terminal
         run: bunx vitest run --pool=forks
 
+      - name: Vitest MOCK_LOOP=1 integration (Node)
+        # Phase 17 Plan 05 — upstream CI smoke gate against the
+        # v1.2 silent-launch shape. Runs the in-process end-to-end
+        # integration test that drives Plan 04's Session composition
+        # root with all four DI factories swapped for mocks. A
+        # failure here blocks the merge before the binary path
+        # could regress.
+        if: matrix.runtime == 'node'
+        working-directory: apps/achilles-terminal
+        env:
+          MOCK_LOOP: "1"
+        run: npx vitest run --pool=forks tests/integration/
+
+      - name: Vitest MOCK_LOOP=1 integration (Bun)
+        # Bun-runtime parity for the MOCK_LOOP=1 step. Same test
+        # contract — the test must pass identically under both
+        # runtimes so a Bun-only divergence is caught at the matrix
+        # layer.
+        if: matrix.runtime == 'bun'
+        working-directory: apps/achilles-terminal
+        env:
+          MOCK_LOOP: "1"
+        run: bunx vitest run --pool=forks tests/integration/
+
+  loop-02-invariant:
+    # Phase 17 Plan 05 — structural defence of the LOOP-02 invariant.
+    # The job runs once per pull_request / push event (no matrix)
+    # because the invariant is OS- and runtime-agnostic — a single
+    # ubuntu-latest runner is sufficient.
+    #
+    # Two checks:
+    #
+    #   1. git diff against the five protected paths
+    #      (packages/voice-protocol, packages/voice-stt,
+    #      packages/voice-tts, packages/claude-code-bridge,
+    #      packages/achilles-skill/skill/prompts/companion.md). Any
+    #      output fails the build with a clear stderr line listing
+    #      the offending files.
+    #
+    #   2. companion.md SHA-256 source-of-truth check — invokes
+    #      apps/achilles-terminal/scripts/check-source-of-truth.mjs
+    #      which compares the source-of-truth file's SHA-256 against
+    #      the SOURCE_OF_TRUTH_HASH const embedded inside
+    #      apps/achilles-terminal/src/audio/companion-md.ts.
+    #
+    # The job runs in parallel with `jobs.test` so the merge gate
+    # fires fast.
+    name: LOOP-02 invariant
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository with full history
+        # fetch-depth: 0 is required so the git diff below can
+        # resolve the merge-base SHA from pull_request events.
+        # Shallow clones (the default depth: 1) would refuse the
+        # base..head ref.
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js 22
+        # Required for the check-source-of-truth.mjs step below.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install workspace dependencies
+        # The source-of-truth script imports companionPromptPath
+        # from @achilles/achilles-skill, which lives in the workspace
+        # graph. The standard D-15-02 install command applies.
+        run: npm ci --include=optional --force
+
+      - name: Assert no diff under LOOP-02 protected paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The LOOP-02 invariant: Phase 17 may IMPORT packages/voice-*
+          # and packages/claude-code-bridge at runtime but MUST NOT
+          # modify any file under them. The companion.md SHA-256
+          # source-of-truth check below is the runtime enforcement;
+          # this CI step is the source-tree enforcement against the
+          # merge base.
+          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          echo "[ci] LOOP-02 check: base=$BASE_SHA head=$HEAD_SHA"
+          DIFF=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
+            packages/voice-protocol \
+            packages/voice-stt \
+            packages/voice-tts \
+            packages/claude-code-bridge \
+            packages/achilles-skill/skill/prompts/companion.md || true)
+          if [ -n "$DIFF" ]; then
+            echo "[ci] FAIL: LOOP-02 invariant violated. Modified files:" >&2
+            echo "$DIFF" >&2
+            exit 1
+          fi
+          echo "[ci] OK: LOOP-02 invariant holds across base..head"
+
+      - name: Run companion.md SHA-256 source-of-truth check
+        # Plan 17-01 created scripts/check-source-of-truth.mjs; this
+        # CI step invokes it to assert the embedded hash in
+        # companion-md.ts matches the source-of-truth file on disk.
+        # A drift would mean either (a) the source file was edited
+        # without updating the const, or (b) the const was edited but
+        # the source file was not — both block LOOP-02.
+        shell: bash
+        working-directory: apps/achilles-terminal
+        run: |
+          set -euo pipefail
+          node scripts/check-source-of-truth.mjs
+
   compile-binaries:
     name: compile (${{ matrix.target.name }})
     runs-on: ${{ matrix.target.runner }}
