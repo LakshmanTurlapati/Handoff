@@ -1,311 +1,141 @@
-# Stack Research — v1.2 Achilles
+# Stack Research — v1.3 Terminal-only Achilles
 
-**Domain:** Voice companion skill for Claude Code — Electron-based floating UI + ElevenLabs STT/TTS + Claude Agent SDK glue, distributed as both a Claude Code skill and a global npm CLI from one monorepo package.
-**Researched:** 2026-06-06
-**Confidence:** HIGH for ElevenLabs and Claude Code skill/SDK surfaces (verified against current official docs and Context7). MEDIUM for some packaging tradeoffs (dual-distribution patterns documented but no single canonical reference).
+**Domain:** Single-package terminal voice companion for Claude Code. Bun-runtime CLI rendering Ink TUI inside the calling terminal, capturing mic via sox child, playing TTS via ffplay child, gating utterance boundaries via energy-threshold VAD, distributed as one npm package with per-platform Bun-compiled binaries via `optionalDependencies`. Reuses the four shipped voice packages (`@achilles/voice-protocol`, `@achilles/voice-stt`, `@achilles/voice-tts`, `@achilles/claude-code-bridge`) untouched.
+**Researched:** 2026-06-08
+**Confidence:** HIGH for Bun, Ink 7, sox, ffplay, npm `optionalDependencies` pattern, ElevenLabs wire integration (already validated in v1.2). MEDIUM for cold-start/Gatekeeper end-state behaviour on macOS-arm64 across a fresh install + production Apple Developer ID signing. LOW for v1.4-deferred items (silero ONNX under Bun, naudiodon PortAudio).
+
+This document covers ONLY what is NEW or CHANGED for v1.3. Versions for the four surviving voice packages are intentionally not re-pinned here — see `.planning/research/STACK.md` history (v1.2) and `packages/voice-{protocol,stt,tts}/package.json`, `packages/claude-code-bridge/package.json` for their already-shipped dependency graphs. v1.3 makes no changes to those packages.
 
 ---
 
 ## Executive Summary
 
-For v1.2 Achilles we add exactly one new app (`apps/achilles`) plus two small shared packages (`packages/voice-protocol`, `packages/voice-skill`). The runtime is **Electron 42.x** for the always-on-top frameless transparent floating window with `focusable: false`. The Claude Code integration uses **`@anthropic-ai/claude-agent-sdk` 0.3.x** running inside Achilles' Electron main process, with a streaming input async-iterable so the transcript is injected as if typed. ElevenLabs work is split: **`@elevenlabs/client` 0.x** in the renderer for browser-side `getUserMedia` → Scribe v2 Realtime STT WebSocket, and **`@elevenlabs/elevenlabs-js` 2.51.x** in the main process for Flash v2.5 streaming TTS. VAD is **`@ricky0123/vad-web` 0.0.30** (Silero via ONNX Web). The waveform is hand-rolled Canvas 2D off the renderer's `AnalyserNode` (no library — wavesurfer is offline-file-oriented and overkill). Dual distribution is one npm package whose `bin` field launches an Electron entry, with the published tarball *also* shaped as a SKILL.md-rooted skill directory; an install script symlinks it into `~/.claude/skills/achilles/`.
+For v1.3 we add exactly one new application workspace (`apps/achilles-tui`), delete the entire `apps/achilles` (Electron) tree, and delete `apps/achilles-cli` (its surface absorbed into the new TUI app's `cli.ts`). The new runtime is **Bun 1.3+** as the primary build target with Node 22 LTS as a guaranteed-runnable fallback (the TypeScript source must execute under both). The TUI is built on **Ink 7.0.5** rendering **React 19.2.7** — note v1.3-terminal-pivot.md called for Ink 6.x but Ink shipped a major in April 2026 with React 19 support, and 7.0.5 is what we should pin. Mic capture and TTS playback are both child processes: **`sox` 14.4.2** (`rec` binary) for 16 kHz mono s16le PCM into stdout, **`ffplay` from ffmpeg 8.1.1** with `-nodisp -autoexit -fflags nobuffer` for gapless MP3 playback from stdin. VAD is a hand-rolled energy-threshold + 300 ms debounce module (<60 lines of JS, zero install cost) — silero-vad via onnxruntime-node is explicitly deferred to v1.4 because of the known JSC-vs-V8 native-module incompatibility under Bun (issue #18079) and because onnxruntime-node is currently a ~15 MB install per-platform.
 
-The Claude Code skill body is intentionally tiny — it shells out to `achilles launch` (the same npm CLI), so Achilles itself, not Claude, owns the window, mic, and ElevenLabs connections.
+Distribution: one published npm package `achilles@1.3.0` whose `bin.achilles` points at a 30-line ESM JS shim. The shim resolves a per-platform Bun-compiled binary via the standard esbuild/swc `optionalDependencies` pattern (five sibling packages `@achilles/cli-{darwin-arm64,darwin-x64,linux-x64,linux-arm64,win32-x64}@1.3.0`, each with `os`/`cpu` filters so npm installs only the matching one). Fallback path: if no platform binary resolves, the shim imports the bundled JS entry under whatever Node interpreter found it. End-user install line stays `npm install -g achilles` (or `bunx achilles`); two system binaries (`sox`, `ffmpeg`) become mandatory PATH dependencies, documented in README and validated at `achilles init`.
+
+The four voice packages survive untouched because their dependency-injection seams (verified at exact line numbers in v1.3-terminal-pivot.md §10 and Appendix A) already accept Bun's native `WebSocket` constructor and Bun's `child_process.spawn` shim. The hand-rolled Scribe v2 Realtime + Flash v2.5 wire codecs are runtime-neutral. PROMPT-01..05 (the embedded companion prompt + extractor regexes) port byte-for-byte; SKILL.md changes by exactly one line (`achilles launch` → `achilles voice`) plus its `allowed-tools` allowlist tightening.
 
 ---
 
 ## Recommended Stack
 
-### Core Technologies
+### Core Technologies (v1.3 additions)
 
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| **Electron** | `42.3.3` (latest stable, Jun 3 2026) | Floating desktop window with mic capture, audio playback, and waveform canvas | Tauri's WebView has documented mic-permission edge cases on macOS (`tauri-apps/wry#1195`, `tauri-apps/tauri#10898`, #11951, #5042), and Tauri ships a *different* WebView per OS so audio worklet + AnalyserNode behavior would need triple-platform QA. Electron ships its own Chromium, so `getUserMedia`, `AudioWorklet`, `MediaRecorder`, and `BrowserWindow({ transparent, frame: false, alwaysOnTop, focusable: false })` all behave identically across macOS/Windows/Linux. The 80–200 MB bundle cost is acceptable because the v1.2 install target is "developer who already runs Claude Code". |
-| **@anthropic-ai/claude-agent-sdk** | `0.3.165` (current) | Programmatic Claude Code session control from Achilles' main process | Official Anthropic-published SDK; `query({ prompt, options })` returns an `AsyncGenerator<SDKMessage>` and accepts an `AsyncIterable<SDKUserMessage>` as the prompt — exactly the shape we need to inject the live transcript and stream Claude's response back for TTS. Requires Node 18+ (Electron 42 ships Node 24, well above). |
-| **@elevenlabs/elevenlabs-js** | `2.51.0` (Jun 2 2026) | ElevenLabs REST + TTS streaming from Electron main process | Official ElevenLabs Node SDK. Used for `textToSpeech.stream(voiceId, { modelId: "eleven_flash_v2_5", text })` (returns a stream of MP3/PCM chunks) and for minting Scribe single-use tokens server-side. Node 15+ supported; Electron 42's Node 24 is fine. |
-| **@elevenlabs/client** | latest (browser SDK) | Renderer-side `Scribe.connect()` to the realtime STT WebSocket | The official ElevenLabs *browser* SDK (`Scribe.connect({ token, modelId: "scribe_v2_realtime", microphone: { ... } })`) handles `getUserMedia`, PCM_16000 chunking, base64 framing, and emits `PARTIAL_TRANSCRIPT` / `COMMITTED_TRANSCRIPT` events. Doing this in the renderer means we don't have to ship a native PortAudio binding (`naudiodon`) or shell out to `sox` (`node-record-lpcm16` / `node-microphone` both require SoX in PATH on macOS, which is hostile for an `npm install -g` install footprint). |
-| **TypeScript** | `5.6.x` | All source | Already the monorepo standard. |
-| **electron-builder** | `25.x` | Package signed `.dmg` / `.exe` / `.AppImage` after `npm install -g` | We need a usable installer when the user runs the global CLI; `electron-builder` is the maintained successor to `@electron/packager` for signed builds. |
+| **Bun** | `1.3.14+` (latest stable as of 2026-06-04, blog/bun-v1.3.14) | Primary runtime; single-binary cross-compile target; CLI cold-start path | Bun gives ~9–15 ms hello-world cold start vs Node 22's ~50–120 ms (bun.com 2026 benchmarks). `bun build --compile --target=bun-{darwin,linux,windows}-{x64,arm64}` (stable since 1.1.5, May 2024; Windows ARM64 added in 1.3.10) emits self-contained per-platform binaries with zero runtime install on the user side. Bun ships native `WebSocket` and native `child_process` shim (60% faster than Node via `posix_spawn(3)`), exactly the two surfaces the surviving voice packages already inject through seams. Critically, Bun is itself how Claude Code ships; the skill body invocation pathway is Bun-on-Bun. |
+| **Node.js** | `22.x LTS` (Active LTS → Maintenance Oct 2026; EOL Apr 2027) | Source-compat target; fallback runtime when the per-platform Bun binary is missing | The TypeScript source must execute under both Bun and Node 22 so the JS bundle fallback in the bin shim is real, not theoretical. Node 22 ships the WebSocket Web API as stable (no `ws` polyfill needed in code) and has stable test-runner + permission model. Node 24 is current LTS as of 2026 but Node 22's broader installed base makes it the safer fallback floor; we document `engines.node: ">=22.0.0"`. |
+| **Ink** | `7.0.5` (April 2026 major; latest patch as of 2026-06-08) | React-renderer for the terminal: pulsing blob, braille sparkline, state line, transcript snippet | Ink 7 is the first version with first-class React 19 support (uses `useEffectEvent`); v1.3-terminal-pivot.md called for Ink 6 but Ink 7 supersedes it with the React 19 baseline our state hook patterns assume. ~900K weekly downloads; used by Claude Code itself, Gatsby, Prisma, Shopify CLI. 30 fps internal cap is well above our 20 fps audio-reactive target. The pulsing blob (7×7 Unicode block grid) and braille sparkline (40 cells × 80 samples) reconcile cheaply because the DOM tree is tiny (≈100 visible cells). OpenTUI is the more aggressive 2026 alternative (Zig core + Bun FFI) but is pre-1.0 and locks us harder to Bun — defer to v1.4 watchlist. |
+| **React** | `19.2.7` (released 2026-06-01) | React renderer underneath Ink 7 | Ink 7 requires React 19; 19.2.7 is the current stable patch. We do not use any concurrent-features deliberately (the Ink render loop is `setInterval`-driven at 50 ms); React is here as Ink's peer dep, not as a featureful UI runtime. |
+| **sox** | `14.4.2` (system binary — brew/apt/choco; mac and Linux ship `rec` alias) | Microphone capture; emits 16 kHz mono int16 PCM raw to stdout | Hard requirement: Scribe v2 Realtime expects exactly 16 kHz mono s16le. `rec -q -t raw -r 16000 -b 16 -e signed -c 1 -` produces that natively, no resampling in process, no native bindings, no node-gyp. Same install line on all three platforms (brew/apt/choco). The fact that sox is mature and stable since 2015 is a feature here, not a bug — the wire shape we depend on does not change. Zero Bun native-module surface — `Bun.spawn` and Node `child_process.spawn` both produce identical stdout streams. |
+| **ffmpeg / ffplay** | `8.1.1` (system binary — brew/apt/choco/winget; 2026-05-04 release; ffplay ships with the ffmpeg package) | TTS playback; gapless MP3 from stdin via `pipe:0` | Voice-tts emits `mp3_44100` chunks (already the v1.2 default per `packages/voice-tts/src/constants.ts:17`). `ffplay -nodisp -autoexit -loglevel quiet -fflags nobuffer -flags low_delay -i pipe:0` handles MP3 frame boundaries internally so the `CHUNK_LENGTH_SCHEDULE = [80, 120, 160, 220]` cadence stays gapless. Cross-platform, no native bindings, native-process scheduling latency ~50–100 ms which fits inside the 1.3 s conversational budget. We collapse `which sox` and `which ffmpeg` checks into one preflight in `achilles init`. |
 
-### Supporting Libraries
+### Supporting Libraries (v1.3 additions)
 
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
-| **@ricky0123/vad-web** | `0.0.30` | Silero VAD (ONNX in Audio Worklet) in the renderer | Emits `onSpeechStart` / `onSpeechEnd`. Drives end-of-utterance detection so we can commit the STT segment and trigger the Claude Code turn. The Node port (`@ricky0123/vad-node`) is *discontinued* per upstream — keep VAD in the renderer (matches our Electron choice). |
-| **onnxruntime-web** | `1.20.x` | Backs `@ricky0123/vad-web` | Peer dep; needs `vad.worklet.bundle.min.js` and the ONNX model copied into the renderer bundle. Document this in the Phase plan. |
-| **ws** | `8.18.x` | Optional fallback if we ever need a main-process STT WebSocket (e.g., for headless `--no-window` mode) | Reuse the same `ws` already in `apps/relay`'s package.json. Not required for the v1.2 happy path because `@elevenlabs/client` handles the WS in the renderer. |
-| **electron-store** | `10.x` | Persist ElevenLabs API key, chosen voice ID, push-to-talk vs continuous toggle | Encrypted at rest via Electron's safeStorage on macOS Keychain / Windows DPAPI. Avoids reinventing config. |
-| **zod** | `3.23.x` | Runtime validation of the IPC envelope between renderer and main, plus the Achilles ↔ Claude Code message protocol | Already the monorepo standard per `packages/protocol`. |
-| **commander** | `12.x` | CLI surface for `achilles`, `achilles launch`, `achilles install-skill`, `achilles login` | Smaller dep footprint than yargs/oclif; well-typed. |
+| **@clack/prompts** | `1.5.1` (latest as of 2026-06) | First-run `achilles init` wizard; STT circuit-breaker `TypedFallback` text input; `achilles config` settings menu | Modern minimal-styled prompt library (8K+ dependents per npm). Specifically NOT a display-loop framework — we use it exclusively for blocking text/confirm/select/spinner flows, never inside the Ink render tree. Bun-compat verified by upstream (clack docs explicitly call out Bun). Replaces the deleted Electron-side `apps/achilles/src/main/init-wizard.ts` and the `apps/achilles/src/renderer/components/TypedFallback.tsx`. |
+| **chalk** | `5.6.x` (5 series, ESM-only since 5.0.0) | ANSI color helpers used inside Ink `<Text>` style props and in raw-ANSI fallback rendering | Chalk 5 is ESM-only; `apps/achilles-tui` ships `"type": "module"`. Versions 5.0+ require Node 14+; trivial for our floor. Chalk 4 (last CJS major) is forbidden — see "What NOT to Use." Mind the 2024 supply-chain incident: pin to a known-good 5.6.x and use `npm audit signatures` in CI. |
+| **log-update** | `7.2.0` (May 2026, ESM-only) | Raw-ANSI fallback render path — used ONLY when Ink fails to detect a TTY (e.g., redirected stdout for debugging or test harness) | Sindre Sorhus library; ~17M weekly downloads on inertia. Provides the "rewrite the last N lines on each tick" primitive Ink would otherwise own. Live-loop fallback only — primary render is Ink. Kept around to defend against the "Ink crash in production" failure mode discovered late in v1.2 (debug session `.planning/debug/achilles-silent-launch.md` — the Electron renderer never wired end-to-end and the lack of a TUI fallback was part of why it shipped silently). |
+| **ansi-escapes** | `7.2.0+` (latest as of 2026-02-04) | Cursor positioning + screen-clear escapes for raw-ANSI fallback; cleanup on SIGINT | Sibling library to log-update. Used by ink internally. Direct dep only when raw-ANSI fallback is active. Trivial size. |
+| **commander** | `12.x` | Subcommand router for `achilles voice`, `achilles init`, `achilles config`, `achilles install-skill`, `achilles transcripts {list,purge}`, `achilles latency --report` | Already the v1.2 CLI choice; survives the cli.ts merge. Smaller than yargs/oclif; well-typed; subcommand argv parsing is the entire surface. v1.3-terminal-pivot.md §2 floated dropping commander for raw `Bun.argv`/`process.argv`; we keep it because the subcommand count went up to 6 and a hand-rolled parser is a maintenance debt with no perf upside at CLI cold-start scale. |
+| **(NONE for VAD)** | — | Energy-threshold VAD; hand-rolled `<60` lines of JS | Pure JS RMS-over-frame + hysteresis state machine (the snippet in v1.3-terminal-pivot.md §7.2 ports directly). Sub-millisecond per frame. Zero install cost. Energy threshold is acceptable for the "developer in a quiet office" primary persona. The `VadHandle` interface is purpose-built so silero swap-in is one file change for v1.4. |
 
 ### Development Tools
 
 | Tool | Purpose | Notes |
 |------|---------|-------|
-| **electron-vite** | Build pipeline for main + preload + renderer | Faster than `electron-forge` for our case; produces TypeScript-typed output and supports hot-reload of the renderer during dev. |
-| **electron-builder** (dev) | `npm run dist` to produce signed installers | Used at release time only; not at `npm install -g` time. |
-| **pnpm workspaces** (existing) | Add `apps/achilles` and `packages/voice-*` as workspace members | Matches existing Handoff layout. |
-| **Turborepo** (existing) | Pipeline orchestration | Already in use per `claude-code-monorepo` patterns in our tree. |
+| **Bun toolchain** | `bun build --compile --target=bun-{darwin,linux,windows}-{x64,arm64} --outfile=achilles` for each per-platform binary; `bun test` for the unit tests that survive migration; `bun install` for workspace fanout | Bun ships its own bundler, runner, test framework, and package manager — replaces electron-vite + vite + electron-builder for the new app. The v1.2 `vitest` unit tests under `apps/achilles/src/main/*.test.ts` survive — `bun test` runs vitest-shape tests directly with no shim. Cross-compile from macOS to Windows/Linux is supported but production CI should still matrix one runner per target OS to handle code-signing per-platform. |
+| **tsc (typecheck only)** | `tsc -p . --noEmit` runs alongside `bun build` because Bun does NOT typecheck | TypeScript 5.6.x. Identical config to other apps in the monorepo. Required for CI gates; not on the runtime path. |
+| **pnpm workspaces** (existing) | Add `apps/achilles-tui` and the five `packages/cli-<platform>-<arch>` workspace members for the per-platform binary publish step | Existing monorepo pattern. Per-platform packages each have a single binary file in `bin/` plus a `package.json` declaring `os`/`cpu` per the esbuild standard. |
+| **Turborepo** (existing) | Pipeline orchestration | Already in use; tasks added: `bun:compile:{darwin,linux,win32}-{x64,arm64}`, `bun:test`, `bun:typecheck`. |
+| **GitHub Actions matrix** | Per-OS build runner; macOS-arm64 + macOS-x64 + linux-x64 + linux-arm64 + win32-x64; codesign step on macOS runners; notarisation step gated on `APPLE_DEVELOPER_ID` secret presence | Avoids cross-host signing issues. Each platform package publishes from its native runner. |
 
 ---
 
 ## Installation
 
 ```bash
-# Inside apps/achilles
-npm install electron@42 @anthropic-ai/claude-agent-sdk @elevenlabs/elevenlabs-js @elevenlabs/client \
-            @ricky0123/vad-web onnxruntime-web electron-store commander zod ws
+# Workspace package setup
+cd apps/achilles-tui
+bun install                           # bun-native install across the monorepo
 
-# Dev dependencies for apps/achilles
-npm install -D electron-vite electron-builder typescript @types/node
+# Production deps (apps/achilles-tui/package.json)
+bun add ink@^7.0.5 react@^19.2.7 @clack/prompts@^1.5.1 chalk@^5.6.0 \
+        log-update@^7.2.0 ansi-escapes@^7.2.0 commander@^12
+
+# Workspace internal deps (pinned to monorepo SHAs via workspace protocol)
+bun add @achilles/voice-protocol@workspace:* \
+        @achilles/voice-stt@workspace:* \
+        @achilles/voice-tts@workspace:* \
+        @achilles/claude-code-bridge@workspace:* \
+        @achilles/achilles-skill@workspace:*
+
+# Dev deps
+bun add -d typescript@~5.6.0 @types/node @types/react
+
+# End-user system deps (one of these per OS — surface in achilles init):
+brew install sox ffmpeg                    # macOS
+sudo apt install sox ffmpeg                # Debian / Ubuntu
+choco install sox.portable ffmpeg          # Windows (admin)
+# OR
+winget install ffmpeg                       # Windows alt
+
+# End-user install (publish-time surfaces)
+npm install -g achilles                    # picks per-platform Bun binary via optionalDependencies
+bunx achilles voice                        # one-shot via bunx cache
 ```
 
-End-user install (two surfaces, one tarball):
-
-```bash
-# Surface A — global npm CLI (the primary install path)
-npm install -g achilles
-achilles launch                 # opens floating UI, ready to talk to Claude Code
-
-# Surface B — Claude Code skill (one-time symlink, done by surface A's post-install)
-achilles install-skill          # symlinks the tarball's SKILL.md tree into ~/.claude/skills/achilles/
-# In Claude Code:
-/achilles                       # shell-outs to `achilles launch`
-```
+The v1.3 CI matrix produces five binary tarballs (one per `os`-`arch` combo) and publishes them to npm as five sibling packages plus the `achilles` parent.
 
 ---
 
-## How Each Piece Plugs Together
+## Integration with Surviving Voice Packages
 
-### 1. Claude Code skill packaging
+This section documents the exact dependency-injection seams that make all four `@achilles/voice-*` and `@achilles/claude-code-bridge` packages reusable verbatim under the new Bun runtime. All paths and line numbers are absolute and verified.
 
-**Verified facts (Context7 + official docs):**
+### `@achilles/voice-stt` — Scribe v2 Realtime WSS client
 
-- A skill is a directory containing `SKILL.md` with YAML frontmatter (`name` ≤ 64 chars lowercase + hyphens; `description` ≤ 1024 chars). Optional fields: `disable-model-invocation`, `allowed-tools`. Source: `code.claude.com/docs/en/skills`. HIGH.
-- Personal install path: `~/.claude/skills/<skill-name>/`. Project install path: `.claude/skills/<skill-name>/`. Windows: `C:\Users\<user>\.claude\skills\`. HIGH.
-- Skills can ship a `scripts/` subdirectory; Claude runs scripts via the Bash tool. The script's *output* enters context, the source does not. Path interpolation via `${CLAUDE_SKILL_DIR}` resolves correctly regardless of install scope. HIGH.
-- "Claude Code: Full network access. Skills have the same network access as any other program on the user's computer." HIGH.
-- A skill folder can also include `.claude-plugin/plugin.json` to load as a plugin (bundling agents, hooks, MCP servers). HIGH.
-- *Constraint:* "Global package installation discouraged: Skills should only install packages locally in order to avoid interfering with the user's computer." HIGH. This rules out a skill that runs `npm install -g electron`, which is why Achilles' Electron runtime is *not* installed by the skill — the skill just shells out to a binary the user installed via the npm CLI surface.
-- *Constraint:* The skill body is plain markdown — there is no programmatic UI surface from within a skill. Any window, any mic, any audio I/O must happen in a child process the skill spawns.
+- **Injection seam:** `webSocketCtor` parameter on `realtime-client.ts` constructor (`/Users/lakshmanturlapati/Documents/Codes/Handoff/packages/voice-stt/src/realtime-client.ts:95-98`).
+- **Bun wiring:** `new RealtimeClient({ webSocketCtor: globalThis.WebSocket, ... })`. Bun's native WebSocket implements the standard browser WebSocket constructor signature; no shim, no `ws` import, no polyfill code path.
+- **Node fallback wiring:** `import { WebSocket } from "ws"` (already a transitive dep through `apps/relay`) → `webSocketCtor: WebSocket`. Identical structural interface; the existing Vitest test paths drive this exact pattern.
+- **Token mint helper:** pure HTTP (`fetch`) — uses the global `fetch` available in both Bun and Node 22+. No change.
+- **Wire codec:** hand-rolled `input_audio_chunk` base64 + commit-flag PCM framing. Pure JS; no runtime dependency.
+- **Cost to migrate:** zero LOC change in the package. The orchestrator picks `webSocketCtor` based on detected runtime.
 
-**Implication for Achilles:** the skill is intentionally tiny. `SKILL.md` says "to start the voice companion, run the `achilles launch` command." Claude reads that, runs Bash to invoke `achilles launch`, and Achilles' own Electron process owns the floating UI and ElevenLabs connections. The skill is a launcher; it is not the runtime.
+### `@achilles/voice-tts` — Flash v2.5 streaming TTS client
 
-### 2. Claude Code interaction model — how the transcript reaches Claude Code
+- **Injection seam:** `webSocketCtor` parameter on `stream-client.ts` constructor (`/Users/lakshmanturlapati/Documents/Codes/Handoff/packages/voice-tts/src/stream-client.ts:92`).
+- **Bun wiring:** identical to STT — `globalThis.WebSocket`.
+- **Sequence buffer:** `packages/voice-tts/src/sequence-buffer.ts` — pure JS. The `CHUNK_LENGTH_SCHEDULE` constant (80/120/160/220 ms) survives unchanged.
+- **Output format:** stays at `mp3_44100` (the `DEFAULT_OUTPUT_FORMAT` from `packages/voice-tts/src/constants.ts:17`) because that's what ffplay handles best from stdin.
+- **Consumer change in v1.3:** the renderer-side `playback-queue.ts` that decoded MP3 via Web Audio `decodeAudioData` is deleted. v1.3 orchestrator wires `for await (ev of ttsClient.events$)` directly into `ffplay.stdin.write(ev.bytes)`. Zero change in the voice-tts package itself.
 
-There are **four documented entrypoints**; Achilles uses #2 as primary and exposes #1 as a fallback.
+### `@achilles/claude-code-bridge` — `claude -p` subprocess wrapper
 
-| # | Entrypoint | Source | Use for Achilles? |
-|---|------------|--------|-------------------|
-| 1 | `claude -p "<prompt>" --output-format stream-json --include-partial-messages` (with optional `--input-format stream-json` for bidirectional NDJSON over stdin) | `code.claude.com/docs/en/headless` | **Fallback**, used when Achilles is launched outside a Claude Code session and needs to drive a one-shot prompt. Stdin is capped at 10 MB (v2.1.128+). |
-| 2 | `@anthropic-ai/claude-agent-sdk` v0.3.165 `query({ prompt: AsyncIterable<SDKUserMessage>, options })` returning `AsyncGenerator<SDKMessage>` | Context7 `/nothflare/claude-agent-sdk-docs` and `code.claude.com/docs/en/agent-sdk/typescript` | **Primary.** Achilles' main process is a Node program; it `import { query } from "@anthropic-ai/claude-agent-sdk"` and feeds each committed STT segment as a user message. Streamed assistant text is buffered into sentence chunks and piped to ElevenLabs TTS. |
-| 3 | Claude Code Hooks (`UserPromptSubmit`, `SessionStart`, etc., configured in `~/.claude/settings.json` with `type: "command"` shell hooks) | `code.claude.com/docs/en/hooks` | **Out of scope for v1.2.** Hooks let us *augment* prompts when a user is already typing into Claude Code; they don't let Achilles *originate* prompts. The product flow is voice → Claude, not Claude-user-prompt → voice. |
-| 4 | Custom MCP server registered via `claude mcp add --transport stdio achilles -- node ./mcp-server.js`, then `allowedTools: ["mcp__achilles__*"]` | `code.claude.com/docs/en/agent-sdk/mcp` | **Out of scope for v1.2** — MCP lets Claude *call* Achilles, not the other way around. Could be a future "ask Claude to speak this" tool, but not the primary loop. |
+- **Injection seam:** `spawnImpl` parameter on `createClaudeSession` (`/Users/lakshmanturlapati/Documents/Codes/Handoff/packages/claude-code-bridge/src/session.ts:71-78`).
+- **Bun wiring:** `import { spawn } from "node:child_process"` works under Bun because `node:child_process` is a documented node-compat shim over `Bun.spawn` (which uses `posix_spawn(3)` and is 60% faster than Node's spawn). `spawnImpl: spawn`. No code change in the package.
+- **Node wiring:** same import line. Identical.
+- **LDJSON line parser:** `packages/claude-code-bridge/src/line-parser.ts` — pure JS, has fixture-tested partial-chunk handling. Documented LOW-risk verify in v1.3 Phase 17 smoke tests.
+- **Cancellation chain:** SIGINT → 1.5 s → SIGTERM → 5 s → SIGKILL. Both runtimes implement signal forwarding to spawned children via the standard `process.kill(pid, signal)` path. macOS process-group SIGINT forwarding is documented to work in Bun 1.3+ for the simple `pipe` stdio case we use (no extra fds).
+- **Subprocess args:** `claude -p --output-format stream-json --include-partial-messages --append-system-prompt-file <path>`. The `--append-system-prompt-file` arg points at the embedded `companion.md` extracted to a temp path on first session start (same pattern as v1.2).
 
-**Primary loop (verified against `@anthropic-ai/claude-agent-sdk` typings):**
+### `@achilles/voice-protocol` — Zod schemas
 
-```typescript
-// apps/achilles/src/main/claude-bridge.ts
-import { query } from "@anthropic-ai/claude-agent-sdk";
+- Runtime-neutral. No DI surface. Pure type + Zod runtime validation; works on every JS runtime that supports `zod@3.23+`. Ports verbatim.
 
-async function* userTurns(transcriptStream: AsyncIterable<string>) {
-  for await (const transcript of transcriptStream) {
-    yield {
-      type: "user" as const,
-      session_id: "",  // empty -> SDK starts/continues a session
-      message: { role: "user", content: [{ type: "text", text: transcript }] },
-      parent_tool_use_id: null,
-    };
-  }
-}
+### `@achilles/achilles-skill` — companion prompt + SKILL.md source of truth
 
-for await (const msg of query({
-  prompt: userTurns(committedTranscripts),
-  options: {
-    appendSystemPrompt: ACHILLES_VOICE_PROMPT,  // "acknowledge first, then act, then summarize"
-    model: "claude-sonnet-4-5-20250929",
-    allowedTools: ["Read", "Edit", "Bash", "Grep"],
-  },
-})) {
-  if (msg.type === "assistant") {
-    for (const block of msg.message.content) {
-      if (block.type === "text") ttsQueue.push(block.text);
-    }
-  }
-}
-```
+- **Embedded prompt path:** exported from package index (`/Users/lakshmanturlapati/Documents/Codes/Handoff/packages/achilles-skill/src/index.ts:107-110`). Untouched.
+- **SKILL.md frontmatter change (the only edit in this package):**
+  - Body command: `achilles launch` → `achilles voice` (one-line diff).
+  - `allowed-tools` tightened from the broad v1.2 `Bash` to the v1.3 allowlist: `Bash(achilles voice *), Bash(achilles init *), Bash(achilles transcripts *), Bash(which achilles), Bash(which sox), Bash(which ffmpeg)` (per v1.3-terminal-pivot.md §8.3).
+- **Source-of-truth check:** the existing CI script `apps/achilles-cli/scripts/check-source-of-truth.mjs` migrates to `apps/achilles-tui/scripts/check-source-of-truth.mjs` and continues asserting SHA-256 equality of `companion.md` between the package and the symlinked-into-skill copy.
 
-### 3. ElevenLabs STT — Scribe v2 Realtime
+### Orchestrator (`apps/achilles/src/main/session.ts`) → `apps/achilles-tui/src/session.ts`
 
-**Verified facts (official docs):**
-
-- Model ID: `scribe_v2_realtime`. **150 ms** end-to-end latency, 93.5% accuracy across 30 languages, built-in VAD. Source: `elevenlabs.io/blog/how-scribe-v2-realtime-works`, `realtime-speech-to-text-api`. HIGH.
-- WebSocket endpoint: `wss://api.elevenlabs.io/v1/speech-to-text/realtime` (also regional: `api.us.`, `api.eu.residency.`, `api.in.residency.`). HIGH.
-- Encodings: `pcm_8000`, `pcm_16000` (default), `pcm_22050`, `pcm_24000`, `pcm_44100`, `pcm_48000`, `ulaw_8000`. HIGH.
-- Client → server messages: `input_audio_chunk` (base64 audio + commit flag + sample rate). Server → client: `session_started`, `partial_transcript`, `committed_transcript`, `committed_transcript_with_timestamps`, plus error types. HIGH.
-- Authentication: `xi-api-key` header *or* a single-use token via `tokens.singleUse.create("realtime_scribe")` (expires after 15 minutes). The token approach is mandatory for client-side STT because we don't want the API key in the renderer. HIGH.
-- Browser SDK: `@elevenlabs/client` exposes `Scribe.connect({ token, modelId: "scribe_v2_realtime", microphone: { echoCancellation: true, noiseSuppression: true } })`. The SDK handles `getUserMedia`, PCM chunking, and base64 framing. HIGH.
-
-**Pricing reality check:** STT on the *API* is bundled into the plan minute pools — Pro ($99/mo) gets ~25 hours STT; overage is ~$3–4.50/hour. Voice-Agent compose pricing (STT + TTS + LLM bundled) starts at $0.08/min Standard, $0.10/min Turbo, $0.12/min Premium. *We do not use the Agents bundle* because we own the LLM (it's Claude Code), so Achilles bills against the STT minute pool only.
-
-### 4. ElevenLabs TTS — Flash v2.5
-
-**Verified facts (official docs):**
-
-- Model ID: `eleven_flash_v2_5`. **~75 ms** first-byte latency on short inputs, 50% lower price/character than Multilingual v2, 32 languages. Recommended for conversational use. Source: `elevenlabs.io/docs/overview/models`, `blog/meet-flash`. HIGH.
-- Streaming surfaces: HTTP chunked streaming (Server-Sent Events), WebSocket bidirectional, and a *multi-context* WebSocket. SDK method: `elevenlabs.textToSpeech.stream(voiceId, { modelId: "eleven_flash_v2_5", text })` returns a stream of audio chunks. HIGH.
-- Audio output formats: MP3 (multiple bitrates), PCM (multiple sample rates). For Electron renderer playback over `AudioContext`/`AudioWorklet`, MP3 44.1 kHz 128 kbps is the simplest path (browser decodes natively). HIGH.
-- `eleven_turbo_v2_5` is now *deprecated* in favor of Flash v2.5 ("functionally equivalent except Flash latency is lower on average"). HIGH. — *Do not* pick Turbo even though many older tutorials still recommend it.
-- Multi-context WebSocket allows interrupting an in-flight utterance with a new one — useful when Claude streams a sentence-by-sentence response and we want to start speaking the first sentence before Claude finishes the rest. Plan for this in Phase 2; ship single-context WS first.
-
-**End-to-end conversational latency target (verified-additive):**
-
-| Stage | Source | Latency |
-|-------|--------|---------|
-| STT first partial transcript | Scribe v2 Realtime spec | ~150 ms |
-| End-of-utterance VAD trigger | `@ricky0123/vad-web` default | ~250 ms silence threshold |
-| Claude SDK time-to-first-token | Anthropic streaming, Claude Sonnet 4.5 | ~700–900 ms |
-| TTS first audio chunk | Flash v2.5 WebSocket | ~75 ms |
-| **Speech-end → first audible word** | sum (parallelizing TTS over Claude streaming) | **~1.0–1.3 s** |
-
-This matches the "conversational" target from the constraints in `PROJECT.md`.
-
-### 5. Floating desktop UI — Electron 42.3.3 with `BrowserWindow` panel pattern
-
-**Decision matrix — Electron vs Tauri vs Web-only PWA:**
-
-| Criterion | Electron 42 | Tauri 2 | Web-only PWA |
-|-----------|-------------|---------|--------------|
-| Bundle size | 80–200 MB | 2–10 MB | 0 MB (browser) |
-| Memory | ~120–400 MB | ~50–170 MB | browser-managed |
-| `getUserMedia` reliability across macOS/Win/Linux | **Identical Chromium everywhere** | Documented permission edge cases on macOS (wry#1195, tauri#10898, #11951, #5042) | Browser-dependent; requires user to keep tab open |
-| `AudioWorklet` for VAD + `AnalyserNode` for waveform | Native | WebView-dependent (WKWebView, WebView2, WebKitGTK behave differently) | Native |
-| Always-on-top, frameless, transparent, non-focus-stealing | `BrowserWindow({ frame: false, transparent: true, alwaysOnTop: true, focusable: false })` — one config | Possible but per-platform plumbing | Not possible without OS chrome |
-| Ship as both skill launcher *and* npm CLI | npm package with `bin` entry that spawns Electron — works | npm package with `bin` entry that runs a Rust binary — works but cross-compile pain | Cannot be a skill launcher (no local UI process) |
-| Distance from existing TS monorepo | Pure TS+Node — fits `apps/web`/`apps/relay`/`apps/bridge` pattern | Rust + TS — new toolchain, new CI, new audit surface | Pure TS — fits, but doesn't meet "floating window" req |
-
-**Verdict: Electron 42.3.3.** The reactive-waveform + mic + transparent always-on-top floating widget *is* what Electron is best at; bundle size is paid once per developer who has already installed Claude Code; cross-platform audio behavior is identical because Chromium is bundled. The Tauri savings (~190 MB) are not worth the macOS mic-permission risk on a voice product. Web-only is eliminated by the floating-window requirement.
-
-**Window config (verified against `electronjs.org/docs/latest/api/browser-window`):**
-
-```typescript
-new BrowserWindow({
-  width: 220, height: 220,
-  frame: false,
-  transparent: true,
-  alwaysOnTop: true,
-  focusable: false,        // does not steal active-window focus
-  type: "panel",           // macOS: floats above fullscreen apps
-  webPreferences: {
-    preload: path.join(__dirname, "preload.js"),
-    contextIsolation: true,
-    nodeIntegration: false,
-    sandbox: true,
-  },
-});
-```
-
-Use `win.setAlwaysOnTop(true, "screen-saver")` on macOS so the window stays above fullscreen Claude-in-iTerm sessions.
-
-### 6. Microphone capture + VAD + waveform — all in the renderer
-
-**Mic capture:**
-
-- Renderer: `navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 16000 } })`. This is the only path that does *not* require shelling out to SoX (`node-record-lpcm16`, `node-microphone`, `node-mic` all require SoX in PATH) or shipping a native PortAudio binding (`naudiodon` — requires node-gyp at install time, fragile on Windows). Keeping audio in the renderer is the deciding factor for the Electron choice over Node-process capture.
-- macOS: Electron requires the `NSMicrophoneUsageDescription` Info.plist key, set via `electron-builder` config. First launch surfaces the standard macOS mic permission dialog.
-
-**VAD:**
-
-- **`@ricky0123/vad-web` 0.0.30** in the renderer. Wraps Silero VAD over `onnxruntime-web` inside an Audio Worklet. Events: `onSpeechStart`, `onSpeechEnd`, `onFrameProcessed(probabilities)`. Drives "commit the segment to Scribe and start the Claude turn" on `onSpeechEnd`.
-- The Node port `@ricky0123/vad-node` is **discontinued upstream** — do not use it. (This was a key disambiguation; older blog posts still recommend it.)
-- Don't reinvent VAD with `webrtcvad` — the Picovoice/Silero comparison consistently shows Silero higher accuracy at the same CPU cost.
-
-**Push-to-talk vs continuous:**
-
-- Default: continuous + VAD-driven commit. Push-to-talk binding (`option+space` global shortcut via `globalShortcut.register('Option+Space', ...)`) is a Phase 2 option.
-
-**Waveform visualization:**
-
-- **Roll our own** off `AudioContext` + `AnalyserNode.getByteTimeDomainData()` drawn on a `<canvas>` in `requestAnimationFrame`. Reactive circle scales with `AnalyserNode.getByteFrequencyData()` RMS. ~30 lines of code.
-- Do **not** use `wavesurfer.js` — it's optimized for displaying *recorded* audio files with seek/cursor, not live mic AnalyserNode output. Issue #578 on the wavesurfer repo explicitly flags that streaming-input is awkward. Adds 100 kB+ for no value here.
-
-### 7. Dual distribution — one source, two surfaces
-
-**The pattern** (verified against `openskills`, `skills-npm`, `vercel-labs/skills`, and the Anthropic skills repo):
-
-The npm package is the source of truth. The published tarball contains:
-
-```
-achilles/
-├── package.json              # "bin": { "achilles": "./dist/cli.js" }
-├── dist/
-│   ├── cli.js                # commander entry — handles `launch`, `install-skill`, `login`
-│   ├── main/                 # Electron main + preload (built by electron-vite)
-│   └── renderer/             # Electron renderer bundle
-├── SKILL.md                  # The skill manifest (sees this as root when symlinked)
-├── scripts/
-│   └── launch.sh             # `#!/usr/bin/env bash` -> exec "$ACHILLES_BIN" launch
-├── .claude-plugin/
-│   └── plugin.json           # Optional — registers as a plugin if user prefers /plugin install
-├── electron/                 # Prebuilt Electron binaries fetched at install time
-└── README.md
-```
-
-**Two install flows:**
-
-1. **`npm install -g achilles`** — npm sets up the `achilles` symlink in the global bin dir pointing at `dist/cli.js`. First run does the Electron post-install (electron's own `npm install` script fetches platform binaries). `achilles launch` opens the floating window. `achilles install-skill` symlinks the *same* tarball directory into `~/.claude/skills/achilles/` so the SKILL.md is discovered by Claude Code. *No code duplication, no second download.*
-
-2. **`/plugin install achilles`** in Claude Code (alt path) — Claude Code installs the package via its plugin marketplace flow, treats `.claude-plugin/plugin.json` as the entrypoint, and the user still gets a SKILL.md-rooted skill. `SKILL.md` then says "run `${CLAUDE_SKILL_DIR}/scripts/launch.sh`", which exec's the bundled Electron binary directly (no global npm install needed for this flow).
-
-The two surfaces are unified by *one* npm package, with the skill metadata (`SKILL.md`, `.claude-plugin/`, `scripts/`) shipped alongside the npm-CLI build output (`dist/`, `electron/`). The CLI's `install-skill` subcommand is the only piece that materially differs between flows.
-
-**`SKILL.md` body (under 5k tokens):**
-
-```yaml
----
-name: achilles
-description: Voice companion for Claude Code. Opens a floating reactive UI, captures microphone, transcribes via ElevenLabs, pipes transcript into the active Claude Code session, and speaks acknowledgement + completion back. Invoke when the user says they want to talk to Claude, asks to use voice, or says /achilles.
-allowed-tools: Bash
----
-
-# Achilles
-
-To start the voice companion, run `bash ${CLAUDE_SKILL_DIR}/scripts/launch.sh` and report back the URL printed on stdout.
-
-The launcher is non-blocking — it spawns the Achilles window process and exits. Once running, Achilles drives Claude Code itself via the Agent SDK; no further action is needed from this skill.
-```
-
-### Integration points with the existing Handoff monorepo
-
-**Suggested layout (does not touch Handoff code):**
-
-```
-apps/
-├── web/             # (Handoff, unchanged)
-├── relay/           # (Handoff, unchanged)
-├── bridge/          # (Handoff, unchanged)
-└── achilles/        # NEW — Electron app + npm CLI
-    ├── src/
-    │   ├── cli/index.ts            # commander entrypoint -> bin
-    │   ├── main/index.ts           # Electron main: BrowserWindow + Claude SDK + TTS
-    │   ├── preload/index.ts        # contextBridge for renderer <-> main IPC
-    │   └── renderer/               # React or Solid renderer w/ Canvas waveform
-    ├── skill/
-    │   ├── SKILL.md
-    │   ├── scripts/launch.sh
-    │   └── .claude-plugin/plugin.json
-    ├── electron.vite.config.ts
-    ├── electron-builder.yml
-    └── package.json                # "name": "achilles", "bin": { "achilles": "./dist/cli/index.js" }
-
-packages/
-├── protocol/        # (Handoff, unchanged)
-├── db/              # (Handoff, unchanged)
-├── voice-protocol/  # NEW — zod schemas for renderer<->main IPC and STT/TTS events
-└── voice-skill/     # NEW — shared types for SKILL.md frontmatter + plugin manifest (Phase 2)
-```
-
-Achilles **does not depend on** `apps/relay`, `apps/bridge`, or `apps/web`. It does not require the Handoff `userId`/`deviceSessionId` plumbing. It is a standalone vertical that happens to live in the same monorepo to share the TS toolchain.
+- The half-duplex turn-taking state machine + the embedded `SPEAKING_DEBOUNCE_MS = 300` constant (line 112 of the v1.2 file) survive verbatim. The only code deleted is the IPC envelope wrapper around the renderer-bound callbacks; v1.3 replaces those with direct function calls into the Ink hook's setter.
 
 ---
 
@@ -313,14 +143,22 @@ Achilles **does not depend on** `apps/relay`, `apps/bridge`, or `apps/web`. It d
 
 | Recommended | Alternative | When to Use Alternative |
 |-------------|-------------|-------------------------|
-| Electron 42 | Tauri 2 | If bundle size dropped from a hard requirement to a strict <10 MB cap (e.g., for IoT-style distribution). Not v1.2. |
-| Electron 42 | Native macOS overlay via Skia / SwiftUI sidecar | Only if Apple-platform-only and bundle <2 MB are simultaneously required. Forecloses Win/Linux. |
-| `@anthropic-ai/claude-agent-sdk` | `claude -p --input-format stream-json` subprocess | If Achilles ever needs to run *outside* a developer machine that has the SDK installed but somehow has `claude` on PATH. Edge case. |
-| `@elevenlabs/client` in renderer | `@elevenlabs/elevenlabs-js` `speechToText.realtime` in main + `naudiodon`/`sox` | Only if for some reason the renderer can't access `getUserMedia` (sandboxed, headless test). Adds native bindings or SoX dep — avoid. |
-| Flash v2.5 TTS | Multilingual v2 | If "rich emotional voice acting" is more important than latency — *not* for a voice agent. |
-| `@ricky0123/vad-web` (Silero) | WebRTC VAD | If accuracy of the Silero model is somehow too high (false-positives on speech-like noise). Picovoice Cobra is also an option but is paid. |
-| Hand-rolled Canvas waveform | `wavesurfer.js` | Only if we also need to show *recorded* audio with seek/cursor (we don't). |
-| One npm package, two surfaces | Two separate packages (`achilles-cli` + `@anthropic/achilles-skill`) | Forbidden by `PROJECT.md` constraint "Single source of truth must ship as both — duplicate codebases are not acceptable." |
+| **Bun 1.3 (primary) + Node 22 (fallback)** | Pure Node 22 + esbuild bundle | If onnxruntime-node or another native module proves load-bearing for v1.3 (it doesn't, but if v1.4 silero work surfaces a blocker we may swap.). Node SEA via `--build-sea` (Node 25.5+, Jan 2026) is the right path then. |
+| **Bun 1.3 (primary) + Node 22 (fallback)** | yao-pkg (vercel/pkg fork) | If we need to ship a single-file binary that runs without a system Bun install AND need Node-specific native modules. yao-pkg supports Node 22. Adds a forked-archived-dep maintenance burden — avoid unless we hit a Bun-vs-native-module wall. |
+| **Ink 7 + React 19** | OpenTUI + `@opentui/react` | If sub-millisecond TUI frame timing becomes load-bearing and Bun lock-in is acceptable. OpenTUI's Zig core + Bun FFI is the more aggressive 2026 entrant but is pre-1.0 and API-in-flux. Watchlist for v1.4. |
+| **Ink 7 + React 19** | Raw ANSI (log-update + ansi-escapes + chalk only) | If the Ink + React 19 reconciler dependency footprint (~2.5 MB) ever becomes an issue or if Ink itself crashes in production. We already ship log-update as the in-flight fallback path. Trade: lose the component model, hand-roll the diff. |
+| **Ink 7 + React 19** | Blessed / neo-blessed | Never. chjj/blessed inactive since 2017; ~46K weekly downloads on inertia. Forks (`neo-blessed`, `unblessed/core`) put us on the support hook. |
+| **sox child process** | naudiodon (PortAudio bindings bundled) | If users report "I don't want to brew install sox" friction louder than expected. naudiodon ships PortAudio in the npm package (~10 MB binary). Marked "not yet production-ready" by maintainer; Bun-compat untested. Defer to v1.4 as an `optionalDependencies` fallback. |
+| **sox child process** | `mic` / `node-record-lpcm16` / `node-microphone` npm wrappers | They wrap sox anyway, so they add an npm dep without removing the system dep. Direct spawn is simpler. |
+| **sox child process** | Bun FFI to PortAudio C library | `bun:ffi` is flagged experimental; async callbacks unsupported. Too much new surface for v1.3. |
+| **ffplay child process** | `speaker` (TooTallNate/node-speaker) PCM writable + decode in process | speaker is a native module (mpg123 bundled, ~15 MB). Last published 2 years ago. Bun-compat unverified. We avoid native modules in the v1.3 audio path on purpose. |
+| **ffplay child process** | `mpv` / `node-mpv` | Adds a second system dep (mpv) where ffmpeg's `ffplay` is bundled with the same ffmpeg the user installs for many other reasons. |
+| **ffplay child process** | macOS-only `afplay` + Linux-only `aplay` + Windows TBD | Three install paths, three test matrices, three lots of edge cases. ffplay is one. |
+| **Energy-threshold + 300 ms debounce VAD (in-process JS)** | silero-vad via onnxruntime-node + `@ericedouard/vad-node-realtime` | Better accuracy in noisy rooms. Deferred to v1.4: (a) onnxruntime-node currently has known Bun load issues on Windows (Bun #18079) and broader JSC-vs-V8 native-module incompatibility, (b) adds ~15 MB install footprint plus a 5 MB Silero ONNX model. Re-evaluate when v1.4 ships if field reports surface false-negatives. |
+| **Energy-threshold + 300 ms debounce VAD (in-process JS)** | WebRTC VAD via libfvad-wasm | The middle ground — better-than-energy accuracy, ~100 KB WASM, no native module. Could be the v1.4 choice if Silero ONNX proves too heavyweight. |
+| **Energy-threshold + 300 ms debounce VAD (in-process JS)** | `@ricky0123/vad-node` | Explicitly winding down upstream — maintainer is not publishing new versions. Forbidden. |
+| **One npm package + per-platform binaries via `optionalDependencies`** | postinstall script that downloads the right binary | Documented anti-pattern: supabase #1217, openai/codex #2766. Breaks behind corporate proxies, breaks offline installs, breaks `npm install --ignore-scripts`. Use the esbuild / swc / @next/swc / @tailwindcss/oxide pattern instead. |
+| **One npm package + per-platform binaries via `optionalDependencies`** | Single platform-agnostic JS bundle (no Bun binary) | If code-signing pipeline is not ready for v1.3 ship (release operator does not have an Apple Developer ID this milestone). The bin shim's fallback path already handles this — set the macOS optionalDependencies entries to no-op shims and the JS path runs under Node/Bun whichever is on the user's machine. Trade: ~50–100 ms cold-start regression on macOS until v1.4. |
 
 ---
 
@@ -328,41 +166,62 @@ Achilles **does not depend on** `apps/relay`, `apps/bridge`, or `apps/web`. It d
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| **`eleven_turbo_v2_5`** | Officially deprecated; Flash v2.5 is the functional successor with lower latency | `eleven_flash_v2_5` |
-| **`scribe_v1`** (per Anthropic cookbook example) | Older Scribe; we want streaming + 150 ms target latency | `scribe_v2_realtime` |
-| **`@ricky0123/vad-node`** | Discontinued upstream | `@ricky0123/vad-web` in the renderer |
-| **`node-record-lpcm16`, `node-microphone`, `node-mic`** | Require SoX in user `$PATH`; hostile to `npm install -g` install footprint | Renderer-side `getUserMedia` |
-| **`naudiodon`** | Native PortAudio bindings via node-gyp; brittle on Windows; install adds C++ toolchain requirement | Renderer-side `getUserMedia` |
-| **`wavesurfer.js`** | File-oriented; live-input case is awkward (upstream issue #578) and adds ~100 kB | Hand-rolled `AnalyserNode` + Canvas2D |
-| **Tauri 2 for v1.2** | Documented `getUserMedia` permission issues on macOS in the WKWebView path (`wry#1195`, `tauri#10898`, `#11951`); cross-WebView audio behavior differs by OS | Electron 42 (one Chromium) |
-| **Building a custom STT/TTS stack** | Out of scope per `PROJECT.md` ("ElevenLabs is the chosen vendor; rolling our own audio models is not a v1.2 goal") | ElevenLabs Scribe + Flash |
-| **Native iOS/Android apps for Achilles** | Out of scope per `PROJECT.md` | Cloud-hosted Claude Code + desktop floating window is the v1.2 surface |
-| **Hooks (`UserPromptSubmit`/`SessionStart`) as the primary transcript injection path** | Hooks *augment* user prompts inside an active Claude session; they don't *originate* prompts | Agent SDK `query()` with streaming `AsyncIterable` input |
-| **MCP server as the primary loop** | MCP lets Claude *call* Achilles; we need Achilles to *drive* Claude | Agent SDK `query()`. (MCP can come later as a "speak this" tool.) |
-| **`claude -p` shell subprocess as primary loop** | Stdin 10 MB cap; spawn-per-turn cost; harder to stream cleanly | Agent SDK in-process. Keep `claude -p` as a documented fallback for users who don't have the SDK env set up. |
-| **Globally installing `electron-packager`/`electron-builder`** | Anti-pattern per `@electron/packager` docs | Dev-dep + `npm run dist` |
+| **Electron** (any version) | The entire reason v1.3 exists is to delete the Electron shell. Electron renderer code never wired end-to-end in v1.2 production (debug session `achilles-silent-launch.md`). The IPC layer, BrowserWindow management, `safeStorage`, `globalShortcut`, `powerMonitor`, and Web Audio playback queue all evaporate. | Bun-runtime single-process terminal CLI |
+| **electron-builder, electron-vite, electron-store, electron-rebuild** | All electron-toolchain. None survive. | Bun toolchain + plain JSON config at `~/.achilles/settings.json` |
+| **Web Audio APIs (`AudioContext`, `AudioWorklet`, `decodeAudioData`, `AnalyserNode`, `MediaStream`, `MediaRecorder`)** | All renderer-only browser APIs. There is no renderer in v1.3 — the TUI runs in a terminal process. | sox stdout → typed array view for PCM frames; inline RMS computation for the level meter; ffplay stdin for playback |
+| **react-dom** | No DOM. Ink uses `react-reconciler` directly with its own host config (Yoga + ANSI). Adding react-dom would bring a 130 KB+ dep and trigger Babel/JSX-runtime confusion. | Ink 7 (`react-reconciler` under the hood) |
+| **chalk 4 (last CJS major)** | CJS-only. `apps/achilles-tui` is ESM-only (`"type": "module"`). Mixing CJS chalk into an ESM tree triggers `ERR_REQUIRE_ESM` chains under Node and dual-mode confusion under Bun. | chalk 5.6+ ESM-only |
+| **wavesurfer.js** | File-oriented; live-input case awkward (upstream #578); 100 KB+ for no value here. Also, no canvas in a terminal. | Hand-rolled braille (U+2800–U+28FF) sparkline at ≈40 cells, computed inline |
+| **`globalShortcut` / global hotkeys** | Was Electron-only in v1.2 (Cmd+Shift+A PTT). Terminal CLIs do not own a global hotkey context. v1.3 drops PTT entirely — always-listening VAD is the new model. (Mark this as a UX-visible behaviour change in release notes.) | Energy-threshold VAD always-listening + Ctrl-C to exit |
+| **`safeStorage` / Electron keychain** | Electron-only. | OS env var `ELEVENLABS_API_KEY` (primary) + optional OS keychain via `@napi-rs/keyring` (if we ship a keychain integration in a later phase). keytar itself is deprecated since March 2026 — do not adopt it. |
+| **`@ricky0123/vad-node`** | Discontinued upstream. The Node port is being wound down; no new versions planned. | Energy-threshold (v1.3) → `@ericedouard/vad-node-realtime` or `libfvad-wasm` (v1.4) |
+| **`silero-vad` via `onnxruntime-node` (in v1.3)** | Bun #18079: onnxruntime-node load failure under Bun 1.2.5 on Windows. Broader JSC-vs-V8 native-module incompatibility — Node native `.node` files are compiled against V8 internals that Bun cannot use directly. Adds ~15 MB onnxruntime + ~5 MB Silero ONNX model. Not v1.3-shippable. | Energy threshold for v1.3; revisit Bun compat in v1.4 |
+| **`@ricky0123/vad-web` / `onnxruntime-web` / Audio Worklet** | All renderer-only browser APIs from v1.2. No worklet in a terminal. | Energy threshold |
+| **`naudiodon` / PortAudio bindings for v1.3** | Maintainer flags "not yet production-ready"; Bun-compat unverified; adds a native module the JSC-vs-V8 wall blocks. | sox child process |
+| **`node-record-lpcm16` / `node-microphone` / `node-mic` npm wrappers** | All wrap sox; they add an npm dep without removing the system dep. | Direct `child_process.spawn("rec", [...])` — the wire format is identical and we don't pay the wrapper's extra abstraction. |
+| **`speaker` (TooTallNate/node-speaker)** | Native module (mpg123 bundled, ~15 MB). Last published ~2 years ago. Bun-compat unverified. Not v1.3-shippable. | ffplay child process |
+| **`afplay` / `aplay` / `paplay` (platform-specific)** | Three install paths, three test matrices, three edge cases. afplay is mac-only AND does not accept stdin. aplay/paplay are Linux-only. | ffplay (one binary, three OS install paths) |
+| **postinstall scripts that fetch binaries** | Breaks behind corporate proxies, breaks `--ignore-scripts`, breaks offline. Documented anti-pattern. | `optionalDependencies` with `os`/`cpu` filters (esbuild pattern) |
+| **yao-pkg / Node SEA in v1.3** | They work; they're just a worse cold start than Bun for our usage (Bun ~15 ms vs SEA ~30–60 ms vs yao-pkg ~60–90 ms). Useful as v1.4 fallback if a hard native-module dep emerges that breaks Bun. | Bun `--compile --target=...` |
+| **`keytar`** | Repository archived 2026-03-25; last release 4 years ago; libsecret deprecation warnings on modern Linux. | `@napi-rs/keyring` if/when we add OS-keychain support |
+| **OpenTUI in v1.3** | Pre-1.0, API in flux, Zig core via `bun:ffi` (experimental). Even faster than Ink, but production risk too high for v1.3. | Ink 7 (defer OpenTUI re-evaluation to v1.4) |
+| **Blessed / blessed-contrib** | Inactive (chjj/blessed last meaningful update 2017); ~46K weekly downloads on inertia. Adopting a fork makes us own the support burden. | Ink 7 |
+| **The `mic` npm package** | Wraps sox on macOS and arecord on Linux but adds a layer over the spawn — doesn't reduce the install set, doesn't change wire format. | Direct `child_process.spawn("rec", [...])` |
+| **MCP server as the v1.3 voice-injection mechanism** | MCP lets Claude *call* Achilles, not the other way around. v1.3 still drives Claude as an external user via stdin. | `claude -p --input-format stream-json` subprocess via `@achilles/claude-code-bridge` |
+| **`@anthropic-ai/claude-agent-sdk` (the v1.2 path)** | v1.2 replaced this with the hand-rolled `claude -p` subprocess wrapper for reasons documented in the v1.2 audit (sandbox env complexity, billing-pool concerns). Do not re-introduce in v1.3. | `@achilles/claude-code-bridge` unchanged |
 
 ---
 
 ## Stack Patterns by Variant
 
-**If the user installs via `npm install -g achilles`:**
-- Primary surface is the global `achilles` binary
-- `achilles install-skill` is a one-time symlink step
-- ElevenLabs API key stored via `electron-store` + `safeStorage`
-- Updates flow through `npm update -g achilles`
+**If the user runs `npm install -g achilles` on a Bun-supported platform:**
+- bin shim resolves `@achilles/cli-<platform>-<arch>` from `optionalDependencies`
+- That sibling package contains one Bun-compiled binary (~60–100 MB unminified, smaller after `bun build --minify`)
+- Cold start ~15 ms to first Ink frame after first sox/ffplay child spawn
+- Update flow: `npm update -g achilles` pulls a new parent version, which pulls new platform sibling
 
-**If the user installs via `/plugin install achilles` inside Claude Code:**
-- Primary surface is the SKILL.md launcher
-- The skill's `scripts/launch.sh` invokes the bundled Electron binary in the skill directory (no global `achilles` needed)
-- Updates flow through Claude Code's plugin marketplace
-- API key entry is prompted on first launch by Achilles' own UI
+**If the user runs `npm install -g achilles` on an unsupported platform (e.g., a Linux distro Bun has not been tested on, or a non-x64/arm64 arch):**
+- All `optionalDependencies` resolve to no-op or are skipped by npm's `os`/`cpu` filter
+- bin shim falls through to `import("./main.js")` which is the JS bundle
+- Runs under the user's existing `node` (>=22) or `bun` on PATH
+- Cold start ~50–80 ms (Node esbuild bundle) or ~15 ms (system Bun)
 
-**If the user is on cloud-hosted Claude Code (the v1.2 primary install target):**
-- `achilles install-skill` is the recommended flow per `PROJECT.md`
-- Cloud Claude Code triggers `bash ${CLAUDE_SKILL_DIR}/scripts/launch.sh`, which on a cloud machine has no display
-- *Therefore*: Achilles needs a `--client` mode where the cloud-side `achilles` registers a relay session and the user's local Achilles window connects to it
-- **This is a known v1.2 phase that needs follow-up research** — see PITFALLS.md "Cloud-Claude-Code-has-no-display" entry
+**If the user runs `bunx achilles voice`:**
+- bunx installs the parent + the matching platform binary into its global cache
+- Subsequent invocations are cache hits (~5 ms additional vs `npm install -g`)
+- bunx is the recommended "I just want to try it" path
+
+**If the Claude Code skill body invokes the CLI:**
+- SKILL.md frontmatter `allowed-tools: Bash(achilles voice *)` gates Claude's permission to call `achilles voice`
+- Bash tool spawns the binary in the foreground; Bash tool's default 120 s timeout is overridden to 600 000 ms in the skill body for long voice sessions
+- Inside the spawned process, the TUI takes over the terminal pane; on Ctrl-C the process exits and Bash returns
+- Skill allowed-tools edge case noted in v1.3-terminal-pivot.md §10.6 / claude-code #60515 — first Bash call auto-approves, subsequent calls may prompt; we mitigate by being a one-process-per-skill-invocation model (the user only runs `achilles voice` once per session)
+
+**If the release operator does NOT have an Apple Developer ID for v1.3 ship:**
+- macOS-arm64 + macOS-x64 optionalDependencies entries ship as JS-only shim packages
+- macOS users fall through to the JS bundle path; sox + ffmpeg installation still required
+- README documents `xattr -dr com.apple.quarantine $(which achilles)` workaround for users who insist on the Bun binary
+- This is acceptable for v1.3 beta; v1.3 stable should ship signed (see PITFALLS.md macOS Gatekeeper entry)
 
 ---
 
@@ -370,64 +229,104 @@ Achilles **does not depend on** `apps/relay`, `apps/bridge`, or `apps/web`. It d
 
 | Package A | Compatible With | Notes |
 |-----------|-----------------|-------|
-| `electron@42.3.3` | `node@24.15.0` (bundled), `chromium@148` (bundled) | Use Electron's bundled Node for renderer and main process; do not mix system Node versions |
-| `@anthropic-ai/claude-agent-sdk@0.3.165` | `node@18+` | Electron 42's Node 24 satisfies this comfortably |
-| `@elevenlabs/elevenlabs-js@2.51.0` | `node@15+`, Deno 1.25+, Bun 1.0+, Cloudflare Workers | No conflict |
-| `@elevenlabs/client` (latest) | Modern browsers / Chromium-based webviews | Requires `AudioWorklet` + WebSocket; both present in Electron 42 |
-| `@ricky0123/vad-web@0.0.30` | `onnxruntime-web@1.20+`, browsers with `AudioWorklet` | Audio Worklet support is required; Electron 42's Chromium 148 is fine |
-| `@anthropic-ai/claude-agent-sdk` ↔ Claude Code session | Starting June 15 2026, Agent SDK usage on subscription plans draws from a **separate** monthly Agent SDK credit pool, distinct from interactive Claude Code limits | Document in `PITFALLS.md` — billing implication for end users |
-| `electron-builder@25` | `electron@42` | Compatible; codesigning for macOS requires Apple Developer cert at release time |
+| `bun@1.3.14` | Node-compat shim covers most `node:*` modules including `child_process`, `fs`, `path`, `util`, `events`, `stream`, `crypto`, `os`. Native `WebSocket` matches WHATWG spec exactly. | Bun does NOT typecheck — `tsc -p . --noEmit` must run in CI separately. |
+| `node@22.x LTS` | Stable WebSocket Web API (since Node 22.4); stable test runner; permission model API surface | Floor for the source-compat fallback path. Node 22 enters Maintenance LTS Oct 2026 and EOL Apr 2027 — fine for v1.3 ship window. |
+| `ink@7.0.5` | `react@^19.0.0` peer; Node 18+ documented (Bun 1.0+ also runs Ink without changes; OpenTUI and Ink share the same react-reconciler base in practice) | Ink 7 broke ink-spinner compatibility briefly in April 2026; `ink-spinner@5.0.0+` is the matching version. |
+| `react@19.2.7` | `react-reconciler` (peer for Ink); the Ink reconciler version matches | Do not install `react-dom` — it's not needed and would inflate the bundle. |
+| `@clack/prompts@1.5.1` | Bun ≥ 1.0; Node ≥ 18 | ESM-only. Pairs with `@clack/core@1.x` (peer). |
+| `chalk@5.6.x` | ESM-only | Cannot coexist with chalk 4 in the dep tree — pin to 5.6.x exactly across the workspace to defend against dual-pkg-hazard. |
+| `log-update@7.2.0` | ESM-only; Node 18+ | Used only when Ink falls back to raw-ANSI mode. |
+| `sox@14.4.2` (system) | Stable wire format since 2015; the `rec` alias is present on macOS and Linux | Windows installs as `sox.exe`; use `sox.exe -q -d ...` instead of `rec`. |
+| `ffmpeg@8.1.1` (system, includes `ffplay`) | Stable mp3 decode pipeline; `pipe:0` stdin path stable since 4.x | The `ffplay` binary is the same package as `ffmpeg` on every platform — one install line. |
+| Surviving voice packages (`@achilles/voice-{protocol,stt,tts}@1.3.0`, `@achilles/claude-code-bridge@1.3.0`, `@achilles/achilles-skill@1.3.0`) | Bun ≥ 1.0 AND Node ≥ 22 (verified via DI seams) | Internal workspace deps; version bump v1.3.0 even though code is byte-for-byte identical for voice-protocol/stt/tts/claude-code-bridge — keeps the monorepo version-cascade clean. achilles-skill changes one SKILL.md line + tightens `allowed-tools`. |
+
+---
+
+## Risk Summary — Surfaced to the Roadmapper
+
+These are the load-bearing assumptions where v1.3 implementation could derail. Each cross-references the deeper treatment in `v1.3-terminal-pivot.md` §10 (Risks and Open Questions).
+
+| Risk | Severity | Mitigation in this stack | Cross-ref |
+|------|----------|--------------------------|-----------|
+| macOS TCC mic-permission inherited from parent terminal — VS Code integrated terminal may not have the entitlement | HIGH | `achilles init` runs sox-open smoke test; on EPERM, prints OS-specific instruction; README documents the VS Code-integrated-terminal failure mode prominently | §10.1 |
+| macOS Gatekeeper quarantine on unsigned Bun-compiled binary | HIGH | If Apple Developer ID available: codesign + notarise in CI matrix. If not: macOS-arm64/x64 platform packages ship JS-shim; users get the slower JS path but skip Gatekeeper | §10.2 |
+| Two system binary deps (sox + ffmpeg) is a regression from v1.2's bundled Electron | MEDIUM | `achilles init` runs `which sox && which ffmpeg`; surface install line on miss; optionally invoke `brew install sox ffmpeg` / `apt install` / `choco install` via subprocess | §10.3 |
+| Bun child_process SIGINT forwarding to spawned process group on macOS | LOW | Bun 1.3+ documented to handle simple `pipe` stdio (which we use); smoke-test the SIGINT chain in Phase 17 with mock loop clients | §10.8 |
+| onnxruntime-node + Bun for v1.4 silero swap | LOW (v1.3); HIGH (v1.4 contingency) | Energy-threshold VAD ships in v1.3; defer silero compat verification to a v1.4 spike before commit. If silero+Bun proves unworkable, fall through to libfvad-wasm or run silero in a Node sidecar process | §10.7 |
+| Single-instance enforcement (two `achilles voice` in two terminals) | MEDIUM | `~/.achilles/voice.lock` PID file checked at startup; refuse second instance with clear message | §10.4 |
+| Sleep/wake / device hot-swap (sox or ffplay dies on wake) | MEDIUM | Watch child exit codes; respawn cap 3-in-10s; document the failure mode; no powerMonitor equivalent in terminal | §10.5 |
+| Claude Code skill Bash tool timeout vs long-running voice session | LOW | Skill body sets Bash timeout to 600 000 ms; voice sessions ≤ 10 minutes are well inside that budget | §10.6 |
 
 ---
 
 ## Sources
 
-**Context7 (HIGH confidence):**
-- `/nothflare/claude-agent-sdk-docs` — `query()` function signature, streaming `AsyncIterable<SDKUserMessage>` input pattern, TypeScript SDK examples
+**Bun runtime (HIGH confidence — official docs verified 2026-06-08):**
+- [Bun 1.3 release blog](https://bun.com/blog/bun-v1.3) — single-binary cross-compile, Anthropic acquisition referenced
+- [Bun v1.3.14 release](https://bun.com/blog/bun-v1.3.14) — latest patch as of 2026-06-04
+- [Bun v1.3.10 release](https://bun.com/blog/bun-v1.3.10) — Windows ARM64 cross-compile target
+- [Bun single-file executables](https://bun.com/docs/bundler/executables) — `--compile --target=bun-{darwin,linux,windows}-{x64,arm64}`
+- [Bun WebSockets](https://bun.com/docs/runtime/http/websockets) — native WebSocket, browser-compat, `ws` polyfill at `src/js/thirdparty/ws.js`
+- [Bun spawn / child_process](https://bun.com/reference/node/child_process/spawn) — `posix_spawn(3)` underneath, 60% faster, killSignal/AbortSignal compat
+- [Bun.spawn reference](https://bun.com/reference/bun/spawn) — signal forwarding, stdio modes
 
-**Anthropic official docs (HIGH confidence):**
-- [Extend Claude with skills](https://code.claude.com/docs/en/skills) — SKILL.md format, install paths, `${CLAUDE_SKILL_DIR}`, network access policy
-- [Agent skills overview (Claude Platform)](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) — frontmatter constraints, progressive disclosure, runtime environment by surface
-- [Run Claude Code programmatically (headless)](https://code.claude.com/docs/en/headless) — `claude -p`, `--input-format stream-json`, 10 MB stdin cap, `system/init` event, Agent SDK credit pool note
-- [Agent SDK TypeScript reference](https://code.claude.com/docs/en/agent-sdk/typescript) — `query()`, `startup()`, options, async iterable prompts
-- [Hooks reference](https://code.claude.com/docs/en/hooks) — 12 lifecycle events, `UserPromptSubmit`/`SessionStart` JSON I/O
-- [Connect to external tools with MCP](https://code.claude.com/docs/en/agent-sdk/mcp) — `claude mcp add --transport stdio`, `allowedTools: mcp__*` pattern
-- [Low-latency voice assistant cookbook (Claude + ElevenLabs)](https://platform.claude.com/cookbook/third-party-elevenlabs-low-latency-stt-claude-tts) — end-to-end latency numbers, streaming pattern
+**Ink TUI (HIGH confidence — verified 2026-06-08):**
+- [ink on npm](https://www.npmjs.com/package/ink) — current 7.0.5, React 19 baseline
+- [ink GitHub](https://github.com/vadimdemedes/ink) — v7.0 April 2026 with React 19 (`useEffectEvent`), ~900K weekly downloads
+- [ink-spinner on npm](https://www.npmjs.com/package/ink-spinner) — 5.0.0 for Ink 7 + React 19 compat
+- [PkgPulse: Ink vs Clack vs Enquirer 2026](https://www.pkgpulse.com/guides/ink-vs-clack-vs-enquirer-interactive-cli-nodejs-2026) — head-to-head positioning
 
-**ElevenLabs official docs (HIGH confidence):**
-- [Realtime STT API reference](https://elevenlabs.io/docs/api-reference/speech-to-text/v-1-speech-to-text-realtime) — WebSocket URL, audio encodings, message types, token auth
-- [Client-side streaming guide](https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/realtime/client-side-streaming) — `@elevenlabs/client` `Scribe.connect()` API, single-use token TTL
-- [Scribe v2 Realtime overview](https://elevenlabs.io/realtime-speech-to-text) — 150 ms latency, 93.5% accuracy, 30 languages, built-in VAD
-- [Models overview](https://elevenlabs.io/docs/overview/models) — Flash v2.5 (`eleven_flash_v2_5`, ~75 ms), Turbo v2.5 deprecated, Scribe v2 Realtime IDs
-- [Meet Flash](https://elevenlabs.io/blog/meet-flash) — Flash positioning, latency, pricing
-- [Streaming TTS guide](https://elevenlabs.io/docs/eleven-api/guides/how-to/text-to-speech/streaming) — `textToSpeech.stream()`, audio chunk delivery
-- [Multi-Context WebSocket](https://elevenlabs.io/docs/api-reference/text-to-speech/v-1-text-to-speech-voice-id-multi-stream-input) — utterance interruption for streaming responses
-- [Latency optimization](https://elevenlabs.io/docs/eleven-api/guides/how-to/best-practices/latency-optimization) — Flash + streaming guidance
-- [Pricing](https://elevenlabs.io/pricing) and [Pricing 2026 breakdown (Cekura)](https://www.cekura.ai/blogs/elevenlabs-pricing) — STT/TTS per-minute, Agents bundle ($0.08–$0.12/min)
+**React 19 (HIGH confidence — verified 2026-06-08):**
+- [react on npm](https://www.npmjs.com/package/react) — 19.2.7, released 2026-06-01
+- [React 19.2 release blog](https://react.dev/blog/2025/10/01/react-19-2) — feature baseline
+- [React versions](https://react.dev/versions) — LTS posture
 
-**npm registry / GitHub (HIGH confidence on versions):**
-- [`@anthropic-ai/claude-agent-sdk` on npm](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) — current 0.3.165, Node 18+
-- [`@elevenlabs/elevenlabs-js` GitHub](https://github.com/elevenlabs/elevenlabs-js) — current 2.51.0 (Jun 2 2026), Node 15+
-- [`@ricky0123/vad-web` on npm](https://www.npmjs.com/package/@ricky0123/vad-web) — 0.0.30, ONNX Web + Audio Worklet
-- [`ricky0123/vad` GitHub](https://github.com/ricky0123/vad) — Node port discontinuation note
+**System binaries (HIGH confidence — official sources verified 2026-06-08):**
+- [SoX Homebrew formula](https://formulae.brew.sh/formula/sox) — 14.4.2 with optional flac/lame/vorbis/opus
+- [SoX 14.4.2 on SourceForge](https://sourceforge.net/projects/sox/files/sox/14.4.2/) — Win32 binaries
+- [SoX Chocolatey package](https://community.chocolatey.org/packages/sox.portable) — sox.portable 14.4.1 on choco (slightly behind upstream)
+- [ffmpeg 8.1.1 release](https://www.free-codecs.com/ffmpeg_download.htm) — 2026-05-04
+- [ffmpeg endoflife.date](https://endoflife.date/ffmpeg) — release schedule
 
-**Electron docs (HIGH confidence):**
-- [Electron Releases](https://releases.electronjs.org/) — 42.3.3 latest stable (Jun 3 2026), Chromium 148, Node 24.15.0
-- [BrowserWindow API](https://www.electronjs.org/docs/latest/api/browser-window) — `transparent`, `alwaysOnTop`, `frame: false`, `focusable: false`, `type: "panel"`, `setAlwaysOnTop("screen-saver")`
-- [Electron installation tutorial](https://www.electronjs.org/docs/latest/tutorial/installation) — dev-dep preference, not global install
+**Distribution pattern (HIGH confidence — verified 2026-06-08):**
+- [esbuild PR #1621 — install via optionalDependencies](https://github.com/evanw/esbuild/pull/1621) — canonical reference for the pattern
+- [esbuild platform-specific binaries on DeepWiki](https://deepwiki.com/evanw/esbuild/6.2-platform-specific-binaries)
+- [pnpm 11.2 release](https://pnpm.io/blog/releases/11.2) — pnpm support for the optionalDependencies platform-binary pattern
+- [Sentry: How to publish binaries on npm](https://sentry.engineering/blog/publishing-binaries-on-npm) — modern walkthrough
 
-**Tauri docs (MEDIUM — used to disqualify Tauri):**
-- [tauri-apps/wry#1195](https://github.com/tauri-apps/wry/issues/1195) — `getUserMedia()` permission prompt issues on macOS
-- [tauri-apps/tauri#10898](https://github.com/tauri-apps/tauri/issues/10898) — "How do I use the microphone"
-- [tauri-apps/tauri#11951](https://github.com/tauri-apps/tauri/issues/11951) — macOS mic/cam permission not prompted
-- [Tauri vs Electron benchmarks (PkgPulse 2026)](https://www.pkgpulse.com/blog/best-desktop-app-frameworks-2026) — bundle/memory comparison
+**Supporting libraries (HIGH confidence — verified 2026-06-08):**
+- [@clack/prompts on npm](https://www.npmjs.com/package/@clack/prompts) — 1.5.1
+- [chalk on npm](https://www.npmjs.com/package/chalk) — 5.6.x ESM-only series
+- [chalk releases](https://github.com/chalk/chalk/releases) — 5.0+ ESM-only baseline
+- [log-update on npm](https://www.npmjs.com/package/log-update) — 7.2.0, May 2026, ESM-only
+- [ansi-escapes on npm](https://www.npmjs.com/package/ansi-escapes) — 7.2.0, Feb 2026
 
-**Distribution / dual-target (MEDIUM — pattern composed from multiple references):**
-- [openskills on npm](https://www.npmjs.com/package/openskills) — single-installer multi-agent skill loader pattern
-- [Anthropic skills GitHub](https://github.com/anthropics/skills) — reference implementations for `SKILL.md` + `scripts/` layout
-- [Cross-Agent Skills as the new npm (Termdock)](https://www.termdock.com/en/blog/cross-agent-skills-new-npm) — "single source + multi-target installer" pattern
+**Node.js LTS (HIGH confidence — verified 2026-06-08):**
+- [Node.js previous releases](https://nodejs.org/en/about/previous-releases) — release schedule
+- [Node.js endoflife.date](https://endoflife.date/nodejs) — 22 LTS until Apr 2027, 24 Active LTS, 26 current
+- [PkgPulse: Node 22 vs Node 24 in 2026](https://www.pkgpulse.com/guides/nodejs-22-vs-nodejs-24-2026) — comparison
+
+**Bun native-module compatibility (MEDIUM — verified through known issues):**
+- [Bun #18079: onnxruntime-node doesn't work in 1.2.5](https://github.com/oven-sh/bun/issues/18079) — the v1.4 silero risk
+- [onnxruntime-node compatibility](https://onnxruntime.ai/docs/reference/compatibility.html) — Node 16+, no formal Bun support
+- [Bun vs Node 2026 production runtime — Pickuma](https://pickuma.com/posts/bun-vs-nodejs-2026-production-runtime/) — JSC vs V8 .node-file limitation
+- [Bun compatibility 2026 — Alex Cloudstar](https://www.alexcloudstar.com/blog/bun-compatibility-2026-npm-nodejs-nextjs/) — broad surface
+
+**VAD (HIGH confidence on package status):**
+- [@ricky0123/vad-node on npm](https://www.npmjs.com/package/@ricky0123/vad-node) — discontinuation note in README
+- [vad-node-realtime fork](https://github.com/eric-edouard/vad-node-realtime) — community-active alternative for v1.4
+- [Silero VAD GitHub](https://github.com/snakers4/silero-vad) — performance baseline
+
+**Keychain (HIGH confidence on deprecation):**
+- [keytar on npm](https://www.npmjs.com/package/keytar) — archived 2026-03-25
+- [@napi-rs/keyring](https://github.com/Brooooooklyn/keyring-node) — recommended replacement
+
+**v1.3 architectural source of truth (this repo):**
+- `/Users/lakshmanturlapati/Documents/Codes/Handoff/.planning/research/v1.3-terminal-pivot.md` — primary architecture research, §§1–12 + Appendix A
+- `/Users/lakshmanturlapati/Documents/Codes/Handoff/.planning/PROJECT.md` — milestone definition, target features, constraints
+- `/Users/lakshmanturlapati/Documents/Codes/Handoff/.planning/debug/achilles-silent-launch.md` — v1.2 live-validation root cause
 
 ---
 
-*Stack research for: Achilles v1.2 voice companion skill for Claude Code (Electron + Anthropic Agent SDK + ElevenLabs Scribe v2 Realtime STT + Flash v2.5 TTS, dual-distributed as Claude Code skill and global npm CLI from one monorepo package).*
-*Researched: 2026-06-06*
+*Stack research for: v1.3 Terminal-only Achilles — Bun-runtime CLI rendering Ink 7 + React 19 TUI, sox mic capture, ffplay TTS playback, energy-threshold VAD, single npm package with per-platform Bun-compiled binaries via optionalDependencies. Reuses the four shipped voice packages (`@achilles/voice-protocol`, `@achilles/voice-stt`, `@achilles/voice-tts`, `@achilles/claude-code-bridge`) and `@achilles/achilles-skill` untouched except for a one-line SKILL.md edit.*
+*Researched: 2026-06-08*

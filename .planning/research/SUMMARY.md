@@ -1,206 +1,285 @@
 # Project Research Summary
 
-**Project:** v1.2 Achilles — Voice companion for Claude Code
-**Domain:** Voice front-end for a terminal coding agent, distributed as both a Claude Code skill and an npm CLI from one source of truth
-**Researched:** 2026-06-06
-**Confidence:** HIGH on stack/protocols/UX patterns; MEDIUM on cloud-hosted Claude Code integration shape (the v1.2 primary target as named in PROJECT.md has a structural conflict that REQUIREMENTS.md must resolve before any phase ships)
+**Project:** v1.3 Terminal-only Achilles — Bun-runtime CLI voice companion for Claude Code
+**Domain:** Single-process terminal voice surface that runs the full voice loop inside the calling terminal (Ink TUI + sox + ffplay + energy-VAD), distributed as one npm package with per-platform Bun-compiled binaries plus a Claude Code skill that shells into the same binary
+**Researched:** 2026-06-08
+**Confidence:** HIGH for stack/architecture/feature reuse (the four surviving voice packages have validated DI seams; Bun + Ink + sox + ffplay are well-trodden 2026 patterns); HIGH for the v1.2 silent-launch replay-prevention catalogue (root-caused in `.planning/debug/achilles-silent-launch.md`); MEDIUM for macOS Gatekeeper end-state (depends on Apple Developer ID acquisition); MEDIUM for adaptive-VAD field tuning in noisy environments (energy threshold is best-effort; silero is the v1.4 upgrade path)
 
 ## Executive Summary
 
-Achilles is a single-user desktop voice surface for Claude Code. The expert consensus across all four research streams is that this is an Electron app with a tiny Claude Code skill body that shells out to it. The Electron app captures microphone audio in the renderer via `getUserMedia`, streams 16 kHz PCM mono frames to the main process, ships them up to ElevenLabs Scribe v2 Realtime STT over a renderer-side WebSocket (using single-use tokens so the API key never leaves main), feeds committed transcripts to a child `claude` process (either via the `@anthropic-ai/claude-agent-sdk` `query()` AsyncIterable shape or via `claude -p --output-format stream-json` subprocess — both are documented; SDK path is preferred when available, subprocess is the universal fallback), and pipes Claude's streamed assistant text — gated by an embedded system prompt that mandates a short spoken acknowledgement first and a tight spoken completion at the end — into ElevenLabs Flash v2.5 TTS streamed back to the renderer for playback. P50 latency target speech-end-to-first-audible-byte is 600-800 ms, P95 1100 ms.
+v1.3 is a deliberate architectural pivot, not a v1.2.1 patch. The v1.2 binary shipped with every requirement "code-side verified" yet the renderer voice loop was never wired end-to-end (preload IPC channels weren't exposed; renderer never instantiated mic capture or STT). v1.3 deletes the Electron shell entirely (`apps/achilles` + `apps/achilles-cli`), folds both into a single new `apps/achilles-terminal/` workspace, and runs the entire voice loop in one Bun process that renders Ink 7.0.5 + React 19.2.7 directly into the calling terminal. The four shipped voice packages (`@achilles/voice-protocol`, `@achilles/voice-stt`, `@achilles/voice-tts`, `@achilles/claude-code-bridge`) and `@achilles/achilles-skill` all survive byte-for-byte untouched — their `webSocketCtor` and `spawnImpl` DI seams (verified at exact line numbers in `packages/voice-stt/src/realtime-client.ts:95-98`, `packages/voice-tts/src/stream-client.ts:92`, `packages/claude-code-bridge/src/session.ts:71-78`) accept Bun's native `WebSocket` and node-compat `spawn` without modification. The single edit outside the new workspace is one SKILL.md line: `achilles launch` → `achilles voice`.
 
-The product is built around four visible states (idle/listening/processing/speaking), a frameless transparent always-on-top "panel" window with a hand-rolled Canvas waveform off `AnalyserNode`, push-to-talk only (no wake word, no continuous mode, no full barge-in in v1.2), and half-duplex turn-taking with the mic gated during TTS playback. Voice-out is the explicit wedge against Claude Code's built-in `/voice` (which only dictates in) and against community Voice Mode MCP (which speaks but has no first-class UI). The single npm tarball ships both the CLI binary (via `bin` entry) and the SKILL.md-rooted skill directory; `achilles install-skill` symlinks the skill body into `~/.claude/skills/achilles/` so the two distribution surfaces are one source of truth.
+The recommended technical approach is opinionated across all four research streams: **Bun 1.3.14+** as primary runtime with `bun build --compile --target=...` producing five per-platform binaries shipped via `optionalDependencies` (the canonical 2026 esbuild/swc/biome pattern), **Node 22 LTS** as the JS-bundle fallback path via a 30-line bin shim, **Ink 7.0.5 + React 19.2.7** for the TUI (Ink 6 was referenced in v1.3-terminal-pivot.md but Ink 7 ships React 19 baseline and is what we should pin), **sox `rec`** child process for 16 kHz mono s16le PCM mic capture (zero native bindings, exact Scribe v2 wire format), **ffplay** child process for gapless MP3 TTS playback via stdin pipe (replaces the deleted v1.2 Web Audio queue), **hand-rolled energy-threshold + 60ms-voice-hold + 300ms-silence-hold VAD** in <60 lines of pure JS (replaces v1.2's PTT hotkey — silero-vad is the v1.4 upgrade behind the same `VadHandle` interface), and **@clack/prompts** for the `achilles init` wizard + `TypedFallback` inline text input when the STT circuit breaker trips. The v1.2 SAFE/LOOP/PROMPT contract ports verbatim through the new in-process EventEmitter architecture; the `SPEAKING_DEBOUNCE_MS = 300` half-duplex gate and the companion-prompt SHA-256 source-of-truth check both survive unchanged.
 
-**The unresolved scope question:** PROJECT.md names cloud-hosted Claude Code as the v1.2 primary install target, but all three deeper research outputs (STACK, ARCHITECTURE, PITFALLS) independently flag that cloud-hosted Claude Code cannot reach the developer's local microphone, has no local display surface for the floating UI, and skills do not sync across surfaces (claude.ai, API, Code). REQUIREMENTS.md must pick exactly one of three resolutions before any phase ships: **(a)** reinterpret "cloud" as "local Claude Code installed via cloud-distributed skill bundle" — every research output's architecture survives this with no changes; **(b)** split into local audio capture + cloud transcript injection — requires naming the transport (the Handoff relay already in this monorepo is a candidate but would expand the security boundary); or **(c)** defer the cloud target to v1.3 and ship local-first in v1.2. Top risks across all research streams converge on echo-loop self-triggering (mitigated by half-duplex + headphone recommendation), hallucinated completion summaries on failed jobs (mitigated by deriving completion from exit code + `tool_result` events, not LLM narration), TCC mic permission attributed to the terminal not Achilles on macOS (mitigated by the Electron host owning the prompt), and the Ink/programmatic-newline gotcha in `claude` interactive mode (mitigated by using non-interactive `--output-format stream-json`).
+The key risks across all four research streams converge into five non-negotiable structural gates the roadmap must enforce. **(1) Skill body MUST stay foreground.** The v1.2 `apps/achilles-cli/src/commands/launch.ts:155` set `stdio: "ignore"` and detached the Electron app, which is part of why the silent-launch shipped — the launching terminal could not see the children failing. v1.3 SKILL.md must document `BASH_MAX_TIMEOUT_MS=86400000` in `~/.claude/settings.json` at the top of the body (because the Bash tool's default 120s timeout would otherwise kill any session longer than 2 minutes — anthropics/claude-code#5615), the skill body must run `achilles voice` foreground (no `&`, no `nohup`, no `disown`), and a lint rule must fail the build if `stdio.*ignore` reappears on the launch path. **(2) Phase 20 ships three real-binary asciicasts (RBS-1/2/3) as non-optional success criteria** — RBS-1 = fresh `npm install -g achilles@<this-build>` → `achilles init` → `achilles voice` → audible round-trip within 8s on darwin-arm64 + linux-x64 + win32-x64; RBS-2 = same loop invoked from inside Claude Code's skill body with `Bash(achilles voice *)`, asserting Ctrl-C cleanly tears down sox + ffplay + claude + WSS connections (no `ps`-visible orphans); RBS-3 = `--save-transcripts` round-trip + `transcripts list/purge` from the real binary. The auditor cannot mark v1.3 anything other than `tech_debt` without these three asciicasts committed to `.planning/milestones/v1.3-evidence/`. **(3) Apple Developer ID acquisition is the Phase 19 release gate** — without it, macOS binaries ship as a v1.3.0-beta with a README-documented `xattr -dr com.apple.quarantine` workaround and JS-fallback path; with it, the binaries are codesign + notarytool-stapled and Phase 20 SC-1 verifies via `spctl --assess --type execute` from a fresh macOS account. **(4) macOS TCC parent-process attribution is the silent-killer for VS Code + Cursor users** (microsoft/vscode#307364, May 2026) — `achilles init` must walk `ps` upward, detect the parent terminal emulator, and print a per-emulator remediation script; the VS Code-integrated-terminal case fails silently on macOS Sequoia without intervention. **(5) Phase 18 init wizard must run real-device smoke tests** (1-second sox open + 1-second ffplay open + 1-utterance round-trip) — not merely `which sox && which ffmpeg` — and ambient calibration (5 seconds of silence to seed the EWMA noise floor) is the smallest viable VAD onboarding.
 
 ## Key Findings
 
 ### Recommended Stack
 
-Single npm package with one Electron application, dual-distributed as a global CLI and a SKILL.md-rooted Claude Code skill. All audio I/O and the floating UI live in the renderer; sockets, keystore, and the Claude bridge live in the main process. ElevenLabs Scribe v2 Realtime is used for STT (~150 ms inference) and Flash v2.5 for TTS (~75 ms first-byte). The Claude Code integration is the Agent SDK `query()` AsyncIterable pattern when in-process, with `claude -p --output-format stream-json` subprocess as the universal fallback (and the canonical path for cloud-auth + version-independence). Detailed versions, install commands, and rejection rationale for alternatives are in `STACK.md`.
+The v1.3 stack is the minimum surface that delivers the terminal-only pivot, preserves every v1.2 SAFE/LOOP/PROMPT contract, and structurally prevents the v1.2 silent-launch failure mode. Distribution is one npm package `achilles@1.3.0` with `bin.achilles` pointing at a 30-line JS shim that prefers the per-platform Bun binary (resolved via `optionalDependencies` filtered by `os`/`cpu`) and falls back to a Node 22+ esbuild bundle when the binary is missing or quarantined. Full versions, install lines, and the rejected-alternatives matrix are in `STACK.md`.
 
 **Core technologies:**
-- **Electron 42.3.3** — frameless transparent always-on-top floating window with `focusable: false`, `type: 'panel'` on macOS, identical Chromium audio behavior across macOS/Windows/Linux — chosen over Tauri because Tauri has documented `getUserMedia` permission edge cases on macOS (wry#1195, tauri#10898, #11951) that are an unacceptable risk for an audio-first product.
-- **`@anthropic-ai/claude-agent-sdk` 0.3.165** (primary) and **`claude -p --output-format stream-json`** subprocess (fallback) — the SDK gives a typed `AsyncGenerator<SDKMessage>` for streaming Claude output and accepts `AsyncIterable<SDKUserMessage>` as input; the subprocess shape is the universal path that works regardless of SDK availability and is the natural pairing for `--append-system-prompt-file` and `--resume <sid>`.
-- **`@elevenlabs/client`** (renderer, browser SDK) for `Scribe.connect()` over WebSocket with a single-use 15-min token — keeps the API key in main; avoids native PortAudio (`naudiodon`) and SoX (`node-record-lpcm16`) install pain.
-- **`@elevenlabs/elevenlabs-js` 2.51.0** (main process) for Flash v2.5 streaming TTS — `textToSpeech.stream(voiceId, { modelId: 'eleven_flash_v2_5' })` returns audio chunks; recommended over deprecated Turbo v2.5.
-- **`@ricky0123/vad-web` 0.0.30** (Silero VAD via ONNX in an Audio Worklet) for end-of-utterance detection — the Node port is discontinued upstream; renderer-only is the right call and matches the Electron choice.
-- **Hand-rolled Canvas2D + `AnalyserNode`** for waveform/reactive circle — wavesurfer.js is file-oriented (issue #578) and adds 100 kB+ for no value here; ~30 lines of code do the live amplitude visualisation.
-- **commander + electron-vite + electron-builder + electron-store + zod** — CLI surface, build pipeline, signed cross-platform installers, encrypted local config (via macOS Keychain / Windows DPAPI), runtime IPC validation.
+
+- **Bun 1.3.14+** — Primary runtime; `bun build --compile --target=bun-{darwin,linux,windows}-{x64,arm64}` produces self-contained per-platform binaries with ~9-15ms cold start (vs Node 22 ~50-120ms). Bun is itself how Claude Code ships; the skill body invocation pathway is Bun-on-Bun. Native `WebSocket` (uWebSockets-backed, matches WHATWG spec) + native `child_process.spawn` shim (60% faster than Node via `posix_spawn(3)`) are exactly the two surfaces the surviving voice packages already inject through seams.
+- **Node 22.x LTS** — Source-compat target + JS-bundle fallback runtime. Required because the TypeScript source must execute under both Bun and Node 22 so the bin shim's fallback path is real (not theoretical) and so the dual-runtime CI matrix can catch drift. Node 22 ships the WebSocket Web API as stable (no `ws` polyfill in source code).
+- **Ink 7.0.5 + React 19.2.7** — TUI host. Ink 7 is the first release with first-class React 19 support (uses `useEffectEvent`); v1.3-terminal-pivot.md called for Ink 6 but Ink 7 supersedes it and is what we should pin. ~900K weekly downloads, used by Claude Code itself. 30 fps internal cap is well above our 20 fps audio-reactive target. Pulsing blob (7×7 Unicode block grid U+2580–U+259F) + braille sparkline (40 cells × 80 samples, U+2800–U+28FF) + state line reconcile cheaply because the DOM tree is ~100 visible cells.
+- **sox 14.4.2** (system binary; `brew install sox` / `sudo apt install sox` / `choco install sox.portable`) — Mic capture via `rec -q -t raw -r 16000 -b 16 -e signed -c 1 -` produces Scribe v2 Realtime's exact required format with no in-process resampling and zero native bindings. Same install line semantics on all three platforms.
+- **ffmpeg 8.1.1 / ffplay** (system binary; ffplay ships with the ffmpeg package) — TTS playback via `ffplay -nodisp -autoexit -loglevel quiet -fflags nobuffer -flags low_delay -i pipe:0` for gapless MP3 streaming from stdin. Replaces the deleted v1.2 renderer-side Web Audio `decodeAudioData` queue and removes the "clicky" small-chunk artefacts. Native MP3 frame-boundary handling keeps the `CHUNK_LENGTH_SCHEDULE = [80, 120, 160, 220]` cadence gapless.
+- **Hand-rolled energy-threshold VAD** — `<60` lines of pure JS implementing RMS-over-frame + hysteresis (60ms voice-hold, 300ms silence-hold). Zero install cost, sub-millisecond per frame. The `VadHandle` interface is purpose-built so silero-vad swap-in is one file change for v1.4. silero is deferred because onnxruntime-node has known Bun load issues (Bun #18079) and adds ~20 MB install footprint.
+- **@clack/prompts 1.5.1** — `achilles init` wizard, `achilles config` settings menu, and the inline `TypedFallback` text input when the STT circuit breaker trips. Bun-compat verified upstream. Replaces the deleted v1.2 Electron-based init window and `TypedFallback.tsx`.
+- **chalk 5.6.x + log-update 7.2.0 + ansi-escapes 7.2.0 + commander 12.x** — ANSI color helpers (inside Ink `<Text>` style props), raw-ANSI fallback render loop (when Ink fails to detect a TTY), cursor escapes, and the subcommand router for `achilles voice/init/config/install-skill/transcripts/latency`. All ESM-only; the new workspace ships `"type": "module"`.
+- **`@achilles/voice-protocol` + `voice-stt` + `voice-tts` + `claude-code-bridge` + `achilles-skill`** — All five workspace packages survive untouched (achilles-skill changes one SKILL.md line). The DI seams (`webSocketCtor`, `spawnImpl`) accept both Bun-native and Node-native implementations without code change.
+
+**Critical version pin notes:**
+- v1.3-terminal-pivot.md referenced Ink 6 throughout; SUMMARY locks Ink 7.0.5 as the correct pin (April 2026 major release; React 19 baseline; matches our state-hook patterns).
+- Workspace layout locks at `apps/achilles-terminal/` + five sibling `apps/cli-<platform>-<arch>/` platform-binary packages (NOT `packages/cli-*` — `apps/` is the right home because these are distribution artifacts, not libraries).
 
 ### Expected Features
 
-The product cleanly partitions into table stakes that match every voice-agent UX precedent (ChatGPT, Pi, Vapi, Wispr, Aqua, Claude Code `/voice`), differentiators that widen the gap against `/voice` and Voice Mode MCP, and anti-features that are commonly requested but explicitly out of scope for v1.2. Full breakdown including dependency graph and competitor matrix is in `FEATURES.md`.
+The full feature catalogue (table stakes, differentiators, anti-features, dependency graph) is in `FEATURES.md`. The v1.3 product preserves every v1.2 SAFE/LOOP/PROMPT requirement verbatim — only the input/output surface changes. Six structural feature classes drive Phase 15-20 scoping:
 
-**Must have (table stakes):**
-- Four visible states with explicit `error` as a fifth (idle / listening / processing / speaking / error).
-- Push-to-talk hotkey + on-screen click; mute/pause; visible mic-capturing state.
-- Floating always-on-top frameless panel window ~220-300px square with drag-to-reposition.
-- Live reactive circle (amplitude-driven scale + glow) and waveform (mic during listening, TTS during speaking — same component, switched audio source).
-- ElevenLabs STT streaming with partial + committed transcripts; transcript shown live in the floating UI as confirmation (not editable — Aqua/Wispr precedent + OpenAI regression backlash).
-- Transcript piped into Claude Code as if typed by the user.
-- Embedded system prompt that produces a one-sentence acknowledgement at start (<=12 words / ~2 s of audio) and a tight `<spoken-summary>` block at completion (<=40 words / ~10-25 s).
-- Completion-summary extractor that routes only the ack and the `<spoken-summary>` block to ElevenLabs TTS — never tool calls, never code, never paths.
-- ElevenLabs TTS playback of ack + completion via Flash v2.5 streaming.
-- `achilles init` first-run wizard: API key prompt -> mic permission flow -> voice selection -> smoke test round-trip.
-- Single npm artifact serving both `npm install -g achilles` and `~/.claude/skills/achilles/` symlink; `achilles install-skill` subcommand.
-- OS mic permission handling with explicit remediation copy (deep-link to System Settings).
-- Privacy defaults: API key stored only in main-process keystore, never persisted transcripts, only outbound network is ElevenLabs.
+**Must have (table stakes for v1.3 to ship):**
+- **TUI shell with 5-state colors + reactive pulsing blob + braille sparkline + status row** — visual continuity with v1.2's floating circle + canvas waveform. Without these, the terminal surface feels like a generic CLI.
+- **Energy-threshold VAD always-listening with mute toggle (`m` key)** — replaces the v1.2 Cmd+Shift+A PTT hotkey. The mute toggle is a privacy expectation; lacking it is a red flag.
+- **sox child for mic capture + ffplay child for TTS playback** — replaces v1.2 `getUserMedia` + Web Audio playback queue. Hard external system deps with per-platform install lines surfaced in `achilles init`.
+- **Half-duplex turn-taking via existing `SPEAKING_DEBOUNCE_MS = 300`** — ported verbatim from v1.2 `session.ts:112`. The constant doesn't care whether the playback is Web Audio or ffplay; the primitive holds.
+- **`achilles init` wizard with sox/ffmpeg preflight + 1-utterance smoke test + ambient noise calibration** — cold-start friction killer. The 5-second ambient calibration seeds the adaptive VAD threshold (without it, energy-threshold VAD fails for ~50% of users in non-quiet rooms).
+- **API key storage hierarchy: `ELEVENLABS_API_KEY` env var → `~/.achilles/settings.json` → (v1.4) OS keychain via `@napi-rs/keyring`** — preserves SAFE-01 under no-Electron runtime; keytar is deprecated (March 2026) so do not adopt it.
+- **macOS parent-emulator detection + per-terminal remediation script on EPERM** — Phase 18 catches the VS Code/Cursor TCC silent-failure mode (microsoft/vscode#307364) and prints the exact "open Terminal.app, run `achilles init` once there" instruction.
+- **`achilles install-skill` symlink (one-line `launch` → `voice` diff in SKILL.md)** — preserves DIST-02 verbatim. The SHA-256 source-of-truth check from v1.2 ports unchanged.
+- **All v1.2 SAFE/LOOP/PROMPT carryovers:** circuit breaker (SAFE-05), sandwich defence (SAFE-04), opt-in `--save-transcripts` + `transcripts list/purge` (SAFE-02), ElevenLabs-only allowlist (SAFE-03), companion-prompt SHA-256 source-of-truth (PROMPT-01..05), stuck-thinking watchdog, latency probe + `--report` subcommand, typed fallback when STT circuit opens.
+- **Single-instance `~/.achilles/voice.lock` PID file** — prevents two `achilles voice` sessions from fighting for the mic. Cleaned up on graceful exit + SIGINT/SIGTERM.
+- **sox/ffplay child-exit respawn watchdog (3-in-10s cap)** — handles suspend/resume + device hot-swap without process restart. No equivalent of Electron's `powerMonitor`; bounded respawn is the floor.
+- **Screen-reader mode via `INK_SCREEN_READER` / `useIsScreenReaderEnabled` + `--plain` non-TTY downgrade + `NO_COLOR`/`FORCE_COLOR` honour** — accessibility floor. The braille sparkline is NOT accessible to NVDA/JAWS/Speakup; the accessible mode suppresses the visual region and emits one announcement per state transition.
 
-**Should have (competitive):**
-- First-class spoken completion is the Achilles wedge — Claude Code's `/voice` only dictates in; Achilles speaking back is the defensible differentiator.
-- Consumer-grade reactive orb + waveform aesthetic (Wispr/Aqua hide in tray icons; the floating reactive UI feels premium and matches the ChatGPT/Pi shape users already know).
-- One artifact -> CLI + skill is genuinely rare; skills-npm and the Anthropic skills repo are exploring this pattern, Achilles can lead with it.
-- Voice-aware system prompt explicitly tuned for ear-reading (no slashes, no parens, no paths) — small craft, outsized perceived quality.
+**Should have (competitive differentiators):**
+- **Cold-start <50ms via Bun `--compile` per-platform binaries** — no competing terminal voice tool ships Bun-compiled binaries today. Below 50ms is "instantaneous" to the user; Node 22 + tsx is ~150ms.
+- **Runs inside the same terminal as Claude Code (true ambient surface)** — v1.2 was a separate floating window; v1.3 lives inline. Users never alt-tab; voice prompt and Claude's terminal output stream in the same pane. This is a perception-of-craft win no other voice product delivers.
+- **Voice-aware system prompt (PROMPT-02 + PROMPT-03) tuned for spoken playback** — ≤12-word ack + ≤40-word `<spoken-summary>` block with explicit "forbidden inside the block" formatting rules. The most defensible voice-UX differentiator across all reference products (kstonekuan/gemini-voice has no voice-out; Gemini CLI `/talk:start` is a proposal; Claude Code's built-in `/voice` is dictation-only).
+- **Gapless TTS via ffplay stdin pipe** — quality improvement, not just a port; removes the v1.2 Web Audio "clicky" artefacts.
+- **First-class typed fallback that feels like a real input mode, not a degraded state** — when STT degrades, drop into `@clack/prompts.text()` inline in the same terminal; preserves sandwich defence + voice output.
+- **`achilles latency --report`** — P50/P95 across rolling sessions for transparency.
 
-**Defer (v2+):**
-- Wake-word ("Hey Achilles") — terminal users prefer PTT; Claude Code's `/voice` also chose no wake word.
-- Always-listening / continuous VAD on the desktop — privacy norm violation in dev environments.
-- Full barge-in / mid-TTS interrupt with full-duplex AEC — 2026 production bar is 200-400 ms turn-taking, <2% false-barge-in, <60 ms TTS flush; ship "press PTT to cancel" instead.
-- Reading the entire Claude Code transcript aloud — Suki's lesson, hostile UX.
-- Editable transcript in the floating UI before send — the entire point of Achilles is to avoid typing; hold PTT and re-speak.
-- Custom voice cloning UX, multi-user voice rooms, native iOS/Android, local Whisper fallback — explicitly out of scope per PROJECT.md.
+**Defer to v1.4+ (explicit anti-features OR not yet validated as the blocker):**
+- silero-vad ONNX upgrade (defer until field reports of energy-VAD missing speech)
+- OpenTUI migration (defer until OpenTUI ships 1.0 and 6 months stable)
+- Push-to-talk hotkey opt-in (explicit anti-feature in v1.3 — reintroduces macOS Accessibility permission wall + conflicts with Claude Code's spacebar PTT)
+- Full barge-in / mid-TTS interrupt (heavy infra for marginal value over 300ms tail debounce)
+- Wake-word ("Hey Achilles") — explicit anti-feature (false-fire on every "Hey" in conversation; Anthropic's own `/voice` chose no wake word)
+- In-loop voice swap without session restart (flicker risk dominates A/B value; `achilles config` handles cross-session voice change)
+- Floating-window mode preservation (hard delete in v1.3 — doubling the Electron + Bun + Node matrix is exactly the cost v1.3 exists to eliminate)
+- Persistent transcripts on by default (security/privacy red flag; `--save-transcripts` opt-in stays)
+- Custom local STT/TTS models (out of scope per PROJECT.md)
+- Multi-user voice rooms (out of scope per PROJECT.md)
 
 ### Architecture Approach
 
-A 7-package monorepo addition under the existing Handoff TypeScript workspace, with a single Electron app, a thin npm-CLI shim, four shared packages (voice STT/TTS/protocol + Claude bridge), and the skill source-of-truth package. The renderer is a pure projection of state owned by the main process; all state transitions, sockets, child processes, and keystore reads happen in main, with the renderer emitting intents (mic frames, hotkey press, playback-buffer-empty) and consuming `STATE_CHANGED` / `TTS_CHUNK` IPC events. Half-duplex turn-taking with mic gated during TTS playback. Sessions persist across utterances via `--resume <sid>` on the Claude child. Full diagrams, component contracts, state machine, latency budget, and the alternatives matrix are in `ARCHITECTURE.md`.
+The architecture collapses v1.2's two-process Electron model (main + renderer over `ipcMain.handle()` + `webContents.send()` IPC, ~1,300 LOC) into one Bun process where the orchestrator exposes a typed `EventEmitter` and the Ink hook subscribes directly via `useSyncExternalStore`. Detailed component-by-component wiring, in-process boundaries, and the build-order rationale are in `ARCHITECTURE.md`. Process model: one Bun parent owns the Ink render loop (stdout TTY raw mode) + orchestrator + state machine + STT WSS + TTS WSS + three child processes (sox lives session-long, claude lives session-long, ffplay one-per-spoken-segment).
 
 **Major components:**
-1. **`apps/achilles` (Electron main + preload + renderer)** — process lifetime, window config, global hotkey, IPC owner, keystore reader, owns both ElevenLabs sockets, owns the state machine.
-2. **`apps/achilles-cli`** — npm `bin` entry that locates the bundled Electron binary and execs it; runs the `install-skill` postinstall step.
-3. **`packages/voice-stt`** — thin client for ElevenLabs Scribe v2 Realtime. `Int16Array` frames in -> `partial` / `committed` events out.
-4. **`packages/voice-tts`** — thin client for ElevenLabs Flash v2.5 stream-input. Text chunks in -> MP3/PCM byte chunks out.
-5. **`packages/voice-protocol`** — shared TypeScript types + Zod schemas for renderer<->main IPC, voice events, state machine enum.
-6. **`packages/claude-code-bridge`** — wraps either `query()` from the Agent SDK or `child_process.spawn('claude', ['-p', ...])`. Parses NDJSON `stream-json`, normalises into typed events. Owns session-id resume.
-7. **`packages/achilles-skill`** — source-of-truth `SKILL.md` body + `prompts/companion.md` embedded system prompt. Both surfaces (skill install + npm CLI) reference the same prompt file (`--append-system-prompt-file`).
 
-**Claude Code integration path (locked):** Subprocess `claude -p --output-format stream-json --include-partial-messages --append-system-prompt-file <companion.md> --resume <sid>` is the primary spine. Agent SDK is the preferred in-process variant when available. MCP is rejected (wrong directionality — MCP lets Claude call tools, not the reverse). Hooks are rejected as the primary path (hooks augment but cannot originate prompts) — kept as a status-sync mechanism if needed.
+1. **`apps/achilles-terminal/src/cli.ts`** — CLI entry; argv parse, settings load, companion.md resolve, composition root that hands factories into Session, Ink render(), SIGINT/SIGTERM cleanup install. Runs under Bun (primary) and Node 22 (fallback).
+2. **`apps/achilles-terminal/src/session.ts`** — Orchestrator. ~80% verbatim port of `apps/achilles/src/main/session.ts`; the IPC envelope wrappers are stripped and replaced with direct in-process function calls. Owns the state machine + half-duplex gate + failure-override path + the `EventEmitter` that broadcasts state → UI.
+3. **`apps/achilles-terminal/src/state-machine.ts` + `normalisation.ts` + `sandwich-defence.ts` + `incident-detection.ts` + `transcript-store.ts` + `latency-probe.ts` + `stuck-thinking-watchdog.ts`** — Port verbatim from v1.2 main process. Pure reducers over `(State | Event) → State`; the v1.2 audit checks for SAFE-01..06 and LOOP-01..07 all port unchanged.
+4. **`apps/achilles-terminal/src/audio/mic-capture-sox.ts` + `playback-ffplay.ts` + `vad-energy.ts`** — NEW. Spawn sox `rec` (or `sox.exe` on Windows) with the exact Scribe v2 wire format flags, emit `Int16Array` frames + per-frame RMS scalar. Spawn ffplay one-per-segment with low-latency flags; push voice-tts mp3 bytes to stdin; listen for `exit` to drive the `SPEAKING_DEBOUNCE_MS = 300` half-duplex tail. Energy VAD with 60ms voice-hold + 300ms silence-hold + adaptive noise-floor EWMA.
+5. **`apps/achilles-terminal/src/ui/VoiceShell.tsx` + `Blob.tsx` + `Sparkline.tsx` + `StateLine.tsx` + `useAchillesState.ts`** — NEW. Ink 7 + React 19 component tree; one `setInterval(50ms)` driving a tick state for the 20fps audio-reactive blob + 40-cell braille sparkline. `useSyncExternalStore` projects orchestrator state into React. Read-only view.
+6. **`apps/achilles-terminal/src/init-wizard.ts` + `commands/{voice,init,config,install-skill,transcripts,latency}.ts`** — NEW + ported subcommands. Init wizard uses `@clack/prompts` linear flow (API key → sox/ffmpeg/claude check → 1-second mic + ffplay open → ambient calibration → 1-utterance smoke test → intro screen). Subcommands route via commander.
+7. **`apps/achilles-terminal/src/store.ts` + `key-source.ts` + `lock-file.ts`** — Rewritten: `~/.achilles/settings.json` replaces `electron-store`; env var > settings file > (v1.4) OS keychain; `~/.achilles/voice.lock` PID file single-instance guard.
+8. **`@achilles/voice-protocol` + `voice-stt` + `voice-tts` + `claude-code-bridge` + `achilles-skill`** — UNCHANGED (one SKILL.md line edit in achilles-skill). Their DI seams accept Bun's native `WebSocket` and node-compat `spawn` without modification.
+9. **`apps/achilles-terminal/dist/cli.js` (the 30-line bin shim)** — Node script that resolves `@achilles/cli-<platform>-<arch>` via `optionalDependencies`, execs the Bun binary if present, falls back to `import("./main.js")` (the esbuild Node 22+ bundle) if quarantined or missing.
+10. **Five sibling platform-binary packages: `apps/cli-darwin-arm64/`, `apps/cli-darwin-x64/`, `apps/cli-linux-x64/`, `apps/cli-linux-arm64/`, `apps/cli-win32-x64/`** — Each ships one Bun-compiled binary (~60-100 MB) in its tarball; `os`/`cpu` fields filter install. The canonical esbuild/swc/biome/turbo distribution pattern.
 
-**Latency budget (verified-additive):** STT VAD commit + inference ~150 ms -> Claude TTFB ~200-400 ms -> first text_delta ~50 ms -> TTS first audio byte ~150-200 ms -> playback decode ~50 ms = **P50 600-800 ms mic-end-to-first-audible-byte, P95 1100 ms**. This is the conversational threshold from PROJECT.md.
+**Data flow (end-to-end voice turn):** User speaks → sox emits 16kHz s16le frames every ~64ms → orchestrator listener calls `sttClient.send(frame)` + `vad.observe(rms, dt)` + `session.emit("rms-sample", rms)` → VAD `speech_start` transitions state to `listening` (Ink re-renders green) → user finishes speaking → 300ms silence → VAD `speech_end` triggers `sttClient.commit()` → Scribe `committed` event → state `processing` (yellow) → `claudeBridge.send(transcript)` → first `text_delta` arrives → `extractAck` detects ack boundary → `ttsClient.openStream` → state `speaking` (blue) → mp3 bytes flow voice-tts events$ → ffplay.stdin.write → first audible byte at ~600-800ms P50. ffplay drains stdin EOF on `stream_complete`, exits, orchestrator schedules 300ms tail, re-arms mic, state returns to `listening`. **Latency budget identical to v1.2** — Scribe/Claude/Flash are unchanged; v1.3 just removes the ~5-10ms Electron IPC overhead per stage.
+
+**The single most important architectural change vs v1.2:** all arrows between orchestrator and audio/UI/clients are now in-process function calls and `EventEmitter` subscriptions. The Electron `ipcMain.handle()` / `contextBridge.exposeInMainWorld()` round trip is gone. ~1,300 LOC of IPC bridge + preload + shared schemas deletes. Latency drops to nanoseconds; reconciliation no longer threatened by IPC backpressure; one log to read when debugging.
 
 ### Critical Pitfalls
 
-The four highest-impact pitfalls converge across STACK, ARCHITECTURE, and PITFALLS. Full list of 25 pitfalls with warning signs, prevention, and per-pitfall phase-mapping is in `PITFALLS.md`.
+The full pitfall catalogue (10 critical + technical-debt + integration + performance + security + UX + "Looks Done But Isn't" checklist + recovery strategies + phase mapping) is in `PITFALLS.md`. Every pitfall maps to a concrete Phase 15-20 prevention gate and a verification artifact (asciicast / real-binary smoke / dual-runtime CI / VS Code-integrated-terminal capture). The top 5 are non-negotiable:
 
-1. **Cloud-hosted Claude Code cannot reach the local mic (Pitfall #20).** The v1.2 primary install target as named in PROJECT.md is structurally incompatible with the audio loop: the mic is on the developer's laptop, the cloud Code session is on Anthropic's infra, the skill cannot capture audio inside the cloud sandbox, and `/skills` do not sync across surfaces. **Mitigation:** pin the integration model in REQUIREMENTS.md before any code (Architecture phase). Three resolutions are viable (see Implications below); the project cannot ship without picking one.
-2. **TTS playback bleeds into the mic and Achilles self-triggers (Pitfall #2).** Naive implementations leave the mic open during TTS playback; speakers are physically closer to the mic than the user is. **Mitigation:** ship half-duplex by default — gate the STT WebSocket / stop forwarding mic frames during TTS playback. Recommend headphones in onboarding. Full-duplex AEC is explicitly out of scope for v1.2.
-3. **Hallucinated "I have finished" when the underlying job failed (Pitfall #17).** Claude Code returns a tool error; the LLM paraphrases it as a success-toned sentence; the user trusts the spoken summary; the working tree is actually broken. **Mitigation:** completion is derived from exit code + `tool_result` events, not LLM narration. System prompt mandates "begin with 'I ran into a problem' if any tool call failed." Achilles refuses to play a success completion when it sees non-zero exit / tool errors in the stream regardless of what the LLM says.
-4. **macOS TCC silently denies mic when the parent is the terminal, not Achilles (Pitfall #3).** On macOS, mic permission is attributed to the launching process. The npm-CLI path launched from iTerm/Terminal.app gets the mic prompt against the terminal — and if denied, every app launched from that terminal is denied until `tccutil reset`. **Mitigation:** the Electron host owns the prompt via `systemPreferences.askForMediaAccess('microphone')`. Ship code-signed + notarised; include `NSMicrophoneUsageDescription` + `com.apple.security.device.audio-input` entitlement.
-5. **Ink stdin/Enter behavior breaks programmatic transcript injection (Pitfall #7, issue #15553).** Spawning `claude` in interactive mode with `stdio: 'pipe'` and writing transcripts to stdin produces silent no-ops — Ink `<TextInput>` treats programmatic `\n` as a literal newline in the buffer, not a submit. **Mitigation:** use non-interactive `claude -p --output-format stream-json` for programmatic transcript injection.
+1. **"Verified code-side but broken in the shipped binary" (the v1.2 silent-launch replay).** v1.2 had every requirement verified code-side, the audit signed off, and the renderer voice loop was never wired end-to-end. v1.3 has at least 8 new seams that can replay this shape (Bun binary vs JS fallback; sox exit vs handler; ffplay stdin vs voice-tts iterator; VAD vs STT commit; LDJSON line buffer; SIGINT propagation; Ink paint vs amplitude; suspend/resume without `powerMonitor`). **Prevention:** Phase 17 ships an in-process MOCK_LOOP smoke gate that runs on every PR + Phase 20 ships three real-binary asciicasts (RBS-1/2/3) as non-optional success criteria with paired wav captures committed to `.planning/milestones/v1.3-evidence/`. Forbid `stdio: "ignore"` on the launch path via a lint rule. The auditor cannot mark v1.3 anything but `tech_debt` without the asciicasts.
+
+2. **macOS TCC microphone permission attributed to the wrong process.** When `achilles voice` is launched from VS Code's integrated terminal (or Cursor's, or via Claude Code's Bash tool inside Cursor), macOS Sequoia walks up the process tree looking for a "responsible process" with `NSMicrophoneUsageDescription` + a code signature + an existing TCC grant. On macOS Sequoia the kernel may NOT prompt the user at all — child processes invoked from VS Code's terminal "cannot request TCC permissions" (microsoft/vscode#307364, May 2026). Same shape as v1.2 silent-launch from a different cause. **Prevention:** Phase 18 init wizard runs a 1-second sox open, catches EPERM/EACCES, walks `ps` upward to detect parent terminal emulator, and prints a per-emulator remediation script. For VS Code/Cursor: instruct the user to run `achilles init` ONCE from Terminal.app to grant mic at the system level. Phase 19 skill body includes `achilles init --skill-check` pre-flight. Phase 20 SC-1 captures asciicast on macOS-arm64 invoked from inside VS Code's integrated terminal (not only from Terminal.app).
+
+3. **macOS Gatekeeper / quarantine on the Bun-compiled binary blocks first launch.** Bun-compiled binaries downloaded from npm carry a quarantine extended attribute. On macOS Sequoia + tightened quarantine rules, an unsigned binary may refuse to launch with `zsh: killed: achilles` and no UI prompt. **Prevention:** Phase 19 has a release-gate decision at the top: signed or unsigned for this release. If signed, acquire Apple Developer ID BEFORE Phase 19 starts (release-operator owned but milestone-gating). Build: `codesign --entitlements entitlements.plist --deep --options runtime --sign "Developer ID Application: ..." achilles --force --timestamp` + `notarytool submit ... --wait` + `spctl --assess --type execute --verbose` verification from a fresh macOS account. If unsigned (v1.3.0-beta only, not v1.3.0 stable), surface the `xattr -dr com.apple.quarantine` line in README + ship the Node-bundle fallback path so the binary still runs (slower cold start; functional). Do NOT auto-strip quarantine programmatically (Apple anti-malware heuristics).
+
+4. **Skill body process lifecycle conflicts with Claude Code's Bash tool.** Bash tool default timeout is 120s (issue #5615); orphan-on-SIGTERM (#45717) propagates the signal to Claude Code itself when tmux is involved; multi-Bash-call permission re-prompt bug (#60515). **Prevention:** SKILL.md MUST document `BASH_MAX_TIMEOUT_MS=86400000` in `~/.claude/settings.json` at the top of the body. The skill body MUST be foreground-only (no `&`, no `nohup`). Phase 17 implements a `gracefulShutdown(reason)` that tears down in <1s telescoped order: SIGINT to claude bridge → SIGTERM sox → `stdin.end()` + 200ms SIGTERM ffplay → WSS close 1000 → flush latency-probe + transcript-store → Ink unmount → `process.exit(0)`. Registered with `process.once` (not `on`) so second SIGINT escalates rather than re-triggers. Detach `claude` child into its own process group. Phase 19 SKILL.md `allowed-tools` narrows to specific patterns (NOT broad `Bash`) to reduce #60515 blast radius.
+
+5. **Energy-threshold VAD false-starts in noisy rooms / misses speech in quiet rooms.** Static thresholds (`VOICE_THRESHOLD = 0.02`) break in three directions: coffee shop (50-65 dBA above threshold → continuous trigger, bills ElevenLabs for nothing); soft voice (<35 dBA → never trigger, silent shape); bursty noise (keyboard clack >100ms → tight WSS open/close loop). Worse variant: TTS playback through speakers bleeds back into mic + room reverb extends beyond the 300ms half-duplex tail. **Prevention:** Phase 16 ships adaptive thresholds via EWMA noise floor (α=0.05, `VOICE_THRESHOLD = noiseFloor * 3`, ~10dB above floor per Wikipedia VAD). Phase 18 init wizard adds 5-second "ambient calibration" — user stays silent, we measure room noise, persist as initial estimate. Phase 16 adds self-trigger guard: after `tts_playback_complete` + 300ms tail, require 500ms post-speech silence verification before re-arming. Minimum-utterance-length floor (ignore `speech_end` if duration <300ms — kills keyboard-click false commits). `--debug-vad` flag streams RMS + threshold + state to stderr at 50ms cadence. Phase 20 includes a noisy-environment field test asciicast (65 dBA lo-fi playlist next to laptop).
+
+**Beyond the top 5, four additional Critical pitfalls deserve roadmap attention:** (6) sox/ffmpeg detection failure mode is too quiet — `which sox && which ffplay` returns paths but device-open fails (no default device / Bluetooth in HFP / PipeWire mismatched / sox x86 on Apple Silicon throws "Unknown system error -86"); (7) ffplay buffering tradeoff makes TTS feel laggy OR gappy — requires Phase 17 benchmark of `-fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0` against representative TTS chunks + backpressure on stdin write + SIGTERM cancel path; (8) Bun ↔ Node runtime drift — WSS close codes, async iteration micro-batching, `process.exit()` semantics differ subtly; Phase 15 must ship dual-runtime CI matrix; (9) Ink reconciliation thrash at 20fps — Phase 16 must measure CPU <10% during 10-minute animation on Windows Terminal v1.18, throttle partial transcripts to 10fps, never re-mount Ink root.
 
 ## Implications for Roadmap
 
-The combined research strongly suggests a seven-phase ordering, opened by a small but unskippable scoping phase that resolves the cloud-vs-local question, then a parallelisable trio of vendor-wrapper packages, then the integration milestone where the loop first runs end-to-end, then UI shell, then distribution, then hardening. Phases 1-3 can be developed in parallel by multiple engineers; Phase 4 is the synchronisation point.
+The four research streams converge on a six-phase structure (Phase 15-20, ~3 weeks). Each phase produces a discrete artifact that can be smoke-tested. Voice packages stay surface-stable across all six phases; the new `apps/achilles-terminal/` workspace stands up additively in Phase 15 and the old `apps/achilles` + `apps/achilles-cli` survive through Phase 18 and delete together at end of Phase 19 once the skill is rewired.
 
-### Phase 1: Architecture & Requirements Scoping (Cloud-vs-Local Decision)
+### Phase 15: Workspace Scaffold + Bun Build Pipeline
 
-**Rationale:** PITFALLS Pitfall #20 + the cloud-Claude-Code contradiction surfaced across STACK, ARCHITECTURE, and PITFALLS. Foundational — every other phase depends on whether the audio loop is local-only or routed through a transport.
-**Delivers:** REQUIREMENTS.md with the cloud-vs-local model locked in. One of: (a) reinterpret "cloud" as "local Claude Code installed via cloud-distributed skill bundle"; (b) split into local audio capture + cloud transcript injection — name the transport (Handoff relay reuse is one option but expands the security boundary); (c) defer cloud target to v1.3 and ship local-first.
-**Avoids:** Pitfall #20 (cloud Claude Code unclear integration story), #24 (skill assumes specific Claude Code version — pin minimum here).
+**Rationale:** Atomic cutover requires a parallel-safe new workspace. The old Electron + npm-shim apps need somewhere to copy from through Phase 16-17. Dual-runtime CI matrix (Pitfall 8 prevention) ships here so all subsequent phases catch drift.
+**Delivers:** `apps/achilles-terminal/` workspace + 5 sibling `apps/cli-<platform>-<arch>/` empty platform-binary packages; `bun build --compile --target=...` matrix wired in `.github/workflows/release.yml`; esbuild Node 22+ fallback bundle (`dist/main.js`); 30-line `dist/cli.js` shim; dual-runtime CI matrix (every test under both `bun test` AND `vitest`); `achilles --version` invocation works on all five platforms.
+**Uses:** Bun 1.3.14+, Node 22 LTS, pnpm workspaces, Turborepo (existing).
+**Avoids:** Pitfall 8 (Bun ↔ Node runtime drift baked into the binary by the time we hit distribution); replays of the "we mid-deleted Electron and now nothing builds" failure mode.
+**Research flag:** STANDARD — Bun cross-compile + esbuild + optionalDependencies are well-trodden 2026 patterns documented exhaustively in STACK.md + ARCHITECTURE.md.
 
-### Phase 2: Voice Vendor Wrappers (parallel-safe with Phase 3, 4)
+### Phase 16: Ink TUI Shell + State Machine Port + sox Mic Capture + VAD
 
-**Rationale:** STACK and ARCHITECTURE both isolate ElevenLabs into thin SDK wrappers (`voice-stt`, `voice-tts`, `voice-protocol`) testable in isolation against WAV fixtures and recorded transcripts. ARCHITECTURE estimates 3-5 days.
-**Delivers:** `packages/voice-stt` (Scribe v2 Realtime client, partial/committed events, exponential-backoff reconnect, 429 distinction); `packages/voice-tts` (Flash v2.5 stream-input, MP3 default, sequence-tracked chunked playback, `chunk_length_schedule: [80, 120, 160, 220]`); `packages/voice-protocol` (Zod-validated IPC + STT/TTS event types).
-**Uses:** `@elevenlabs/client`, `@elevenlabs/elevenlabs-js@2.51.0`, `ws@8.18`, `zod@3.23`.
-**Avoids:** Pitfalls #1 (sample-rate/codec mismatch), #4 (WebSocket lifecycle), #5 (model selection per call site), #6 (TTS chunk ordering + 500 ms prebuffer).
+**Rationale:** The TUI shell is the load-bearing visible surface; without it Phase 17 can't validate the voice loop against a real visual. The state machine ports verbatim from v1.2 (the most valuable code). sox capture needs to exist before the voice-stt wiring in Phase 17. VAD adaptive thresholds are critical (Pitfall 6) and must ship together with VAD itself.
+**Delivers:** `state-machine.ts` + `normalisation.ts` port (zero changes); `VoiceShell.tsx` + `Blob.tsx` + `Sparkline.tsx` + `StateLine.tsx` + `useAchillesState.ts` Ink components; `mic-capture-sox.ts` with sox child + exit-code handler + bounded respawn; `vad-energy.ts` with adaptive EWMA noise floor + minimum-utterance-length floor + post-speech silence verification; `--debug-vad` flag; five visual states (idle/listening/processing/speaking/error) all rendered; `achilles voice --mock` invocation drives amplitude from `mock-amplitude.ts` plus real sox loop.
+**Uses:** Ink 7.0.5 + React 19.2.7; sox 14.4.2; pure JS energy VAD; existing v1.2 `mock-amplitude.ts` + `mock-loop-clients.ts` ported verbatim.
+**Avoids:** Pitfall 4 (sox/ffmpeg silent device-open failure — exit-code handler + bounded respawn 3-in-10s); Pitfall 5 (Ink reconciliation thrash — perf budget gate, CPU <10% on Windows Terminal v1.18); Pitfall 6 (energy-VAD false-starts/misses — adaptive thresholds + minimum-utterance-length + self-trigger guard).
+**Research flag:** NEEDS RESEARCH — adaptive VAD thresholds in the field aren't fully validated; Phase 16 should spike the EWMA tuning against representative recordings before locking. Ink perf budget against Windows Terminal v1.18 also needs measurement.
 
-### Phase 3: Claude Code Bridge (parallel-safe with Phase 2, 4)
+### Phase 17: End-to-end Voice Loop Wired + Graceful Shutdown
 
-**Rationale:** Independent of voice. Testable in isolation with golden NDJSON fixtures. ARCHITECTURE estimates 2-3 days. PITFALLS #7 and #8 demand a robust LDJSON line reader and the non-interactive subprocess path before the integration milestone.
-**Delivers:** `packages/claude-code-bridge` with `createClaudeSession({ systemPromptFile })` -> `{ send(text), events$, close() }`. Subprocess path with `--output-format stream-json --include-partial-messages --append-system-prompt-file --resume`. Agent SDK alternative gated behind a flag. LDJSON line buffer with N KB watchdog. Authoritative success/failure signal from exit code + `tool_result` events.
-**Avoids:** Pitfalls #7 (Ink stdin gotcha), #8 (partial JSON across reads), #17 (hallucinated completion), #19 (stuck "thinking" state), #24 (Claude Code version pinning).
+**Rationale:** This is the load-bearing phase that makes the actual product real. The session.ts port (~80% verbatim) consolidates Phase 16's foundation. ffplay benchmark (Pitfall 7) belongs here because the orchestrator owns the playback subprocess. gracefulShutdown (Pitfall 10) belongs here because it touches every component the orchestrator owns.
+**Delivers:** `session.ts` ported from v1.2 with IPC bridge calls stripped + replaced with direct `EventEmitter` function calls; `@achilles/voice-stt` wired with `webSocketCtor: globalThis.WebSocket`; `@achilles/claude-code-bridge` wired with `spawnImpl: spawn`; `@achilles/voice-tts` wired same; `playback-ffplay.ts` with benchmarked low-latency flags + backpressure on stdin.write + SIGTERM cancel path with 1s deadline; half-duplex turn-taking via `SPEAKING_DEBOUNCE_MS = 300` port; sandwich defence + normalisation + extractAck + extractSpokenSummary ports unchanged; failure-override path (PROMPT-05) ports unchanged; `gracefulShutdown(reason)` function with `process.once` SIGINT/SIGTERM handlers + telescoped 1.5s teardown budget + `claude` child detached into own process group; `proc.unref()` on every spawn before any `process.exit()`; WebSocket close-code normaliser shim; MOCK_LOOP=1 integration test ports unchanged + becomes the upstream CI smoke gate.
+**Uses:** Existing `@achilles/voice-protocol`, `voice-stt`, `voice-tts`, `claude-code-bridge` (all unchanged — DI seams used directly).
+**Avoids:** Pitfall 1 (MOCK_LOOP smoke gate catches refactor breakage before Phase 20 verification); Pitfall 7 (ffplay benchmark + backpressure); Pitfall 8 (runtime-independent shim layer); Pitfall 9 (process-group detach for claude; foreground-only model); Pitfall 10 (gracefulShutdown + WSS close 1000 + lock file cleanup).
+**Research flag:** NEEDS RESEARCH — ffplay flag benchmark (100 trials of representative chunks) needs spike before lock; SIGTERM-propagation behaviour under Bun-on-tmux verification on 3 OSes; `proc.unref()` Bun-specific edge cases.
 
-### Phase 4: Floating UI Shell (Electron app) (parallel-safe with Phase 2, 3)
+### Phase 18: Init Wizard + Config + Transcripts Management
 
-**Rationale:** PITFALLS #15 (panel-window failure modes) and #3 (macOS TCC) both demand fresh-account testing. Window plumbing, four-state visual surface, Canvas waveform, and mic permission flow are independent of the voice loop. ARCHITECTURE estimates 3-4 days.
-**Delivers:** `apps/achilles` with `BrowserWindow({ frame: false, transparent: true, alwaysOnTop: true, focusable: false, type: 'panel', skipTaskbar: true })`. `app.dock.hide()` + `Tray`. `setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })`. `showInactive()` for TTS reveals. Reactive circle + Canvas waveform off mock `AnalyserNode`. Five visible states. AudioWorklet stub for 48k->16k Int16 PCM. Mic permission flow with `systemPreferences.askForMediaAccess('microphone')`.
-**Uses:** Electron 42.3.3, `@ricky0123/vad-web`, hand-rolled Canvas2D off `AnalyserNode`, `electron-store`, `electron-vite`.
-**Avoids:** Pitfalls #3 (TCC denial flow), #15 (panel window failure modes), #25 (USB/Bluetooth device-change handling).
+**Rationale:** Cold-start friction is the #1 CLI drop-off cause. The init wizard MUST ship together with sox/ffmpeg preflight + ambient calibration + per-terminal-emulator TCC remediation script. SAFE-02 opt-in transcripts + latency probe ports here because they belong on the wizard's adjacent surface.
+**Delivers:** `init-wizard.ts` using `@clack/prompts` linear flow — (1) API key (env var detection → settings file → prompt with paste-friendly input); (2) sox/ffmpeg/claude detection with real 1-second open + stderr parse against known-error table (not merely `which`); (3) macOS parent-emulator detection via `ps` walk + per-emulator remediation script (VS Code/Cursor → "open Terminal.app once" script; iTerm2/Terminal.app/ghostty/Warp → expect prompt); (4) ambient noise calibration (5-second silence → seed EWMA noise floor → persist to `~/.achilles/settings.json`); (5) 1-utterance smoke test (real ElevenLabs round-trip); (6) intro screen on first run, persisted; `store.ts` replacing electron-store; `transcripts list/purge` subcommand ports verbatim; `latency --report` subcommand port; opt-in `--save-transcripts` JSONL with 0o600 perms + secret redaction; `achilles config` subcommand with `@clack/prompts` settings menu.
+**Uses:** @clack/prompts 1.5.1; chalk 5.6.x.
+**Avoids:** Pitfall 2 (macOS TCC parent-process — per-emulator remediation script); Pitfall 4 (sox/ffmpeg real-device smoke, not just which); Pitfall 6 (ambient calibration is the smallest viable VAD onboarding).
+**Research flag:** STANDARD — `@clack/prompts` patterns + secret-redaction patterns + transcript JSONL rotation are all well-documented in FEATURES.md sources.
 
-### Phase 5: End-to-End Integration + State Machine + Embedded System Prompt
+### Phase 19: Distribution — Skill Rewire + Publish Pipeline + Gatekeeper
 
-**Rationale:** Synchronisation milestone where Phases 2, 3, 4 compose. ARCHITECTURE estimates 4-6 days. The half-duplex echo gating (#2), re-utterance race (#10), and long/symbol-heavy completion (#16) can only be designed jointly across voice + UI + bridge boundaries.
-**Delivers:** `apps/achilles/src/main/session.ts` orchestrating voice-stt -> claude-code-bridge -> voice-tts behind the state machine. Half-duplex turn-taking with STT-gate-during-TTS. `packages/achilles-skill/skill/prompts/companion.md` embedded system prompt: one-sentence ack <=12 words; `<spoken-summary>` block <=40 words; no paths, symbols, code, or ANSI. Pre-TTS string normalisation. Cancellation primitive (SIGINT). Debounce mic re-activation ~300 ms after TTS ends.
-**Avoids:** Pitfalls #2 (echo loop), #9 (prompt injection — sandwich-defense wrapper), #10 (re-utterance race), #16 (long completion), #17 (hallucinated success), #21 (secrets read aloud).
+**Rationale:** Distribution is the ship gate. SKILL.md edit is one line but lands at end of phase so the skill cuts over atomically with the publish. Apple Developer ID acquisition is the explicit release-operator gate at start of phase (NOT during). Old `apps/achilles-cli` + `apps/achilles` delete at end of phase, AFTER `npm publish` succeeds.
+**Delivers:** One-line `packages/achilles-skill/skill/SKILL.md` edit (`achilles launch` → `achilles voice`) + frontmatter `allowed-tools: Bash(achilles voice *), Bash(achilles init *), Bash(achilles transcripts *), Bash(which achilles), Bash(which sox), Bash(which ffmpeg)` (narrow patterns, NOT broad `Bash`) + `BASH_MAX_TIMEOUT_MS=86400000` documentation prominently at top of body; SHA-256 source-of-truth check ports unchanged (runs against new package layout); `achilles install-skill` symlink (absolute, not relative — Windows fallback copies); macOS codesign + notarytool pipeline for darwin-arm64 + darwin-x64 with Apple Developer ID (acquired before Phase 19 starts); Windows unsigned + SmartScreen instructions in README; Linux Bun-compiled ELF + chmod +x; tarball-no-secrets scan ports + `strings dist/achilles | grep -E "sk_[a-f0-9]{48,}"` MUST be empty test; per-OS GitHub Actions runners publish from native hosts (cross-compile from macOS to Windows is supported but production CI matrices per-OS to handle code-signing); npm publish for `achilles` + all 5 `@achilles/cli-<platform>-<arch>` from one CI workflow; `apps/achilles-cli/` and `apps/achilles/` delete at end of phase.
+**Uses:** Bun cross-compile + esbuild Node bundle + Apple codesign/notarytool + GitHub Actions matrix.
+**Avoids:** Pitfall 3 (Gatekeeper — codesign + notarytool stapled + `spctl --assess` verification from fresh account; v1.3.0-beta fallback with xattr instructions if cert not acquired); Pitfall 9 (`BASH_MAX_TIMEOUT_MS` doc + foreground-only skill body + narrow allowed-tools).
+**Research flag:** NEEDS RESEARCH — Apple Developer ID acquisition timeline is an unknown (release-operator owned; v1.2 audit listed this as open); Windows code signing decision (EV cert vs SmartScreen unsigned) needs explicit go/no-go before Phase 19 start; cross-host signing edge cases.
 
-### Phase 6: Distribution — npm CLI + Skill Packaging + Cross-platform Installer
+### Phase 20: Hardening + Real-Binary Asciicast Gates (Ship Gate)
 
-**Rationale:** Once the loop works locally, distribution is the gate to user validation. ARCHITECTURE splits into ~2-3 days for CLI and ~2 days for skill. PITFALLS #11, #12, #13, #14 cluster here. Test against a fresh Windows VM and a fresh macOS account.
-**Delivers:** `apps/achilles-cli` with `bin: { achilles: './dist/cli.js' }`, `achilles install-skill` symlinks `packages/achilles-skill/skill/` into `~/.claude/skills/achilles/`. `electron-builder` config producing signed `.dmg` (hardened runtime + notarisation + `NSMicrophoneUsageDescription`), `.exe` (NSIS), `.AppImage`. `SKILL.md` body <=2000 words shelling out to `${CLAUDE_SKILL_DIR}/bin/launch.sh`. CI diff-check across skill + CLI. Tarball scan for ElevenLabs key prefix at release.
-**Avoids:** Pitfalls #11 (skill bundle scope), #12 (dual-distribution drift), #13 (Windows global install), #14 (monorepo workspace symlinks), #22 (API key leak).
-
-### Phase 7: Hardening, Privacy, Resilience
-
-**Rationale:** PITFALLS closes with privacy/security and resilience as cross-cutting concerns. ARCHITECTURE allocates 3-5 days. Turns a working loop into a shippable product.
-**Delivers:** Default-off transcript persistence with `--save-transcripts` opt-in + retention + `achilles transcripts purge`. `--debug-audio` flag with loud on-screen indicator. Graceful degradation: STT failure -> "type your prompt" fallback; TTS failure -> completion text surfaced in UI and printed to terminal. ElevenLabs incident detection + exponential backoff with full jitter. Stuck "thinking" timeout (60 s default) + audible status update + cancel gesture. Device-change reacquisition. Code-signing identity + notarisation for the release build. macOS TCC remediation flows tested on a fresh account; Windows install tested on a fresh VM.
-**Avoids:** Pitfalls #18 (no graceful degradation), #19 (stuck thinking), #21/22/23 (secrets, key leaks, persisted audio), #25 (USB/Bluetooth/suspend audio).
+**Rationale:** This phase exists to structurally prevent the v1.2 silent-launch replay. The three real-binary asciicasts (RBS-1/2/3) are non-optional success criteria — the audit cannot pass v1.3 without them committed to `.planning/milestones/v1.3-evidence/`. Circuit breaker + lock file + stuck-thinking watchdog port here because they round out v1.2 SAFE/LOOP parity at the very end against a published baseline.
+**Delivers:** `incident-detection.ts` circuit-breaker port verbatim; `stuck-thinking-watchdog.ts` port (60s no-streaming-output trigger); `lock-file.ts` single-instance guard with `kill -0` liveness check + auto-cleanup on stale PID; sox/ffplay respawn-on-exit watchdog cap 3-in-10s with clear surface error on cap-exceeded; audio-device-change detection (sox exit code 1 → soft respawn); `TypedFallback` via `@clack/prompts.text()` when STT breaker opens; v1.2 audit checklist for SAFE-01..06 + LOOP-01..07 re-run against v1.3 implementation; ElevenLabs WSS idle timeout (close after >120s in idle, reopen on next speech_start) to prevent billing leak; **RBS-1 asciicast** = fresh `npm install -g achilles@<this-build>` → `achilles init` (incl. ambient calibration) → `achilles voice` → "hello achilles" → audible round-trip within 8s + post-Ctrl-C `ps` clean + WSS close 1000 logged, captured on darwin-arm64 + linux-x64 + win32-x64 with paired wav files; **RBS-2 asciicast** = same fresh install → `achilles install-skill` → restart Claude Code → invoke skill body → Ctrl-C tears down all children cleanly + no #60515 re-prompt; **RBS-3 asciicast** = `--save-transcripts` 3-utterance session → `transcripts list/purge` works; **noisy-environment SC** = asciicast captured with 65 dBA lo-fi playlist next to laptop, asserting VAD doesn't continuously trigger; **VS Code-integrated-terminal SC** = asciicast captured from inside VS Code terminal on macOS-arm64 showing EPERM detection + remediation message path.
+**Uses:** Existing v1.2 `incident-detection.ts`, `stuck-thinking-watchdog.ts`, `transcript-store.ts` ports.
+**Avoids:** Pitfall 1 (the ship gate that catches "verified code-side but broken in binary" — three asciicasts on fresh OS accounts); Pitfall 2 (VS Code terminal SC); Pitfall 6 (noisy-environment SC); Pitfall 10 (post-Ctrl-C `ps` clean inspection in RBS-1).
+**Research flag:** NEEDS RESEARCH — asciinema + audio-capture tooling per platform needs spike (especially Windows wav capture); the noisy-environment SC needs explicit pass criteria (false-positive rate cap during 30s of music).
 
 ### Phase Ordering Rationale
 
-- **Phase 1 is unskippable and foundational** — REQUIREMENTS.md edit, should take hours not days, but everything downstream depends on it.
-- **Phases 2, 3, 4 are independent and parallel-safe** — voice wrappers test against WAV fixtures, the Claude bridge tests against golden NDJSON, the UI shell tests against mocked state. Sequence if single engineer; parallelise if multiple.
-- **Phase 5 is the integration milestone** — highest-risk phase, reserve buffer. State machine cannot be retrofit cleanly after the loop is wired.
-- **Phases 6 and 7 close the milestone** — distribution turns the artifact into something a user can install; hardening turns "works on developer's machine" into "works on a fresh Windows VM and a fresh macOS account."
-- **System prompt design is fused with Phase 5** rather than treated as a separate phase because the prompt and the extractor are mutually dependent.
+- **Phases 15-17 cannot be parallelised** (16 needs 15's build pipeline; 17 needs 16's TUI shell + sox capture). Phases 18-20 have some parallelism: Phase 18 can run alongside latter half of Phase 17 if there's a second engineer.
+- **Voice packages stay surface-stable across all six phases.** Nothing in `packages/voice-*` or `claude-code-bridge` changes. This is the entire reason the pivot is feasible in 6 phases — the load-bearing wire-protocol work doesn't redo.
+- **Adaptive VAD ships in Phase 16, not Phase 20.** Static thresholds are unshippable per Pitfall 6; the EWMA + minimum-utterance-length + self-trigger guard belong with the VAD itself. Ambient calibration in Phase 18 is the user-facing companion piece.
+- **gracefulShutdown ships in Phase 17, not Phase 20.** It touches every component the orchestrator owns; deferring it lets shutdown bugs accumulate across Phase 18-19.
+- **Apple Developer ID acquisition is the Phase 19 release gate, not a Phase 19 deliverable.** Without it, Phase 19 starts; with the v1.3.0-beta fallback decision documented up front; with it, Phase 19 starts with codesign in CI from day one.
+- **Real-binary asciicasts are the ship gate, not a Phase 20 nice-to-have.** They are the structural prevention for the v1.2 silent-launch failure shape. The auditor cannot mark v1.3 anything but `tech_debt` without them committed.
 
 ### Research Flags
 
-Phases likely needing deeper research during planning (`/gsd:plan-phase --research-phase <N>`):
+Phases likely needing deeper research during planning (run `/gsd:plan-phase --research-phase N`):
+- **Phase 16:** Adaptive VAD EWMA tuning against representative recordings; Ink perf budget measurement against Windows Terminal v1.18.
+- **Phase 17:** ffplay low-latency flag benchmark (100 trials); SIGTERM-propagation under Bun-on-tmux verification on 3 OSes; `proc.unref()` Bun edge cases.
+- **Phase 19:** Apple Developer ID acquisition timeline (release-operator gated); Windows code-signing decision (EV vs SmartScreen unsigned); cross-host signing edge cases.
+- **Phase 20:** asciinema + audio-capture tooling per platform; noisy-environment SC pass criteria.
 
-- **Phase 1 (Architecture & Requirements Scoping):** the cloud-hosted Claude Code surface is the only research area where current confidence is MEDIUM. If resolution (b) is picked (split local audio + cloud transport), the chosen transport's API and quotas need a spike — Handoff relay reuse specifically needs architectural review against the v1.2 security boundary.
-- **Phase 5 (End-to-End Integration):** the embedded system prompt design has MEDIUM precedent — the specific contract that makes Claude reliably emit a tight `<spoken-summary>` block needs empirical iteration against representative tasks (refactor / bug fix / test run).
-- **Phase 7 (Hardening / Resilience):** ElevenLabs rate-limit semantics on the user's actual plan and the 429 class distinction (PITFALLS #4) deserve a verification pass against the production account.
-
-Phases with standard patterns (skip `--research-phase`):
-
-- **Phase 2 (Voice Wrappers):** ElevenLabs Scribe v2 Realtime and Flash v2.5 are HIGH-confidence documented protocols; the wrappers are mechanical SDK glue.
-- **Phase 3 (Claude Code Bridge):** the non-interactive subprocess + stream-json path is HIGH-confidence; the LDJSON line reader is a well-known pattern.
-- **Phase 4 (Floating UI Shell):** Electron `BrowserWindow` panel configuration is HIGH-confidence (verified against official Electron docs and known issues).
-- **Phase 6 (Distribution):** the npm-CLI + SKILL.md dual-distribution pattern is MEDIUM-confidence but composed from multiple precedents (skills-npm, openskills, Anthropic skills repo) — no novel research needed.
+Phases with standard patterns (skip research-phase, plan directly):
+- **Phase 15:** Bun cross-compile + esbuild Node bundle + optionalDependencies pattern are exhaustively documented (esbuild, swc, biome, turbo precedents).
+- **Phase 18:** `@clack/prompts` linear flows + secret-redaction + transcript JSONL rotation are well-documented.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | ElevenLabs and Claude Code skill/SDK surfaces verified against current official docs and Context7. Electron + `@ricky0123/vad-web` versions current. MEDIUM only on the dual-distribution packaging pattern (composed from multiple references, no single canonical). |
-| Features | HIGH | Table stakes verified across 9 reference products. Anti-features grounded in industry consensus. MEDIUM on differentiator scoping (subjective). |
-| Architecture | HIGH on the spine (component contracts, IPC, state machine, latency math). MEDIUM on the cloud-hosted Claude Code shape — ARCHITECTURE explicitly flags this as the open question. |
-| Pitfalls | MEDIUM-HIGH. STT/TTS, Electron, macOS TCC, and Claude Code subprocess behaviors are documented and verified from 2025-2026 official sources. Claude Code stdin-injection (issue #15553) and cloud-hosted skill semantics are partially in flux. |
+| Stack | HIGH | Bun, Ink 7, sox, ffplay, optionalDependencies pattern, ElevenLabs wire integration all officially documented + validated in v1.2 (for the voice packages). MEDIUM only for macOS Gatekeeper end-state (depends on Apple Developer ID acquisition timing) and v1.4-deferred items (silero ONNX under Bun, naudiodon). |
+| Features | HIGH | Table stakes carry over from v1.2's 30 verified requirements + are validated against direct precedents (kstonekuan/gemini-voice, Gemini CLI `/talk:start` proposal, Claude Code's built-in `/voice`). MEDIUM only for differentiator scoping in a 12-month-old category. HIGH for anti-features (industry consensus + v1.2-specific decisions already validated). |
+| Architecture | HIGH | Package reuse map verified at exact line numbers (`webSocketCtor` seams at `realtime-client.ts:95-98` and `stream-client.ts:92`; `spawnImpl` seam at `session.ts:71-78`; `SPEAKING_DEBOUNCE_MS = 300` at `session.ts:112`; companion.md export at `achilles-skill/src/index.ts:107-110`). Bun-compile + optionalDependencies pattern is mainstream 2026 distribution. MEDIUM on cross-runtime test seam (Bun's vitest adapter is stable but existing test suite hasn't run under Bun yet — call-out, not blocker). |
+| Pitfalls | HIGH | v1.2-failure-mode replays grounded in `.planning/debug/achilles-silent-launch.md`; macOS TCC + Gatekeeper + Bun cold-start surface verified against 2026 official + community sources (microsoft/vscode#307364, claude-code#5615, #45717, #60515, bun#7208, npm/cli#4828). MEDIUM only for ffplay buffering choice (low-latency flags well-documented but our specific chunk schedule unverified end-to-end) and Ink reconciliation at 20fps with our specific component count (no published numbers for this exact surface). |
 
-**Overall confidence:** HIGH on everything except the cloud-hosted Claude Code integration model, which is MEDIUM and must be resolved in Phase 1 before any other phase ships.
+**Overall confidence:** HIGH
 
 ### Gaps to Address
 
-1. **Cloud-hosted Claude Code integration model (the unresolved scope question).** Three viable resolutions: (a) reinterpret cloud = local Claude Code installed via cloud-distributed skill bundle; (b) split local audio capture + cloud transcript injection — needs transport choice; (c) defer cloud target to v1.3. REQUIREMENTS.md must pick one in Phase 1. The architecture survives all three with minimal changes; only the Claude bridge's spawn step is affected.
-2. **macOS code-signing identity** is a known release blocker. Phase 6 / Phase 7 must own resolution.
-3. **Voice selection UI** is not specified in PROJECT.md. v1.2 ships one default voice; voice picker is deferred per FEATURES.
-4. **Push-to-talk vs press-to-toggle** is unspecified. ARCHITECTURE recommends press-to-toggle; FEATURES recommends PTT. Phase 1 / Phase 4 should pick one consistent with the embedded system prompt's cadence.
-5. **Agent SDK vs subprocess for Claude integration**: STACK leans SDK-primary, ARCHITECTURE leans subprocess-primary. Not in conflict (subprocess is universal fallback). Phase 3 should decide the default. Subprocess is safer for cloud-auth + version-independence; SDK is preferable when developer environment has it pre-configured.
+- **Apple Developer ID acquisition timeline.** Release-operator owned per v1.2 audit §5.2; status as of v1.3 milestone open is unknown. **Handle:** make this an explicit Phase 19 release-gate question (signed for v1.3.0 stable vs unsigned for v1.3.0-beta with documented xattr workaround). Surface in requirements scoping.
+- **Adaptive VAD field tuning in noisy environments.** Energy-threshold + EWMA is the v1.3 best-effort; silero ONNX is the v1.4 upgrade behind the same `VadHandle` interface. **Handle:** Phase 16 ships `--debug-vad` flag for in-the-field tuning; Phase 20 noisy-environment SC validates the pass criteria; v1.4 spike on Bun + onnxruntime-node compat (Bun #18079).
+- **ffplay flag benchmark not yet run.** Recommended starting point is `-fflags nobuffer -flags low_delay -probesize 32 -analyzeduration 0` but 100-trial benchmark in Phase 17 may surface need to drop `-fflags nobuffer` for resilience against upstream jitter. **Handle:** Phase 17 deliverable, ~1 hour of work; document chosen flags in `playback-ffplay.ts` constants with benchmark provenance.
+- **Bun-on-Bun SIGTERM propagation under tmux.** anthropics/claude-code#45717 documents SIGTERM in Bash tool propagating to Claude Code itself when tmux is involved. v1.3 must survive that bug. **Handle:** Phase 17 detaches `claude` child into own process group via `setpgid`; Phase 20 RBS-2 explicitly captures the tmux + skill-body + Ctrl-C path on all three OSes.
+- **VS Code-integrated-terminal TCC on macOS Sequoia.** microsoft/vscode#307364 confirms the failure mode but the workaround (run `achilles init` once from Terminal.app) needs in-the-field validation. **Handle:** Phase 18 ships the remediation script; Phase 20 captures asciicast from inside VS Code's terminal on macOS-arm64.
+- **Cross-runtime test seam (Bun vs Node 22) — existing v1.2 vitest suite hasn't been exercised under Bun yet.** **Handle:** Phase 15 dual-runtime CI matrix as a build-pipeline checkbox, not feature work. If a test passes under one runtime and fails under another, that's a Phase 15 gate, not a downstream surprise.
 
 ## Sources
 
-### Primary (HIGH confidence)
-- Context7 `/nothflare/claude-agent-sdk-docs`
-- Anthropic docs — Skills, Headless `claude -p`, Agent SDK TypeScript, Hooks, MCP, Low-latency voice cookbook, Claude Code on the web
-- ElevenLabs docs — Realtime STT, client-side streaming, Scribe v2 Realtime overview, models overview, Flash v2.5, streaming TTS, multi-context WebSocket, latency optimisation, pricing
-- Electron docs — `BrowserWindow` API, `systemPreferences.askForMediaAccess`, Releases (42.3.3 latest stable Jun 3 2026)
-- npm registry / GitHub — `@anthropic-ai/claude-agent-sdk@0.3.165`, `@elevenlabs/elevenlabs-js@2.51.0`, `@ricky0123/vad-web@0.0.30`
-- Known issues — tauri-apps/wry#1195, tauri-apps/tauri#10898/#11951/#5042/#8314 (mic permission edge cases); anthropics/claude-code#15553 (Ink stdin/Enter); electron/electron#10078, #24703
+### Primary (HIGH confidence — verified 2026-06-08)
 
-### Secondary (MEDIUM confidence)
-- Reference product surveys — ChatGPT Advanced Voice, Pi (Inflection), Wispr Flow, Aqua Voice, Vapi/Retell, Suki, Voice Mode MCP, Claude Code `/voice`
-- Dual-distribution pattern — openskills npm, Anthropic skills GitHub, skills-npm, Cross-Agent Skills (Termdock)
-- Latency engineering — Hamming, CallSphere, Decagon, FutureAGI 2026, Gradium
-- macOS TCC behavior — pingdotgg/t3code#728; BigBinary Electron mic permission; Screenify macOS deep-dive
-- Voice agent UX — Voice UI Kit (Pipecat), react-ai-voice-visualizer, LiveKit, assistant-ui
-- Tauri vs Electron 2026 — PkgPulse
+**Internal architecture source-of-truth:**
+- `/Users/lakshmanturlapati/Documents/Codes/Handoff/.planning/research/v1.3-terminal-pivot.md` — implementation-ready architecture; §§1–12 + Appendix A
+- `/Users/lakshmanturlapati/Documents/Codes/Handoff/.planning/research/v1.2-reuse-audit.md` — reuse classification map
+- `/Users/lakshmanturlapati/Documents/Codes/Handoff/.planning/research/STACK.md` — version pins, install lines, rejected alternatives
+- `/Users/lakshmanturlapati/Documents/Codes/Handoff/.planning/research/FEATURES.md` — table stakes, differentiators, anti-features catalogue
+- `/Users/lakshmanturlapati/Documents/Codes/Handoff/.planning/research/ARCHITECTURE.md` — in-process boundaries, build order, test seams
+- `/Users/lakshmanturlapati/Documents/Codes/Handoff/.planning/research/PITFALLS.md` — phase-mapped replay-prevention catalogue + "Looks Done But Isn't" checklist
+- `/Users/lakshmanturlapati/Documents/Codes/Handoff/.planning/PROJECT.md` — v1.3 milestone definition, target features, constraints
+- `/Users/lakshmanturlapati/Documents/Codes/Handoff/.planning/debug/achilles-silent-launch.md` — v1.2 live-validation root cause (the failure shape v1.3 must structurally prevent)
+- `/Users/lakshmanturlapati/Documents/Codes/Handoff/.planning/milestones/v1.2-MILESTONE-AUDIT.md` — verification debt the v1.3 phase gates close
 
-### Tertiary (LOW confidence)
-- Cloud-hosted Claude Code API surface — the cloud product is named as the v1.2 primary target but the public API for transcript injection is not yet fully documented; **must be resolved by Phase 1 spike.**
-- ElevenLabs Agents bundle pricing — we do not use this bundle but rates need verification at release time.
-- Specific 429 class distinction — documented in PITFALLS #4 but exact response payload shape should be verified during Phase 2 implementation.
+**Bun runtime (official docs):**
+- bun.com/blog/bun-v1.3, bun-v1.3.14, bun-v1.3.10 (Windows ARM64 cross-compile target)
+- bun.com/docs/bundler/executables (--compile --target=bun-{darwin,linux,windows}-{x64,arm64})
+- bun.com/docs/runtime/http/websockets, bun.com/reference/node/child_process/spawn
+- bun.com/docs/guides/runtime/codesign-macos-executable
+
+**Ink + React (official + community 2026):**
+- npmjs.com/package/ink (7.0.5), github.com/vadimdemedes/ink (v7.0 April 2026, React 19 useEffectEvent)
+- github.com/vadimdemedes/ink/discussions/657 (30fps cap rationale)
+- React 19.2.7 react.dev/blog/2025/10/01/react-19-2
+
+**System binaries (HIGH):**
+- formulae.brew.sh/formula/sox, sourceforge.net/projects/sox/files/sox/14.4.2/
+- ffmpeg 8.1.1 release (2026-05-04); endoflife.date/ffmpeg
+
+**Distribution pattern (HIGH):**
+- github.com/evanw/esbuild/pull/1621 (canonical optionalDependencies reference)
+- pnpm.io/blog/releases/11.2 (platform-binary pattern support)
+- sentry.engineering/blog/publishing-binaries-on-npm
+
+**Supporting libraries (HIGH):**
+- npmjs.com/package/@clack/prompts (1.5.1)
+- chalk 5.6.x ESM-only series; log-update 7.2.0 (May 2026); ansi-escapes 7.2.0 (Feb 2026)
+
+**Node.js LTS (HIGH):**
+- nodejs.org/en/about/previous-releases; endoflife.date/nodejs (Node 22 LTS until Apr 2027)
+
+### Secondary (MEDIUM confidence — community sources cross-referenced)
+
+**Bun native-module compatibility:**
+- github.com/oven-sh/bun/issues/18079 (onnxruntime-node + Bun — v1.4 silero risk)
+- github.com/oven-sh/bun/issues/7208 (Bun-compiled binary deep-sign — historical, resolved 1.2+)
+- pickuma.com/posts/bun-vs-nodejs-2026-production-runtime/ (JSC vs V8 .node-file limitation)
+
+**macOS TCC / Gatekeeper:**
+- github.com/microsoft/vscode/issues/307364 (VS Code integrated terminal TCC silent failure — May 2026)
+- github.com/pingdotgg/t3code/issues/728 (same shape for camera + mic)
+- mjtsai.com/blog/2025/07/07/the-curious-case-of-the-responsible-process/
+
+**Claude Code skill body lifecycle:**
+- code.claude.com/docs/en/skills; platform.claude.com/docs/en/agents-and-tools/tool-use/bash-tool
+- github.com/anthropics/claude-code/issues/45717 (SIGTERM propagation to Claude Code via tmux)
+- github.com/anthropics/claude-code/issues/5615 (BASH_DEFAULT_TIMEOUT_MS + BASH_MAX_TIMEOUT_MS)
+- github.com/anthropics/claude-code/issues/60515 (multi-Bash-call re-prompt bug)
+
+**VAD literature:**
+- arxiv 2312.05815 (adaptive threshold algorithms in noisy environments)
+- picovoice.ai/blog/complete-guide-voice-activity-detection-vad/ (production VAD 2026 guide)
+- snakers4/silero-vad (the v1.4 upgrade target)
+
+**Terminal voice precedents (direct competitors, <12 months old):**
+- kstonekuan/gemini-voice (March 2026 — dictation-only)
+- google-gemini/gemini-cli#6929 (/talk:start proposal, validates voice-out direction)
+- PATAPIM Terminal IDE (Whisper voice dictation, different category)
+
+### Tertiary (LOW — informational, validated during planning)
+
+- OpenTUI / @opentui/react (Zig core + Bun FFI; v1.4 watchlist; pre-1.0 in mid-2026)
+- @napi-rs/keyring (v1.4 keychain integration candidate; keytar deprecated March 2026)
+- libfvad-wasm (v1.4 middle-ground VAD option if silero ONNX too heavyweight)
 
 ---
-*Research completed: 2026-06-06*
-*Ready for roadmap: yes — pending REQUIREMENTS.md resolution of the cloud-vs-local question in Phase 1*
+
+*Research completed: 2026-06-08*
+*Ready for roadmap: yes — Phase 15-20 structure with explicit prevention gates per phase, three non-optional Phase 20 real-binary asciicast deliverables, Apple Developer ID acquisition surfaced as Phase 19 release gate*
