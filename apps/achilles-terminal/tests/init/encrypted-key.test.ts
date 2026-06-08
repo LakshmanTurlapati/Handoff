@@ -19,7 +19,6 @@
  * No emojis (CLAUDE.md global).
  */
 import {
-  mkdirSync,
   mkdtempSync,
   statSync,
   writeFileSync,
