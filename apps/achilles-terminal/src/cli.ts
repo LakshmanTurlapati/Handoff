@@ -14,8 +14,18 @@
  *
  * The static top-level import budget is therefore locked to exactly
  *   { node:fs/promises, node:url, node:path }
- * across both Phase 15 and Phase 16. Any addition would regress
- * INIT-07 and is rejected by tests/cli.test.ts T8.
+ * across Phase 15, Phase 16, Phase 17, and Phase 18. Any addition would
+ * regress INIT-07 and is rejected by tests/cli.test.ts T8 and
+ * tests/integration/init-07-invariant.test.ts.
+ *
+ * Phase 18 Plan 04 adds the `init`, `config`, `transcripts`, and
+ * `latency` (migrated to runLatencyReport) subcommand branches. The
+ * `voice` branch acquires the single-instance lock (SAFE-04) via
+ * acquireLock() BEFORE the session.ts dynamic import so the conflict
+ * message fires before any pipeline boots. Every new subcommand uses
+ * `await import("./...")` dynamic gates inside main() so INIT-07's
+ * top-level static-import budget remains exactly
+ * { node:fs/promises, node:url, node:path }.
  *
  * Pitfall 5 (Bun stdout flush-on-exit): every exit path that writes to
  * stdout uses the explicit write-then-callback form
@@ -72,16 +82,18 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Phase 17, Plan 04, Task 3: `latency` subcommand dynamic-import
-  // gate. The renderLatencyReport reader lives in latency-probe.js;
-  // INIT-07 invariant preserved — the static top-level imports
-  // continue to be exactly { node:fs/promises, node:url, node:path }
-  // (this branch uses ONLY dynamic imports).
+  // Phase 18 Plan 04 / Phase 17 Plan 04: `latency` subcommand dynamic-import
+  // gate. Phase 18 migrates the import target from latency-probe.js to
+  // latency-report.js (Plan 03 wrapper) so cli.ts depends on a stable
+  // consumer surface instead of Phase 17's internal implementation path.
+  // INIT-07 invariant preserved — the static top-level imports continue to
+  // be exactly { node:fs/promises, node:url, node:path } (this branch uses
+  // ONLY dynamic imports).
   if (argv[0] === "latency") {
     const sub = argv[1];
     if (sub === "--report" || sub === "report") {
-      const { renderLatencyReport } = await import("./latency-probe.js");
-      const report = await renderLatencyReport();
+      const { runLatencyReport } = await import("./latency-report.js");
+      const report = await runLatencyReport();
       process.stdout.write(report, () => process.exit(0));
       return;
     }
@@ -92,14 +104,85 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Phase 16: `voice` subcommand dynamic-import gate. The runVoice
-  // function in session.ts owns commander parsing, isTTY routing,
-  // Ink mount or plain-text fallback, and the minimum SIGINT handler.
-  // The await import gate is the ONLY new import path in cli.ts —
-  // session.js (and its transitive ink + react + chalk + sox + VAD
-  // imports) loads LAZILY so `achilles --version` never pays the cost
-  // of any of those modules (INIT-07 invariant).
+  // Phase 18 Plan 04: `init` subcommand dynamic-import gate.
+  // Invokes the Plan 03 @clack/prompts linear wizard via runInitWizard().
+  // On wizard completion: exit 0.
+  // On user cancel (Ctrl-C): print "achilles init: cancelled." + exit 130.
+  // On any other failure: exit 1.
+  // INIT-07: runInitWizard and all of its transitive @clack/prompts /
+  // @napi-rs/keyring / @stablelib/nacl imports load ONLY inside this branch.
+  if (argv[0] === "init") {
+    const { runInitWizard } = await import("./init/wizard.js");
+    const outcome = await runInitWizard();
+    if (outcome.completed) {
+      process.exit(0);
+      return;
+    } else if (outcome.cancelled) {
+      process.stderr.write("achilles init: cancelled.\n");
+      process.exit(130);
+      return;
+    } else {
+      process.exit(1);
+      return;
+    }
+  }
+
+  // Phase 18 Plan 04: `config` subcommand dynamic-import gate.
+  // Invokes the Plan 03 @clack/prompts settings menu via runConfigMenu().
+  // Exits 0 on save or cancel (the menu handles both without an error code
+  // distinction — the user chose to exit). The session-level exit is always
+  // clean because runConfigMenu catches all prompts.
+  if (argv[0] === "config") {
+    const { runConfigMenu } = await import("./config-menu.js");
+    await runConfigMenu();
+    process.exit(0);
+    return;
+  }
+
+  // Phase 18 Plan 04: `transcripts` subcommand dynamic-import gate.
+  // list  -> transcriptsList()  — prints ~/.achilles/transcripts/ contents.
+  // purge -> transcriptsPurge() — interactive delete menu.
+  // else  -> stderr + exit 1.
+  // INIT-07: transcripts/cli.js and its @clack/prompts import load only here.
+  if (argv[0] === "transcripts") {
+    const sub = argv[1];
+    if (sub === "list") {
+      const { transcriptsList } = await import("./transcripts/cli.js");
+      await transcriptsList();
+      process.exit(0);
+      return;
+    }
+    if (sub === "purge") {
+      const { transcriptsPurge } = await import("./transcripts/cli.js");
+      await transcriptsPurge();
+      process.exit(0);
+      return;
+    }
+    process.stderr.write("achilles transcripts: try list or purge.\n");
+    process.exit(1);
+    return;
+  }
+
+  // Phase 16 + Phase 18 Plan 04: `voice` subcommand dynamic-import gate.
+  // Phase 18 wraps the existing gate with SAFE-04 lock acquisition:
+  //   1. acquireLock() from lock-file.js BEFORE session.js dynamic import.
+  //   2. On { ok: false }, print the explicit conflict message + exit 1.
+  //   3. On { ok: true }, proceed to runVoice() as in Phase 16/17.
+  // releaseLock is NOT called here — graceful-shutdown.ts registers a
+  // process.once("exit") unlink so calling releaseLock() here would race.
+  // INIT-07: session.js and its transitive ink + react + chalk + sox + VAD
+  // imports load LAZILY so `achilles --version` never pays the cost
+  // of any of those modules.
   if (argv[0] === "voice") {
+    const { acquireLock } = await import("./lock-file.js");
+    const lockState = acquireLock();
+    if (!lockState.ok) {
+      process.stderr.write(
+        `Another achilles voice session is running (pid ${lockState.runningPid}). Press Ctrl-C in that terminal first.\n`,
+      );
+      process.exit(1);
+      return;
+    }
     const { runVoice } = await import("./session.js");
     await runVoice(argv.slice(1));
     return;
