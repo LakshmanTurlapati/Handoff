@@ -25,6 +25,7 @@
     "build:binaries": "node scripts/build-binaries.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint . --max-warnings 0",
+    "pretest": "node scripts/link-ink.mjs",
     "test": "vitest run"
   },
   "dependencies": {
@@ -36,8 +37,8 @@
   "optionalDependencies": {
     "@achilles/cli-darwin-arm64": "1.3.0",
     "@achilles/cli-darwin-x64": "1.3.0",
-    "@achilles/cli-linux-x64": "1.3.0",
     "@achilles/cli-linux-arm64": "1.3.0",
+    "@achilles/cli-linux-x64": "1.3.0",
     "@achilles/cli-win32-x64": "1.3.0"
   },
   "devDependencies": {
