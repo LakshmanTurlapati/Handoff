@@ -5,6 +5,7 @@
     "moduleResolution": "NodeNext",
     "target": "ES2024",
     "lib": ["ES2024"],
+    "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -23,6 +24,12 @@
     "tsBuildInfoFile": "./.tsbuildinfo",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.mjs"],
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "scripts/**/*.mjs"
+  ],
   "exclude": ["dist", "node_modules"]
 }
