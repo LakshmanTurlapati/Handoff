@@ -1,0 +1,10 @@
+{
+  "name": "@achilles/cli-darwin-arm64",
+  "version": "1.3.0",
+  "description": "Bun-compiled achilles binary for macOS arm64.",
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["bin/achilles"],
+  "publishConfig": { "access": "public" }
+}
