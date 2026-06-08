@@ -169,7 +169,7 @@ export interface StructuredLogger {
  * 40+ alphanumeric chars). Distinct from pattern 4 (xi HYPHEN prefix).
  * Added in Phase 18 Plan 02.
  */
-const DEFAULT_REDACT_PATTERNS: ReadonlyArray<RegExp> = [
+export const DEFAULT_REDACT_PATTERNS: ReadonlyArray<RegExp> = [
   /Bearer\s+[A-Za-z0-9._-]+/g,
   /[a-zA-Z0-9_-]{32,}\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
   /sk-[a-zA-Z0-9]{16,}/g,
