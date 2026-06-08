@@ -12,7 +12,10 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import type { spawn as spawnFn } from "node:child_process";
 import { createMicSox } from "../../src/audio/mic-sox.js";
+
+type SpawnArgs = Parameters<typeof spawnFn>;
 
 // Minimal stand-in for a node:child_process child. EventEmitter satisfies the
 // proc.on / proc.once contract; stdout / stderr are independent EventEmitter
@@ -37,7 +40,9 @@ function makeFakeChild(): EventEmitter & {
 describe("createMicSox — sox child process wrapper (CAP-01)", () => {
   it("Test 1: POSIX argv shape (linux/darwin) — rec with no -d flag", () => {
     const fakeChild = makeFakeChild();
-    const fakeSpawn = vi.fn(() => fakeChild);
+    const fakeSpawn = vi.fn<(...args: SpawnArgs) => typeof fakeChild>(
+      () => fakeChild,
+    );
     createMicSox({
       onFrame: vi.fn(),
       onExit: vi.fn(),
@@ -65,7 +70,9 @@ describe("createMicSox — sox child process wrapper (CAP-01)", () => {
 
   it("Test 1b: POSIX argv shape (darwin) — rec with no -d flag", () => {
     const fakeChild = makeFakeChild();
-    const fakeSpawn = vi.fn(() => fakeChild);
+    const fakeSpawn = vi.fn<(...args: SpawnArgs) => typeof fakeChild>(
+      () => fakeChild,
+    );
     createMicSox({
       onFrame: vi.fn(),
       onExit: vi.fn(),
@@ -92,7 +99,9 @@ describe("createMicSox — sox child process wrapper (CAP-01)", () => {
 
   it("Test 2: Windows argv shape — sox.exe with -d default-device flag", () => {
     const fakeChild = makeFakeChild();
-    const fakeSpawn = vi.fn(() => fakeChild);
+    const fakeSpawn = vi.fn<(...args: SpawnArgs) => typeof fakeChild>(
+      () => fakeChild,
+    );
     createMicSox({
       onFrame: vi.fn(),
       onExit: vi.fn(),
@@ -120,7 +129,9 @@ describe("createMicSox — sox child process wrapper (CAP-01)", () => {
 
   it("Test 3: stdio shape — [\"ignore\", \"pipe\", \"pipe\"] (PITFALLS.md §1 silent-launch defence)", () => {
     const fakeChild = makeFakeChild();
-    const fakeSpawn = vi.fn(() => fakeChild);
+    const fakeSpawn = vi.fn<(...args: SpawnArgs) => typeof fakeChild>(
+      () => fakeChild,
+    );
     createMicSox({
       onFrame: vi.fn(),
       onExit: vi.fn(),
@@ -128,13 +139,15 @@ describe("createMicSox — sox child process wrapper (CAP-01)", () => {
       platformOverride: "linux",
     });
     const call = fakeSpawn.mock.calls[0]!;
-    const options = call[2] as { stdio: unknown };
+    const options = call[2] as unknown as { stdio: unknown };
     expect(options.stdio).toEqual(["ignore", "pipe", "pipe"]);
   });
 
   it("Test 4: frame extraction — 640-byte chunk yields one Int16Array of length 320", () => {
     const fakeChild = makeFakeChild();
-    const fakeSpawn = vi.fn(() => fakeChild);
+    const fakeSpawn = vi.fn<(...args: SpawnArgs) => typeof fakeChild>(
+      () => fakeChild,
+    );
     const onFrame = vi.fn();
     createMicSox({
       onFrame,
@@ -155,7 +168,9 @@ describe("createMicSox — sox child process wrapper (CAP-01)", () => {
 
   it("Test 5: multi-frame buffering — 1280-byte chunk yields two frames; 480-byte then 160-byte assembles one frame from the leftover", () => {
     const fakeChild = makeFakeChild();
-    const fakeSpawn = vi.fn(() => fakeChild);
+    const fakeSpawn = vi.fn<(...args: SpawnArgs) => typeof fakeChild>(
+      () => fakeChild,
+    );
     const onFrame = vi.fn();
     createMicSox({
       onFrame,
@@ -189,7 +204,9 @@ describe("createMicSox — sox child process wrapper (CAP-01)", () => {
 
   it("Test 6: exit-code error — nonzero exit + stderr is surfaced; currentStatus flips to \"exited\"", () => {
     const fakeChild = makeFakeChild();
-    const fakeSpawn = vi.fn(() => fakeChild);
+    const fakeSpawn = vi.fn<(...args: SpawnArgs) => typeof fakeChild>(
+      () => fakeChild,
+    );
     const onExit = vi.fn();
     const handle = createMicSox({
       onFrame: vi.fn(),
@@ -206,7 +223,9 @@ describe("createMicSox — sox child process wrapper (CAP-01)", () => {
 
   it("Test 7: kill propagation — handle.stop() calls kill(\"SIGTERM\") and resolves after exit", async () => {
     const fakeChild = makeFakeChild();
-    const fakeSpawn = vi.fn(() => fakeChild);
+    const fakeSpawn = vi.fn<(...args: SpawnArgs) => typeof fakeChild>(
+      () => fakeChild,
+    );
     const handle = createMicSox({
       onFrame: vi.fn(),
       onExit: vi.fn(),
