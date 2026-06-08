@@ -90,7 +90,7 @@
 **UI hint**: yes
   - [x] 18-01-PLAN.md — Wave 1 foundation: install @clack/prompts + @napi-rs/keyring + @stablelib/nacl deps; build env → keychain → encrypted-file API key resolver with 0o600 enforcement + libsodium secretbox round trip (INIT-02, SAFE-01)
   - [x] 18-02-PLAN.md — Wave 2 modules: preflight (which + device-open smoke) + install-suggestions (brew/apt/choco) + ambient calibration (5s → 10th percentile RMS) + parent-terminal TCC detection + init.json marker + single-instance lock-file enforcement + structured-logger 7th regex (xi_-prefix new ElevenLabs shape) (INIT-03, INIT-04 half, INIT-06, SAFE-04, SAFE-01 hardening)
-  - [ ] 18-03-PLAN.md — Wave 3 user surfaces: @clack/prompts wizard composing Plans 01/02 (linear flow with idempotency + summary diff + smoke test) + transcripts store/retention/CLI (JSONL with 7-regex redaction + 30-day retention + list/purge) + typed-input fallback (poll circuit-breaker.status()) + config menu (4 VAD knobs + 2 booleans with validators) + latency-report wrapper (INIT-01, INIT-04 half, INIT-05, SAFE-02, ERR-04, ERR-07)
+  - [x] 18-03-PLAN.md — Wave 3 user surfaces: @clack/prompts wizard composing Plans 01/02 (linear flow with idempotency + summary diff + smoke test) + transcripts store/retention/CLI (JSONL with 7-regex redaction + 30-day retention + list/purge) + typed-input fallback (poll circuit-breaker.status()) + config menu (4 VAD knobs + 2 booleans with validators) + latency-report wrapper (INIT-01, INIT-04 half, INIT-05, SAFE-02, ERR-04, ERR-07)
   - [ ] 18-04-PLAN.md — Wave 4 cli.ts extension + integration tests + Phase 18 wrap: 4 new subcommand branches (init / config / transcripts / latency) via dynamic-import gates preserving INIT-07; voice branch acquires single-instance lock BEFORE session.ts dynamic import; SAFE-03 + INIT-07 invariant assertions; ROADMAP.md Phase 18 closed with 4/4 Complete (INIT-07 preserved, SAFE-03 verified)
 
 ### Phase 19: Distribution + Publishing + Gatekeeper + Skill Rewire
@@ -140,6 +140,6 @@ Phase 19's deletion of `apps/achilles` + `apps/achilles-cli/src/commands/launch.
 | 15. Workspace Scaffold + Bun Build Pipeline | v1.3 | 4/4 | Complete   | 2026-06-08 |
 | 16. TUI Shell + State Machine + sox + VAD | v1.3 | 4/4 | Complete   | 2026-06-08 |
 | 17. End-to-end Voice Loop + gracefulShutdown | v1.3 | 5/5 | Complete   | 2026-06-08 |
-| 18. Init Wizard + Config + Transcripts | v1.3 | 2/4 | In Progress|  |
+| 18. Init Wizard + Config + Transcripts | v1.3 | 3/4 | In Progress|  |
 | 19. Distribution + Publishing + Gatekeeper | v1.3 | 0/TBD | Not started | - |
 | 20. Hardening + Ship Gate (RBS Asciicasts) | v1.3 | 0/TBD | Not started | - |
