@@ -87,6 +87,14 @@ export function startPlainMode(events: PlainModeEvents): () => void {
     writeSnapshot();
   });
 
+  // Emit an initial snapshot so the user sees the starting state line even
+  // before the first state-change event fires. Without this, `achilles
+  // voice --plain --mock` produces no stdout until the VAD warmup completes
+  // and the first speech_start fires (>500ms minimum). The initial line
+  // also serves as a "process is alive and capturing" confirmation per
+  // CONTEXT.md TUI-06 wire-format row.
+  writeSnapshot();
+
   return (): void => {
     unsubscribeState();
     unsubscribeTranscript();

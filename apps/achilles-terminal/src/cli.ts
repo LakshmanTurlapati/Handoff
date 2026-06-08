@@ -1,14 +1,21 @@
 #!/usr/bin/env node
 /**
- * `achilles` CLI seed entry point (Phase 15).
+ * `achilles` CLI entry point (Phase 15 seed + Phase 16 voice subcommand).
  *
  * INIT-07: the argv parse for --version / -v MUST happen before any
  * dynamic import of pipeline-boot modules (the modules that would touch
- * ELEVENLABS_API_KEY, sox, or ffmpeg). In Phase 15 there are no pipeline
- * imports yet, so the invariant is trivially satisfied — but the
- * structure (top-level static imports of node:fs/promises + node:url +
- * node:path only, argv branch first, ALL other logic gated) must be
- * preserved so Phase 16+ cannot regress it.
+ * ELEVENLABS_API_KEY, sox, or ffmpeg). The Phase 15 seed kept the
+ * invariant trivially (no pipeline imports existed yet); Phase 16
+ * extends the `voice` branch from a stub-write-to-stderr-and-exit to a
+ * dynamic import of session.ts's runVoice(); the --version / -v /
+ * --latency-probe argv-first branches stay at the top of main() so
+ * INIT-07 is structurally preserved — Ink, React, chalk, sox, and VAD
+ * never load when the user runs --version.
+ *
+ * The static top-level import budget is therefore locked to exactly
+ *   { node:fs/promises, node:url, node:path }
+ * across both Phase 15 and Phase 16. Any addition would regress
+ * INIT-07 and is rejected by tests/cli.test.ts T8.
  *
  * Pitfall 5 (Bun stdout flush-on-exit): every exit path that writes to
  * stdout uses the explicit write-then-callback form
@@ -65,15 +72,17 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Phase 15 stub: the voice TUI is not implemented yet. Phase 16 ships
-  // the real subcommand router and Ink-based UI. Print a real error
-  // message rather than silently exiting so users get a clear "this
-  // surface is not in this build" signal.
+  // Phase 16: `voice` subcommand dynamic-import gate. The runVoice
+  // function in session.ts owns commander parsing, isTTY routing,
+  // Ink mount or plain-text fallback, and the minimum SIGINT handler.
+  // The await import gate is the ONLY new import path in cli.ts —
+  // session.js (and its transitive ink + react + chalk + sox + VAD
+  // imports) loads LAZILY so `achilles --version` never pays the cost
+  // of any of those modules (INIT-07 invariant).
   if (argv[0] === "voice") {
-    process.stderr.write(
-      "achilles voice: TUI not implemented in Phase 15. Phase 16 ships this.\n",
-    );
-    process.exit(1);
+    const { runVoice } = await import("./session.js");
+    await runVoice(argv.slice(1));
+    return;
   }
 
   process.stderr.write("achilles: unknown command. Try --version.\n");
