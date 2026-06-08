@@ -170,7 +170,8 @@ describe("readEncryptedKey tamper detection", () => {
     const raw = Buffer.from(readFileSync(encPath, "utf8"), "base64");
 
     // Flip a byte in the ciphertext area (after the 24-byte nonce).
-    raw[25] = raw[25] ^ 0xff;
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    raw[25] = raw[25]! ^ 0xff;
     writeFileSync(encPath, raw.toString("base64"), { encoding: "utf8" });
     // Restore 0o600 so the permissions check does not interfere.
     chmodSync(encPath, 0o600);
