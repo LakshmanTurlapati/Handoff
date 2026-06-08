@@ -93,7 +93,7 @@ export class KeychainUnavailableError extends Error {
    * `unknown` so the resolver does not inspect message bytes (which
    * may carry implementation detail not safe to log).
    */
-  readonly cause: unknown;
+  override readonly cause: unknown;
 
   constructor(message: string, cause: unknown) {
     super(message);
