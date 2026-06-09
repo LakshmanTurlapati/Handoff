@@ -140,6 +140,6 @@ Phase 19's deletion of `apps/achilles` + `apps/achilles-cli/src/commands/launch.
 | 15. Workspace Scaffold + Bun Build Pipeline | v1.3 | 4/4 | Complete   | 2026-06-08 |
 | 16. TUI Shell + State Machine + sox + VAD | v1.3 | 4/4 | Complete   | 2026-06-08 |
 | 17. End-to-end Voice Loop + gracefulShutdown | v1.3 | 5/5 | Complete   | 2026-06-08 |
-| 18. Init Wizard + Config + Transcripts | v1.3 | 4/4 | Complete   | 2026-06-08 |
+| 18. Init Wizard + Config + Transcripts | v1.3 | 4/4 | Complete    | 2026-06-09 |
 | 19. Distribution + Publishing + Gatekeeper | v1.3 | 0/TBD | Not started | - |
 | 20. Hardening + Ship Gate (RBS Asciicasts) | v1.3 | 0/TBD | Not started | - |

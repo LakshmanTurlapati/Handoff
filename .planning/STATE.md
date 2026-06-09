@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Terminal-only Achilles
-status: executing
-stopped_at: "ROADMAP.md, REQUIREMENTS.md traceability, and STATE.md written; awaiting `/gsd:plan-phase 15`"
-last_updated: "2026-06-08T18:03:02.878Z"
+status: ready_to_plan
+stopped_at: Phase 18 complete (4/4) — ready to discuss Phase 19
+last_updated: 2026-06-09T03:13:45.997Z
 last_activity: 2026-06-08 -- Phase 18 execution started
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 17
-  completed_plans: 13
+  completed_plans: 44
   percent: 50
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** A developer can hand off intent to their terminal coding agent through the most natural surface available — phone screen (Handoff) or voice (Achilles) — without leaving their local environment behind.
-**Current focus:** Phase 18 — init-wizard-config-transcripts-single-instance-lock
+**Current focus:** Phase 19 — distribution + publishing + gatekeeper + skill rewire
 
 ## Current Position
 
-Phase: 18 (init-wizard-config-transcripts-single-instance-lock) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 18
-Last activity: 2026-06-08 -- Phase 18 execution started
+Phase: 19
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-06-09
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -45,6 +45,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 15-20 | TBD | TBD | — |
+| 18 | 4 | - | - |
 
 *Updated after each plan completion*
 

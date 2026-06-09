@@ -55,30 +55,30 @@ Requirements for the v1.3 release. Each maps to roadmap phases 15-20.
 
 ### Init / Onboarding (INIT)
 
-- [ ] **INIT-01**: `achilles init` wizard via `@clack/prompts` walks API key resolution → sox/ffmpeg preflight → ambient calibration → 1-utterance smoke test linearly
-- [ ] **INIT-02**: API key resolution hierarchy: `ELEVENLABS_API_KEY` env var → OS keychain via `@napi-rs/keyring` → encrypted `~/.achilles/key.enc` (libsodium secretbox, 0o600 perms); env var always wins on read
-- [ ] **INIT-03**: Wizard runs `which sox && which ffmpeg` preflight; on miss prints platform-specific install line (`brew install sox ffmpeg`, `sudo apt install sox ffmpeg`, `choco install sox.portable ffmpeg`); offers to invoke the package manager subprocess if `which brew/apt/choco` succeeds
-- [ ] **INIT-04**: Wizard runs 5-second ambient calibration to set initial VAD noise floor + 1-utterance smoke test exercising the full mic → STT → claude → TTS → ffplay path; on success writes `~/.achilles/init.json` marker that `achilles voice` checks to skip the wizard
-- [ ] **INIT-05**: `achilles init` is idempotent and re-runnable; shows "keep current" defaults for every prompt; prints a final summary diff before writing
-- [ ] **INIT-06**: On sox EPERM/EACCES, error names the parent terminal emulator (resolved via `process.ppid` + `ps -p $PPID -o comm=`) and prints explicit System Settings → Privacy & Security → Microphone path; ships a per-emulator remediation script for VS Code / Cursor / iTerm / Terminal.app / Ghostty
+- [x] **INIT-01**: `achilles init` wizard via `@clack/prompts` walks API key resolution → sox/ffmpeg preflight → ambient calibration → 1-utterance smoke test linearly
+- [x] **INIT-02**: API key resolution hierarchy: `ELEVENLABS_API_KEY` env var → OS keychain via `@napi-rs/keyring` → encrypted `~/.achilles/key.enc` (libsodium secretbox, 0o600 perms); env var always wins on read
+- [x] **INIT-03**: Wizard runs `which sox && which ffmpeg` preflight; on miss prints platform-specific install line (`brew install sox ffmpeg`, `sudo apt install sox ffmpeg`, `choco install sox.portable ffmpeg`); offers to invoke the package manager subprocess if `which brew/apt/choco` succeeds
+- [x] **INIT-04**: Wizard runs 5-second ambient calibration to set initial VAD noise floor + 1-utterance smoke test exercising the full mic → STT → claude → TTS → ffplay path; on success writes `~/.achilles/init.json` marker that `achilles voice` checks to skip the wizard
+- [x] **INIT-05**: `achilles init` is idempotent and re-runnable; shows "keep current" defaults for every prompt; prints a final summary diff before writing
+- [x] **INIT-06**: On sox EPERM/EACCES, error names the parent terminal emulator (resolved via `process.ppid` + `ps -p $PPID -o comm=`) and prints explicit System Settings → Privacy & Security → Microphone path; ships a per-emulator remediation script for VS Code / Cursor / iTerm / Terminal.app / Ghostty
 - [ ] **INIT-07**: `achilles --version` works without API key, sox, or ffmpeg (argv parse precedes any pipeline boot)
 
 ### Privacy + Security (SAFE)
 
-- [ ] **SAFE-01**: ElevenLabs API key main-process-only (env / keystore / encrypted file); never appears in any log file even with `--debug` flag (7-regex redaction pattern ported from v1.2 tarball scanner); 0o600 perms enforced on encrypted-file fallback
-- [ ] **SAFE-02**: Transcripts off by default; `--save-transcripts` opt-in writes JSONL with secret redaction to `~/.achilles/transcripts/`; `achilles transcripts list / purge` subcommands; 30-day retention default (carryover from v1.2)
-- [ ] **SAFE-03**: ElevenLabs-only outbound network allowlist enforced at `packages/voice-protocol/src/transport.ts:assertElevenLabsHost` (carryover from v1.2, no change)
-- [ ] **SAFE-04**: Single-instance lock at `~/.achilles/voice.lock` with PID liveness check (`kill -0`); refuses to start second instance with "Another achilles voice session is running (pid 12345). Press Ctrl-C in that terminal first."; cleaned up on graceful exit + SIGINT/SIGTERM handlers
+- [x] **SAFE-01**: ElevenLabs API key main-process-only (env / keystore / encrypted file); never appears in any log file even with `--debug` flag (7-regex redaction pattern ported from v1.2 tarball scanner); 0o600 perms enforced on encrypted-file fallback
+- [x] **SAFE-02**: Transcripts off by default; `--save-transcripts` opt-in writes JSONL with secret redaction to `~/.achilles/transcripts/`; `achilles transcripts list / purge` subcommands; 30-day retention default (carryover from v1.2)
+- [x] **SAFE-03**: ElevenLabs-only outbound network allowlist enforced at `packages/voice-protocol/src/transport.ts:assertElevenLabsHost` (carryover from v1.2, no change)
+- [x] **SAFE-04**: Single-instance lock at `~/.achilles/voice.lock` with PID liveness check (`kill -0`); refuses to start second instance with "Another achilles voice session is running (pid 12345). Press Ctrl-C in that terminal first."; cleaned up on graceful exit + SIGINT/SIGTERM handlers
 
 ### Error Visibility + Resilience (ERR)
 
 - [ ] **ERR-01**: Inline error banner (one-line red row above status row) names error class (network / auth / rate-limit / sox / ffplay / claude) and proposes next action; auto-dismisses after 8s or on next successful event
 - [ ] **ERR-02**: STT + TTS WSS connects guarded by circuit breaker (threshold + cooldown + full-jitter backoff, carryover from v1.2 SAFE-05); ElevenLabs 429 produces explicit messaging "ElevenLabs rate limit — retrying in Ns" via existing `classifyHttpError`
 - [ ] **ERR-03**: sox + ffplay child-exit watchdog respawns bounded (max 3 attempts in 10s window); on cap-exceeded transitions to error state with "Audio device lost — restart Achilles"
-- [ ] **ERR-04**: Typed-input fallback via inline `@clack/prompts.text()` activated when STT circuit opens; typed transcript flows through the same sandwich-wrap single-pipeline entry as voice transcripts
+- [x] **ERR-04**: Typed-input fallback via inline `@clack/prompts.text()` activated when STT circuit opens; typed transcript flows through the same sandwich-wrap single-pipeline entry as voice transcripts
 - [ ] **ERR-05**: Stuck-thinking watchdog (carryover from v1.2): if `claude -p` emits no stream-json line for 60s, the TUI surfaces "Claude has been thinking for 60s — Ctrl-C to cancel"
 - [ ] **ERR-06**: Suspend/resume + device hot-swap recovery: child-exit-code polling detects sox/ffplay EIO after wake; respawns and resets state machine to idle
-- [ ] **ERR-07**: `achilles voice --debug` enables verbose latency-probe + line-trace logging to `~/.achilles/debug-<ts>.log` (key redacted); `achilles latency --report` prints rolling-window P50/P95 speech-end → ack-spoken from `~/.achilles/latency/` JSON files (LOOP-06 port from v1.2)
+- [x] **ERR-07**: `achilles voice --debug` enables verbose latency-probe + line-trace logging to `~/.achilles/debug-<ts>.log` (key redacted); `achilles latency --report` prints rolling-window P50/P95 speech-end → ack-spoken from `~/.achilles/latency/` JSON files (LOOP-06 port from v1.2)
 - [ ] **ERR-08**: Unconditional structured logger writes to `~/.achilles/achilles.log` on every run regardless of flags; closes the v1.2 silent-stdio gap that hid the renderer-wiring defect (key still redacted; rotates at 10MB)
 
 ### Ship Gate — Real-Binary Verification (GATE)
@@ -186,24 +186,24 @@ Each v1.3 requirement maps to exactly one phase (15-20). Filled by the gsd-roadm
 | LOOP-05 | Phase 17 | Pending |
 | LOOP-06 | Phase 17 | Pending |
 | LOOP-07 | Phase 17 | Pending |
-| INIT-01 | Phase 18 | Pending |
-| INIT-02 | Phase 18 | Pending |
-| INIT-03 | Phase 18 | Pending |
-| INIT-04 | Phase 18 | Pending |
-| INIT-05 | Phase 18 | Pending |
-| INIT-06 | Phase 18 | Pending |
+| INIT-01 | Phase 18 | Complete |
+| INIT-02 | Phase 18 | Complete |
+| INIT-03 | Phase 18 | Complete |
+| INIT-04 | Phase 18 | Complete |
+| INIT-05 | Phase 18 | Complete |
+| INIT-06 | Phase 18 | Complete |
 | INIT-07 | Phase 15 | Pending |
-| SAFE-01 | Phase 18 | Pending |
-| SAFE-02 | Phase 18 | Pending |
-| SAFE-03 | Phase 18 | Pending |
-| SAFE-04 | Phase 18 | Pending |
+| SAFE-01 | Phase 18 | Complete |
+| SAFE-02 | Phase 18 | Complete |
+| SAFE-03 | Phase 18 | Complete |
+| SAFE-04 | Phase 18 | Complete |
 | ERR-01 | Phase 19 | Pending |
 | ERR-02 | Phase 17 | Pending |
 | ERR-03 | Phase 19 | Pending |
-| ERR-04 | Phase 18 | Pending |
+| ERR-04 | Phase 18 | Complete |
 | ERR-05 | Phase 17 | Pending |
 | ERR-06 | Phase 17 | Pending |
-| ERR-07 | Phase 18 | Pending |
+| ERR-07 | Phase 18 | Complete |
 | ERR-08 | Phase 19 | Pending |
 | GATE-01 | Phase 20 | Pending |
 | GATE-02 | Phase 20 | Pending |
