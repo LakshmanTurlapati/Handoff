@@ -1,8 +1,8 @@
 /**
- * Ink root component (Phase 16, Plan 04, Task 2).
+ * Ink root component (Phase 16, Plan 04, Task 2 + Phase 19 Plan 02 Task 1).
  *
- * Composes Blob + Sparkline + StatusRow + ScreenReader (from Plan 03) into
- * a single Ink tree, driven by:
+ * Composes Banner (Phase 19) + Blob + Sparkline + StatusRow + ScreenReader
+ * (from Plan 03) into a single Ink tree, driven by:
  *
  *   - useAchillesState(session)  -> AchillesState
  *   - useAmplitude(session)      -> live mic / mock RMS
@@ -40,6 +40,15 @@
  * lives in session.ts's handleFrame methods). Kept on the component signature
  * so Phase 17 can wire UI-side debug display if needed without a refactor.
  *
+ * Phase 19 Plan 02 Task 1 (D-10 / D-11 / ERR-01):
+ *   - The Banner component renders ABOVE the screen-reader/sighted branch
+ *     as the FIRST child of the root <Box flexDirection="column">. This
+ *     ensures error rows pre-empt the visual surface during cascading
+ *     failures while StatusRow continues to render below.
+ *   - useErrorBanner(session) maps session error events through the
+ *     error-classifier and bumps errorNonce / successNonce so Banner's
+ *     internal timer logic is purely state-driven.
+ *
  * LOOP-02 invariant: zero imports from the four voice runtime packages,
  * the claude bridge package, or the achilles skill package. Only Ink +
  * React + local components.
@@ -54,6 +63,7 @@ import { Blob } from "./Blob.js";
 import { Sparkline } from "./Sparkline.js";
 import { StatusRow } from "./StatusRow.js";
 import { ScreenReader } from "./ScreenReader.js";
+import { Banner } from "./Banner.js";
 import {
   isScreenReaderActive,
   idleBreathingAmplitude,
@@ -62,6 +72,7 @@ import {
 import {
   useAchillesState,
   useAmplitude,
+  useErrorBanner,
   useRingBuffer,
 } from "./useAchillesState.js";
 import type { Session } from "../session.js";
@@ -83,6 +94,7 @@ export function VoiceShell({
   const state = useAchillesState(session);
   const liveAmplitude = useAmplitude(session);
   const { ring, writeIndex } = useRingBuffer(session);
+  const { errorClass, errorNonce, successNonce } = useErrorBanner(session);
   const [tickMs, setTickMs] = useState(0);
 
   // Single 50ms interval per VoiceShell mount per Pitfall 1 perf guidance.
@@ -129,6 +141,11 @@ export function VoiceShell({
   // mode per CONTEXT.md Accessibility row "don't render them at all".
   return (
     <Box flexDirection="column">
+      <Banner
+        classification={errorClass}
+        errorNonce={errorNonce}
+        successNonce={successNonce}
+      />
       {sr ? (
         <ScreenReader state={state} />
       ) : (

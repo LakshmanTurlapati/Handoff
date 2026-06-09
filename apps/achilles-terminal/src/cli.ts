@@ -163,6 +163,28 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Phase 19 Plan 02 (DIST-03): install-skill subcommand dynamic-import gate.
+  // Symlinks (or on Windows, copies) the skill bundle into
+  // ~/.claude/skills/achilles/. The destination becomes the source-of-truth
+  // for Claude Code skill discovery on macOS/Linux (the symlink target IS
+  // the installed @achilles/achilles-skill package).
+  // INIT-07 invariant: install-skill.ts and its @achilles/achilles-skill
+  // import load ONLY here; cli.ts's static-import budget stays at exactly
+  // { node:fs/promises, node:url, node:path }. This is the 6th dynamic-
+  // import gate inside main() (init, config, transcripts, latency, voice,
+  // plus install-skill).
+  if (argv[0] === "install-skill") {
+    const force = argv.includes("--force");
+    const { installSkillCommand } = await import("./install-skill.js");
+    installSkillCommand({
+      force,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      processExitImpl: (code) => process.exit(code),
+    });
+    return;
+  }
+
   // Phase 16 + Phase 18 Plan 04: `voice` subcommand dynamic-import gate.
   // Phase 18 wraps the existing gate with SAFE-04 lock acquisition:
   //   1. acquireLock() from lock-file.js BEFORE session.js dynamic import.
