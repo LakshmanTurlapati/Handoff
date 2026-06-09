@@ -1,0 +1,302 @@
+# achilles-release.yml
+#
+# Phase 19 Plan 03 Task 3 -- v1.3.0 release workflow for the achilles
+# voice CLI. Builds 3 platform binaries on per-OS runners, runs the two
+# release gate scripts, publishes 5 packages sequentially in Pattern 2
+# order (3 platform siblings FIRST, then @achilles/achilles-skill, then
+# the parent achilles LAST), then runs the macOS smoke job against the
+# published artifact to verify the JS-fallback resolution works.
+#
+# Triggered ONLY by:
+#   - workflow_dispatch (operator-gated; CLAUDE.md global rule
+#     "never run applications automatically" -- the release is a
+#     human-initiated action, not a side effect of a code merge)
+#   - push.tags matching "v*" (operator tags the release; same gate)
+#
+# Distribution shape (Option 3 lock per 19-CONTEXT.md D-01/D-02):
+#   - 3 compiled platform siblings (linux-x64, linux-arm64, win32-x64)
+#   - 1 skill package (@achilles/achilles-skill)
+#   - 1 parent package (achilles) running the JS-fallback bundle under
+#     Node 22+ via the `#!/usr/bin/env node` shebang on dist/cli.js
+#   - macOS gets NOTHING platform-specific; the JS-fallback runs on
+#     macOS via Node 22 (Bun documented as preferred for sub-500ms
+#     cold-start). NO compiled macOS binary, NO macOS sibling publish.
+#
+# Sequential publish order (RESEARCH Pattern 2):
+#   Siblings FIRST so the parent's optionalDependencies pins resolve at
+#   install time. Without this ordering, a user who runs
+#   `npm install -g achilles@1.3.0` during the publish window sees
+#   "ERESOLVE: optional dep not found" warnings (non-fatal but ugly).
+#
+# Rollback story (RESEARCH Standard Stack `npm deprecate` row):
+#   - `npm unpublish` is only valid within 72 hours of publish AND
+#     requires no dependents.
+#   - For anything beyond that window or with dependents, the only
+#     option is `npm deprecate <pkg>@1.3.0 "v1.3.0 published in error
+#     -- use 1.3.1"`. Deprecation is operator-triggered, NOT part of
+#     this workflow.
+#
+# Required GitHub Actions secrets:
+#   - NPM_PUBLISH_TOKEN (npm classic publish token with publish access
+#     to `achilles` + the `@achilles` private scope)
+#
+# Required permissions (job-level + workflow-level):
+#   - contents: read (checkout repository)
+#   - id-token: write (npm provenance / Sigstore attestation per
+#     RESEARCH Pattern 2 + Security Domain row V2)
+
+name: achilles-release
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  # A release run MUST complete; do NOT cancel an in-flight publish even
+  # if a later tag push or workflow_dispatch arrives. Concurrent runs at
+  # the same ref serialize; runs at different refs proceed in parallel.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    name: build (${{ matrix.target.name }})
+    runs-on: ${{ matrix.target.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: linux-x64
+            runner: ubuntu-latest
+            bunTarget: bun-linux-x64
+            out: cli-linux-x64/bin/achilles
+          - name: linux-arm64
+            runner: ubuntu-22.04-arm
+            bunTarget: bun-linux-arm64
+            out: cli-linux-arm64/bin/achilles
+          - name: win32-x64
+            runner: windows-2022
+            bunTarget: bun-windows-x64
+            out: cli-win32-x64/bin/achilles.exe
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Set up Bun 1.3.14
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Install workspace dependencies
+        # D-15-02: --include=optional --force is mandatory; plain
+        # `npm ci` fails with EBADPLATFORM because npm 10.9.3 enforces
+        # os/cpu on workspace packages.
+        run: npm ci --include=optional --force
+
+      - name: Compile binary
+        working-directory: apps/achilles-terminal
+        run: |
+          mkdir -p ../$(dirname '${{ matrix.target.out }}')
+          bun build src/cli.ts --compile --target=${{ matrix.target.bunTarget }} --outfile=../${{ matrix.target.out }} --minify
+
+      - name: Smoke test - compiled binary --version
+        # Gating smoke per Phase 15 (silent-launch defence). The step
+        # confirms the file exists, executes --version, asserts non-zero
+        # exit fails via `set -e`, and asserts stdout matches semver.
+        working-directory: apps/achilles-terminal
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN_PATH="../${{ matrix.target.out }}"
+          if [ ! -f "$BIN_PATH" ]; then
+            echo "[ci] FAIL: compiled binary missing at $BIN_PATH" >&2
+            exit 1
+          fi
+          OUTPUT=$("$BIN_PATH" --version)
+          echo "[ci] version output: ${OUTPUT}"
+          echo "${OUTPUT}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+'
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target.name }}-binary
+          path: apps/${{ matrix.target.out }}
+          if-no-files-found: error
+
+  publish:
+    name: publish (sequential -- siblings, skill, parent)
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out repository with full history
+        # fetch-depth: 0 so the source-of-truth gate can resolve any
+        # diff-base refs if needed by future extensions.
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: "npm"
+
+      - name: Set up Bun 1.3.14
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Install workspace dependencies
+        # D-15-02: --include=optional --force is mandatory.
+        run: npm ci --include=optional --force
+
+      - name: Build JS-fallback bundle (parent + node bundle)
+        working-directory: apps/achilles-terminal
+        run: npm run build
+
+      - name: Download linux-x64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-linux-x64-binary
+          path: apps/cli-linux-x64/bin/
+
+      - name: Download linux-arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-linux-arm64-binary
+          path: apps/cli-linux-arm64/bin/
+
+      - name: Download win32-x64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-win32-x64-binary
+          path: apps/cli-win32-x64/bin/
+
+      - name: Gate 1 - SHA-256 source-of-truth check
+        # Phase 17 single-arm form (RESEARCH Pitfall 3): verifies the
+        # source companion.md SHA-256 matches the embedded
+        # SOURCE_OF_TRUTH_HASH const. A mismatch blocks the publish.
+        run: node apps/achilles-terminal/scripts/check-source-of-truth.mjs
+
+      - name: Gate 2 - Tarball secret-scan (parent)
+        # Phase 19 Plan 03 Task 1 port of the v1.2 7-regex scan. Runs
+        # `npm pack` on apps/achilles-terminal, extracts the tarball,
+        # walks the tree, applies the 7 regexes. Any leak aborts the
+        # publish before any tarball uploads.
+        working-directory: apps/achilles-terminal
+        run: node scripts/check-tarball-no-secrets.mjs
+
+      # Sequential publish: SIBLINGS FIRST per RESEARCH Pattern 2.
+      - name: Publish @achilles/cli-linux-x64
+        working-directory: apps/cli-linux-x64
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: npm publish --access public --provenance
+
+      - name: Publish @achilles/cli-linux-arm64
+        working-directory: apps/cli-linux-arm64
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: npm publish --access public --provenance
+
+      - name: Publish @achilles/cli-win32-x64
+        working-directory: apps/cli-win32-x64
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: npm publish --access public --provenance
+
+      - name: Publish @achilles/achilles-skill
+        working-directory: packages/achilles-skill
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: npm publish --access public --provenance
+
+      - name: Publish achilles (parent)
+        working-directory: apps/achilles-terminal
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: npm publish --access public --provenance
+
+      - name: Wait for CDN cache propagation
+        # Pitfall 9: npm view may return 404 immediately after publish
+        # because the registry CDN is eventually-consistent. 30s falls
+        # within the documented 15-45s propagation window.
+        run: sleep 30
+
+      - name: Verify @achilles/cli-linux-x64 on registry
+        run: npm view @achilles/cli-linux-x64@1.3.0 version
+
+      - name: Verify @achilles/cli-linux-arm64 on registry
+        run: npm view @achilles/cli-linux-arm64@1.3.0 version
+
+      - name: Verify @achilles/cli-win32-x64 on registry
+        run: npm view @achilles/cli-win32-x64@1.3.0 version
+
+      - name: Verify @achilles/achilles-skill on registry
+        run: npm view @achilles/achilles-skill@1.3.0 version
+
+      - name: Verify achilles parent on registry
+        run: npm view achilles@1.3.0 version
+
+  macos-smoke:
+    # Pitfall 5: this job publishes NOTHING platform-specific. macOS
+    # under the Option 3 lock runs the JS-fallback bundle via the
+    # `#!/usr/bin/env node` shebang -- no compiled macOS binary, no
+    # macOS sibling package on the registry. This job verifies the
+    # JS-fallback resolution works end-to-end.
+    name: macos-smoke (Bun + Node lanes)
+    needs: publish
+    runs-on: macos-14
+    permissions:
+      contents: read
+    steps:
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Bun 1.3.14
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Install published achilles@1.3.0 globally
+        run: npm install -g achilles@1.3.0
+
+      - name: Smoke (Node lane) - achilles --version
+        # The bin shim in dist/cli.js dispatches the JS-fallback under
+        # Node 22 via the `#!/usr/bin/env node` shebang. DIST-06 partial.
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUTPUT=$(achilles --version)
+          echo "[ci] node lane version output: ${OUTPUT}"
+          echo "${OUTPUT}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+'
+
+      - name: Smoke (Bun lane) - bunx achilles@1.3.0 --version
+        # Per RESEARCH Open Question 7: Bun is documented as the
+        # preferred runtime on macOS for sub-500ms cold-start. DIST-06
+        # Bun lane gate.
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUTPUT=$(bunx achilles@1.3.0 --version)
+          echo "[ci] bun lane version output: ${OUTPUT}"
+          echo "${OUTPUT}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+'
