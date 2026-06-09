@@ -4,8 +4,8 @@ milestone: v1.3
 milestone_name: Terminal-only Achilles
 status: executing
 stopped_at: Phase 19 context gathered
-last_updated: "2026-06-09T18:11:43.716Z"
-last_activity: 2026-06-09 -- Phase 19 planning complete
+last_updated: "2026-06-09T18:31:11.839Z"
+last_activity: 2026-06-09 -- Phase 19 execution started
 progress:
   total_phases: 6
   completed_phases: 4
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** A developer can hand off intent to their terminal coding agent through the most natural surface available — phone screen (Handoff) or voice (Achilles) — without leaving their local environment behind.
-**Current focus:** Phase 19 — distribution + publishing + skill rewire (macOS ships exclusively via JS-fallback bundle under Bun runtime per Option 3 lock; no codesign/notarytool/Gatekeeper pipeline, no Apple Developer ID requirement)
+**Current focus:** Phase 19 — Distribution + Publishing + Skill Rewire
 
 ## Current Position
 
-Phase: 19
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-09 -- Phase 19 planning complete
+Phase: 19 (Distribution + Publishing + Skill Rewire) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 19
+Last activity: 2026-06-09 -- Phase 19 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
