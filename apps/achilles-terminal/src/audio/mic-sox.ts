@@ -47,6 +47,16 @@ export interface MicSoxHandle {
    * `exit`; `"exited"` thereafter.
    */
   readonly currentStatus: "running" | "exited";
+  /**
+   * Phase 19 Plan 02 Task 2 (ERR-03): the underlying sox child process,
+   * exposed as a narrow ChildProcessExitLike surface so the dual-arm
+   * createChildExitWatchdog can attach its on("exit") listener. The
+   * watchdog never reads stdout/stderr/stdin from this reference; it only
+   * observes the exit edge. Phase 17's child-exit-watchdog.ts owns the
+   * 3-in-10s sliding-window cap; session.ts constructs the watchdog and
+   * passes this child reference at wireAudioBridges() time.
+   */
+  readonly child: ChildProcess;
 }
 
 /** Options accepted by {@link createMicSox}. */
@@ -184,6 +194,11 @@ export function createMicSox(options: MicSoxOptions): MicSoxHandle {
     },
     get currentStatus(): "running" | "exited" {
       return currentStatus;
+    },
+    // Phase 19 Plan 02 Task 2 (ERR-03): expose the child reference so
+    // the watchdog can attach its exit listener.
+    get child(): ChildProcess {
+      return proc;
     },
   };
 }

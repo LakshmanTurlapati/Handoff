@@ -24,23 +24,32 @@ export default tseslint.config(
       },
     },
     rules: {
-      // Slot for Phase 19 GATE-04 rule: forbid `stdio: "ignore"` on the launch path.
-      // Phase 15 leaves this empty; Phase 19 adds the no-restricted-syntax rule:
-      //   "no-restricted-syntax": [
-      //     "error",
-      //     {
-      //       selector: "ObjectExpression > Property[key.name='stdio'][value.value='ignore']",
-      //       message: "stdio:'ignore' is forbidden on the launch path (GATE-04)",
-      //     },
-      //   ],
+      // GATE-04 (Phase 19 Plan 02 Task 2): forbid the literal
+      // `{ stdio: "ignore" }` shape on the launch path. The v1.2 CLI
+      // used `stdio: "ignore"` when spawning the Electron child
+      // (apps/achilles-cli/src/commands/launch.ts:155) which is what
+      // hid the renderer-loop-never-wired silent-launch failure from
+      // the user. v1.3 runs foreground with `stdio: "inherit"`; this
+      // lint rule structurally prevents a regression to the v1.2 shape.
       //
-      // Rationale: the v1.2 CLI used `stdio: "ignore"` when spawning the Electron
-      // child (apps/achilles-cli/src/commands/launch.ts:155) which is what hid the
-      // renderer-loop-never-wired silent-launch failure from the user. v1.3 runs
-      // foreground with `stdio: "inherit"`; the lint rule above structurally
-      // prevents a future regression to the v1.2 shape.
-
-      // Phase 15 baseline: no extra rules beyond typescript-eslint recommended-type-checked.
+      // Pitfall 8 (19-RESEARCH.md): the selector is LITERAL-only. It
+      // matches `spawn(cmd, args, { stdio: "ignore" })` but does NOT
+      // match the array form `spawn(cmd, args, { stdio: ["ignore", ...] })`
+      // (legitimate when only stdin is silenced) nor variable
+      // indirection (`const opts = { stdio: "ignore" }; spawn(..., opts)`).
+      // The accepted false-negatives are documented; the locked rule
+      // catches the v1.2 anti-pattern verbatim and is the smallest AST
+      // selector that does not produce false-positives on the v1.3
+      // sox/ffplay shapes.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "ObjectExpression > Property[key.name='stdio'][value.value='ignore']",
+          message:
+            "stdio:'ignore' is forbidden on the launch path (GATE-04)",
+        },
+      ],
     },
   },
   // Untyped recommended for plain JS/MJS config + script files (outside tsconfig project).

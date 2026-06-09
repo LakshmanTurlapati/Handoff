@@ -120,6 +120,15 @@ export interface TtsPlaybackHandle {
   flush(): void;
   cancel(): Promise<void>;
   dispose(): Promise<void>;
+  /**
+   * Phase 19 Plan 02 Task 2 (ERR-03): the underlying ffplay child
+   * process — present only after start() has resolved. The
+   * createChildExitWatchdog reads .on("exit") from this reference.
+   * Returns null when start() has not yet been called OR after the
+   * child has been disposed. Tests that exercise the watchdog must
+   * await start() before constructing the watchdog.
+   */
+  readonly child: ChildProcessLike | null;
 }
 
 /**
@@ -197,7 +206,10 @@ export interface CreateTtsPlaybackDeps {
  * consumes. We narrow to this surface so the test fake does not need
  * to implement the full ChildProcess type tree.
  */
-interface ChildProcessLike {
+// Exported in Phase 19 Plan 02 Task 2 so the TtsPlaybackHandle.child
+// field's type is reachable from session.ts (which imports the handle
+// type and passes the child to createChildExitWatchdog).
+export interface ChildProcessLike {
   readonly stdin: {
     write(chunk: Buffer, callback: (err?: Error | null) => void): boolean;
     end(): void;
@@ -453,5 +465,16 @@ export function createTtsPlayback(
     await cancel();
   }
 
-  return { start, appendText, flush, cancel, dispose };
+  return {
+    start,
+    appendText,
+    flush,
+    cancel,
+    dispose,
+    // Phase 19 Plan 02 Task 2 (ERR-03): expose ffplay child reference
+    // for createChildExitWatchdog. Null until start() has resolved.
+    get child(): ChildProcessLike | null {
+      return ffplay;
+    },
+  };
 }

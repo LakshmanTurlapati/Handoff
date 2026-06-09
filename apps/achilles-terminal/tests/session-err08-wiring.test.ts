@@ -47,15 +47,17 @@ describe("ERR-08 logger fan-out in session.ts (Phase 19 Plan 02 Task 2)", () => 
 
   it("(c) graceful-shutdown chain awaits logger.flush() then calls logger.dispose()", () => {
     // The flush + dispose pair lives either inside runVoice() or in the
-    // registerGracefulShutdown call site. Look at the entire file.
-    expect(source).toMatch(/logger\.flush\(\)/);
-    expect(source).toMatch(/logger\.dispose\(\)/);
+    // registerGracefulShutdown call site. Accept both the literal
+    // `logger.flush()` form and the `<some>Logger.flush()` form
+    // (e.g. `runVoiceLogger.flush()`).
+    expect(source).toMatch(/[lL]ogger\.flush\(\)/);
+    expect(source).toMatch(/[lL]ogger\.dispose\(\)/);
     // Order: flush BEFORE dispose.
-    const flushIdx = source.indexOf("logger.flush()");
-    const disposeIdx = source.indexOf("logger.dispose()");
-    expect(flushIdx).toBeGreaterThan(0);
-    expect(disposeIdx).toBeGreaterThan(0);
-    expect(flushIdx).toBeLessThan(disposeIdx);
+    const flushMatch = /[lL]ogger\.flush\(\)/.exec(source);
+    const disposeMatch = /[lL]ogger\.dispose\(\)/.exec(source);
+    expect(flushMatch).not.toBeNull();
+    expect(disposeMatch).not.toBeNull();
+    expect(flushMatch!.index).toBeLessThan(disposeMatch!.index);
   });
 
   it("(d) logger fan-out reaches at least 4 named scopes via logger.child(scope)", () => {

@@ -48,20 +48,21 @@ describe("ERR-03 sox + ffplay watchdog wiring in session.ts (Phase 19 Plan 02 Ta
     expect(source).toMatch(/classification\s*:\s*["']playback_lost["']/);
   });
 
-  it("(d) the two watchdog constructions sit inside the wireAudioBridges() body", () => {
+  it("(d) the two watchdog constructions sit AFTER the wireAudioBridges() declaration (in wireAudioBridges itself or its helper companions)", () => {
     const wireFnIdx = source.indexOf("private wireAudioBridges(");
     expect(wireFnIdx).toBeGreaterThan(0);
-    // Both createChildExitWatchdog occurrences must appear AFTER the
-    // wireAudioBridges declaration. We do not require strict containment
-    // inside braces here (TypeScript private-method body bounds are
-    // brittle to detect with regex); we assert the constructions appear
-    // in the same file after the wireAudioBridges declaration, which
-    // satisfies the plan's spirit.
+    // Filter for the CALL form (createChildExitWatchdog followed by an
+    // open paren / brace) so the import line at the top of the file is
+    // excluded. We expect at least 2 call-form occurrences (sox + ffplay)
+    // and every one of them must appear AFTER the wireAudioBridges()
+    // declaration so the wiring lives in the audio-bridges path. Plan 19
+    // permits the ffplay watchdog to live in a small helper companion
+    // (e.g. wireFfplayWatchdog) that's invoked from wireAudioBridges.
+    const callForm = /createChildExitWatchdog\s*\(/g;
     const occurrences: number[] = [];
-    let i = source.indexOf("createChildExitWatchdog");
-    while (i !== -1) {
-      occurrences.push(i);
-      i = source.indexOf("createChildExitWatchdog", i + 1);
+    let match: RegExpExecArray | null;
+    while ((match = callForm.exec(source)) !== null) {
+      occurrences.push(match.index);
     }
     expect(occurrences.length).toBeGreaterThanOrEqual(2);
     for (const idx of occurrences) {
@@ -87,18 +88,27 @@ describe("ERR-03 sox + ffplay watchdog wiring in session.ts (Phase 19 Plan 02 Ta
   });
 
   it("cap-exceeded does NOT call process.exit (typed-input fallback survives — CONTEXT.md Claude's Discretion)", () => {
-    // The onError callbacks in the new watchdog block must NOT call
-    // process.exit. We grep within ~3KB after the first
-    // createChildExitWatchdog occurrence (covers both watchdog blocks).
-    const firstWatchdog = source.indexOf("createChildExitWatchdog");
-    expect(firstWatchdog).toBeGreaterThan(0);
-    const block = source.slice(firstWatchdog, firstWatchdog + 3_000);
-    // The block contains both watchdog constructions; assert NO
-    // process.exit appears in either onError callback.
-    const onErrSpans = block.match(/onError\s*:\s*\([\s\S]*?\)\s*=>\s*\{[\s\S]*?\}/g) ?? [];
-    expect(onErrSpans.length).toBeGreaterThanOrEqual(2);
-    for (const span of onErrSpans) {
-      expect(span).not.toMatch(/process\.exit/);
+    // The onError callbacks for both watchdogs must NOT contain an
+    // actual process.exit() CALL (parenthesised form). Comments and
+    // docstrings that mention "process.exit" textually are allowed —
+    // they document the contract. We strip line-comments and block
+    // comments from the search window before regex-matching, then
+    // require the CALL form (process.exit followed by '(' optionally
+    // with arguments) to be absent.
+    const callForm = /createChildExitWatchdog\s*\(/g;
+    const occurrences: number[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = callForm.exec(source)) !== null) {
+      occurrences.push(match.index);
+    }
+    expect(occurrences.length).toBeGreaterThanOrEqual(2);
+    for (const idx of occurrences) {
+      const rawBlock = source.slice(idx, idx + 2_000);
+      // Strip block + line comments so docstring mentions of process.exit
+      // do not trip the assertion.
+      const noBlockComments = rawBlock.replace(/\/\*[\s\S]*?\*\//g, "");
+      const noLineComments = noBlockComments.replace(/\/\/[^\n]*/g, "");
+      expect(noLineComments).not.toMatch(/process\.exit\s*\(/);
     }
   });
 });

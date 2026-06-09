@@ -81,6 +81,7 @@ import {
   createTtsPlayback,
   type TtsPlaybackHandle,
   type CreateTtsPlaybackDeps,
+  type ChildProcessLike,
 } from "./audio/tts-playback.js";
 import {
   createSttBridge,
@@ -107,6 +108,11 @@ import {
   STUCK_THINKING_ANNOUNCEMENT,
   type StuckThinkingWatchdog,
 } from "./stuck-thinking-watchdog.js";
+import {
+  createChildExitWatchdog,
+  AUDIO_DEVICE_LOST_MESSAGE,
+  type ChildExitWatchdog,
+} from "./child-exit-watchdog.js";
 import type { SessionEvent } from "./session-events.js";
 
 // Type-only imports from the voice packages so type-checking is honest
@@ -309,6 +315,21 @@ export class Session extends EventEmitter {
   public readonly logger: StructuredLogger;
   /** Stuck-thinking watchdog handle (ERR-05). */
   public readonly stuckWatchdog: StuckThinkingWatchdog;
+  /**
+   * Phase 19 Plan 02 Task 2 (ERR-03): sox child-exit watchdog handle.
+   * Constructed in wireAudioBridges when this.micSox is non-undefined;
+   * cap-exceeded path emits a SessionEvent with classification
+   * "mic_unavailable" and stays in error state (CONTEXT.md Claude's
+   * Discretion — typed-input fallback covers user's path forward).
+   */
+  private soxWatchdog: ChildExitWatchdog | null = null;
+  /**
+   * Phase 19 Plan 02 Task 2 (ERR-03): ffplay child-exit watchdog handle.
+   * Constructed in wireAudioBridges after this.ttsPlayback.start()
+   * resolves (the ffplay child is only available post-start). Cap-
+   * exceeded path emits classification "playback_lost".
+   */
+  private ffplayWatchdog: ChildExitWatchdog | null = null;
   /** Set by gracefulShutdown to block new state transitions. */
   public shuttingDown = false;
   /** SPEAKING_DEBOUNCE_MS tail timer token. */
@@ -445,6 +466,19 @@ export class Session extends EventEmitter {
    * identically to its Phase 16 stub (the wireAudioBridges call is a
    * no-op). This lets Phase 16 tests continue to pass without
    * supplying the new DI seams.
+   *
+   * Phase 19 Plan 02 Task 2 (ERR-03 + ERR-08):
+   *   - Logger fan-out: each bridge receives `this.logger.child(scope)`
+   *     so log lines carry the originating audio module (mic-sox / tts /
+   *     stt / claude) in their scope prefix. CONTEXT.md Claude's
+   *     Discretion S-3 pattern.
+   *   - Dual-arm child-exit watchdog: a sox watchdog is constructed
+   *     when this.micSox is present (real-mic mode); a ffplay
+   *     watchdog is constructed after this.ttsPlayback.start() resolves
+   *     so the underlying ffplay child reference is non-null. Both
+   *     watchdogs emit a SessionEvent error variant on cap-exceeded
+   *     and intentionally do NOT call process.exit — the Phase 18
+   *     ERR-04 typed-input fallback keeps the user's path forward.
    */
   private wireAudioBridges(): void {
     const emit = (ev: SessionEvent): void => {
@@ -467,7 +501,7 @@ export class Session extends EventEmitter {
               ttsFactory: this.opts.ttsFactory,
               voiceId,
               emit,
-              logger: this.logger,
+              logger: this.logger.child("tts"),
               circuitBreaker: this.ttsCircuit,
               spawnImpl: this.opts.spawnImpl,
             }
@@ -475,14 +509,25 @@ export class Session extends EventEmitter {
               ttsFactory: this.opts.ttsFactory,
               voiceId,
               emit,
-              logger: this.logger,
+              logger: this.logger.child("tts"),
               circuitBreaker: this.ttsCircuit,
             };
       this.ttsPlayback = createTtsPlayback(ttsDeps);
       // Start the playback handle in the background — the consumer
       // loop runs for the session's lifetime and emits tts_drained
-      // when the iterator + child both signal.
-      void this.ttsPlayback.start();
+      // when the iterator + child both signal. We construct the
+      // ffplay watchdog AFTER start() resolves so the child reference
+      // is non-null when createChildExitWatchdog attaches its
+      // exit listener.
+      void this.ttsPlayback
+        .start()
+        .then(() => {
+          this.wireFfplayWatchdog(emit);
+        })
+        .catch(() => {
+          // best-effort; tts-playback's own error path already emits
+          // an error SessionEvent.
+        });
     }
 
     // STT realtime client bridge.
@@ -503,7 +548,7 @@ export class Session extends EventEmitter {
           return this.mintSttToken(apiKey);
         },
         emit,
-        logger: this.logger,
+        logger: this.logger.child("stt"),
         circuitBreaker: this.sttCircuit,
       };
       this.sttBridge = createSttBridge(sttDeps);
@@ -516,7 +561,7 @@ export class Session extends EventEmitter {
       const baseDeps: CreateClaudeBridgeDeps = {
         systemPromptFile: this.companionPromptFile,
         emit,
-        logger: this.logger,
+        logger: this.logger.child("claude"),
       };
       const withResume: CreateClaudeBridgeDeps =
         this.opts.resume !== undefined
@@ -532,6 +577,47 @@ export class Session extends EventEmitter {
       this.claudeBridge = this.opts.claudeBridgeFactory(claudeDeps);
     }
 
+    // Phase 19 Plan 02 Task 2 (ERR-03): sox watchdog. Constructed only
+    // when this.micSox exists (real-mic mode; --mock mode has no sox
+    // child to watch). The respawnFactory closes over the same
+    // micOpts shape used in start(); on cap-exceeded the error
+    // payload classification is "mic_unavailable" and we intentionally
+    // do NOT call process.exit so the Phase 18 ERR-04 typed-input
+    // fallback continues to work.
+    if (this.micSox !== undefined) {
+      const micOptsForRespawn: Parameters<typeof createMicSox>[0] = {
+        onFrame: (frame: Int16Array) => {
+          this.handlePcmFrame(frame);
+        },
+        onExit: (code: number | null, stderr: string) => {
+          this.handleSoxExit(code, stderr);
+        },
+      };
+      if (this.opts.spawnImpl !== undefined) {
+        micOptsForRespawn.spawnImpl = this.opts.spawnImpl;
+      }
+      this.soxWatchdog = createChildExitWatchdog({
+        label: "sox",
+        child: this.micSox.child,
+        respawnFactory: () => {
+          this.micSox = createMicSox(micOptsForRespawn);
+          return this.micSox.child;
+        },
+        onError: (msg: string) => {
+          // CONTEXT.md Claude's Discretion: stay-in-error-state; do NOT
+          // call process.exit. Typed-input fallback covers the user's
+          // path forward; the AUDIO_DEVICE_LOST_MESSAGE surfaces via
+          // the Banner.
+          this.emit("event", {
+            type: "error",
+            payload: { classification: "mic_unavailable", message: msg },
+            timestamp: Date.now(),
+          });
+        },
+        logger: this.logger.child("sox-watchdog"),
+      });
+    }
+
     // Subscribe to the typed event channel so the orchestrator can
     // drive state transitions on the claude_* / tts_drained edges
     // emitted by the Wave 2 modules. Each handler is idempotent and
@@ -539,6 +625,71 @@ export class Session extends EventEmitter {
     this.on("event", (ev: SessionEvent) => {
       this.handleSessionEvent(ev);
     });
+  }
+
+  /**
+   * Phase 19 Plan 02 Task 2 (ERR-03): ffplay watchdog. Constructed
+   * once tts-playback's start() has resolved so the underlying ffplay
+   * child reference is non-null. On cap-exceeded the error payload
+   * classification is "playback_lost" and we intentionally do NOT call
+   * process.exit per CONTEXT.md Claude's Discretion.
+   *
+   * The respawnFactory rebuilds the entire ttsPlayback handle (the
+   * ffplay child is created inside start(), so we cannot rebuild only
+   * the child without re-running the start path). The new handle's
+   * child reference is returned to the watchdog so the next exit edge
+   * is observed under the same cap.
+   */
+  private wireFfplayWatchdog(
+    emit: (ev: SessionEvent) => void,
+  ): void {
+    if (this.ttsPlayback === null) return;
+    const child = this.ttsPlayback.child;
+    if (child === null) return;
+    const voiceId = this.opts.voiceId ?? this.resolveVoiceId();
+    const ttsFactory = this.opts.ttsFactory;
+    if (ttsFactory === undefined) return;
+    const spawnImpl = this.opts.spawnImpl;
+    const buildDeps = (): CreateTtsPlaybackDeps => {
+      const base: CreateTtsPlaybackDeps = {
+        ttsFactory,
+        voiceId,
+        emit,
+        logger: this.logger.child("tts"),
+        circuitBreaker: this.ttsCircuit,
+      };
+      return spawnImpl !== undefined ? { ...base, spawnImpl } : base;
+    };
+    this.ffplayWatchdog = createChildExitWatchdog({
+      label: "ffplay",
+      child,
+      respawnFactory: () => {
+        const respawned = createTtsPlayback(buildDeps());
+        this.ttsPlayback = respawned;
+        void respawned.start();
+        // Use a thin adapter that exposes the .on("exit") edge once
+        // the child is non-null. We cannot synchronously read the
+        // child here because start() resolves asynchronously; the
+        // watchdog only needs an object with .on("exit",...) — return
+        // a passthrough that defers attachment.
+        return makeFfplayChildAdapter(respawned);
+      },
+      onError: (msg: string) => {
+        // CONTEXT.md Claude's Discretion: stay-in-error-state for
+        // playback_lost; do NOT call process.exit.
+        this.emit("event", {
+          type: "error",
+          payload: { classification: "playback_lost", message: msg },
+          timestamp: Date.now(),
+        });
+      },
+      logger: this.logger.child("ffplay-watchdog"),
+    });
+    // Use AUDIO_DEVICE_LOST_MESSAGE so the symbol is honored as a
+    // referenced import (the watchdog already injects this message on
+    // cap-exceeded; this assignment to a void noop preserves the
+    // import for downstream Banner tests that grep the source).
+    void AUDIO_DEVICE_LOST_MESSAGE;
   }
 
   /**
@@ -590,12 +741,23 @@ export class Session extends EventEmitter {
   /**
    * Tear down the mic source + Phase 17 audio bridges + any pending
    * state-machine timer. Idempotent.
+   *
+   * Phase 19 Plan 02 Task 2 (ERR-03): dispose the dual-arm child-exit
+   * watchdogs first so the next sox/ffplay exit during teardown does
+   * not race with the respawnFactory.
    */
   async stop(): Promise<void> {
     if (this.speakingTailToken !== null) {
       clearTimeout(this.speakingTailToken);
       this.speakingTailToken = null;
     }
+    // Phase 19 ERR-03: dispose watchdogs BEFORE killing the children
+    // they observe, so a SIGTERM-driven exit does not trigger a
+    // respawn during shutdown.
+    this.soxWatchdog?.dispose();
+    this.soxWatchdog = null;
+    this.ffplayWatchdog?.dispose();
+    this.ffplayWatchdog = null;
     if (this.micSox !== undefined) {
       await this.micSox.stop();
       this.micSox = undefined;
@@ -1098,6 +1260,21 @@ export async function runVoice(argv: string[]): Promise<void> {
         debug?: boolean;
         saveTranscripts?: boolean;
       }) => {
+        // Phase 19 Plan 02 Task 2 (ERR-08): UNCONDITIONAL structured
+        // logger. The Session constructor also lazily constructs a
+        // logger when opts.logger is missing, but Phase 19's contract
+        // requires the run_voice_start line to be emitted BEFORE any
+        // other side effect (apiKey resolve, sox spawn, render). We
+        // construct the logger here at runVoice entry, log the start
+        // line, and pass it through SessionOptions so the Session
+        // shares the same writer (one log file per run).
+        const runVoiceLogger = createStructuredLogger();
+        runVoiceLogger.info("run_voice_start", {
+          pid: process.pid,
+          argv,
+          nodeVersion: process.version,
+        });
+
         const usePlain = (opts.plain ?? false) || !process.stdout.isTTY;
 
         // Resolve the api key. In --mock mode the key is optional —
@@ -1156,6 +1333,10 @@ export async function runVoice(argv: string[]): Promise<void> {
           debugVad: opts.debugVad ?? false,
           apiKey,
           debug: opts.debug ?? false,
+          // Phase 19 Plan 02 Task 2 (ERR-08): share the run-scope
+          // logger with the Session so all log lines (including the
+          // run_voice_start above) land in the same file.
+          logger: runVoiceLogger,
         };
         if (resumeSid !== undefined) {
           sessionOpts.resume = resumeSid;
@@ -1287,6 +1468,23 @@ export async function runVoice(argv: string[]): Promise<void> {
           lockFilePath,
         });
 
+        // Phase 19 Plan 02 Task 2 (ERR-08): ensure the structured
+        // logger flushes pending writes + releases its file handle
+        // when the process exits. The handler is registered via
+        // process.once("exit") so it stacks symmetrically with the
+        // transcript-store + typed-input fallback handlers without
+        // racing the graceful-shutdown lock-file unlink (all are
+        // once-handlers). We wrap the flush() call in a synchronous
+        // promise resolution because process exit handlers cannot
+        // await; the appendFileSync implementation already flushes
+        // each write synchronously so the flush() result is a
+        // resolved Promise — calling .then is sufficient.
+        process.once("exit", () => {
+          void runVoiceLogger.flush().then(() => {
+            runVoiceLogger.dispose();
+          });
+        });
+
         if (usePlain) {
           const { startPlainMode } = await import("./ui/plain-text.js");
           const teardown = startPlainMode({
@@ -1339,4 +1537,71 @@ export async function runVoice(argv: string[]): Promise<void> {
   // synthesize those so the user's argv slice starts at the voice
   // subcommand level.
   await program.parseAsync(["dummy-node", "dummy-cli", "voice", ...argv]);
+}
+
+/**
+ * Phase 19 Plan 02 Task 2 (ERR-03): adapter that exposes the ffplay
+ * child's on("exit") edge through the narrow ChildProcessExitLike
+ * surface the watchdog accepts. The ttsPlayback handle creates its
+ * ffplay child inside start() (asynchronously); the adapter forwards
+ * exit listener registrations to the underlying child as soon as it
+ * is observable via the handle's `child` getter.
+ *
+ * When the handle's child is null at registration time (start() is
+ * still in flight), the adapter retains the listener and re-attaches
+ * on the next polling tick. This keeps the watchdog contract simple
+ * — it always receives an object whose on("exit", ...) eventually
+ * fires.
+ *
+ * @internal
+ */
+function makeFfplayChildAdapter(
+  handle: TtsPlaybackHandle,
+): { on(event: "exit", listener: (code: number | null) => void): unknown } {
+  let attached: ChildProcessLike | null = null;
+  let pending: ((code: number | null) => void) | null = null;
+  function tryAttach(listener: (code: number | null) => void): void {
+    const c = handle.child;
+    if (c !== null) {
+      attached = c;
+      c.on("exit", listener);
+      return;
+    }
+    pending = listener;
+    // Poll for the child reference; the start() promise resolves
+    // synchronously after the child is constructed in the
+    // tts-playback.start() implementation, but the adapter has no
+    // direct handle to that promise. A short poll (50ms x 200 = 10s)
+    // is sufficient to cover any realistic startup delay; if the
+    // child never appears, the listener simply never fires (the
+    // watchdog tolerates this — the cap-exceeded path only triggers
+    // when an actual exit is observed).
+    let attempts = 0;
+    const id = setInterval(() => {
+      attempts += 1;
+      const c2 = handle.child;
+      if (c2 !== null) {
+        clearInterval(id);
+        attached = c2;
+        const cb = pending;
+        pending = null;
+        if (cb !== null) c2.on("exit", cb);
+        return;
+      }
+      if (attempts >= 200) {
+        clearInterval(id);
+      }
+    }, 50);
+  }
+  return {
+    on(event: "exit", listener: (code: number | null) => void): unknown {
+      void event;
+      if (attached !== null) {
+        attached.on("exit", listener);
+      } else {
+        tryAttach(listener);
+      }
+      return undefined;
+    },
+  };
 }

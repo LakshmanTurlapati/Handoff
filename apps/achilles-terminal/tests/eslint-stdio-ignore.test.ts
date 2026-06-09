@@ -20,13 +20,19 @@
  *
  * No emojis (CLAUDE.md global).
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { ESLint } from "eslint";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import {
+  writeFileSync,
+  unlinkSync,
+  existsSync,
+} from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ESLINT_CONFIG = resolve(__dirname, "..", "eslint.config.js");
+const SRC_DIR = resolve(__dirname, "..", "src");
 
 /**
  * Build an ESLint instance bound to the workspace eslint.config.js.
@@ -38,16 +44,41 @@ function buildEslint(): ESLint {
   });
 }
 
+/**
+ * Path manager for synthetic fixture files. The tsconfig `include`
+ * glob covers `src/**\/*.ts`, so writing a fixture under `src/`
+ * lets the type-checked ESLint config pick it up.
+ */
+const FIXTURE_FORBIDDEN = resolve(SRC_DIR, "__eslint_test_forbidden.ts");
+const FIXTURE_SANCTIONED = resolve(SRC_DIR, "__eslint_test_sanctioned.ts");
+const FIXTURE_ARRAY = resolve(SRC_DIR, "__eslint_test_array.ts");
+
+const FORBIDDEN_SOURCE = `import { spawn } from "node:child_process";
+spawn("rec", [], { stdio: "ignore" });
+`;
+const SANCTIONED_SOURCE = `import { spawn } from "node:child_process";
+spawn("rec", [], { stdio: "inherit" });
+`;
+const ARRAY_SOURCE = `import { spawn } from "node:child_process";
+spawn("rec", [], { stdio: ["pipe", "pipe", "pipe"] });
+`;
+
+beforeAll(() => {
+  writeFileSync(FIXTURE_FORBIDDEN, FORBIDDEN_SOURCE);
+  writeFileSync(FIXTURE_SANCTIONED, SANCTIONED_SOURCE);
+  writeFileSync(FIXTURE_ARRAY, ARRAY_SOURCE);
+});
+
+afterAll(() => {
+  for (const path of [FIXTURE_FORBIDDEN, FIXTURE_SANCTIONED, FIXTURE_ARRAY]) {
+    if (existsSync(path)) unlinkSync(path);
+  }
+});
+
 describe("ESLint stdio:\"ignore\" forbid rule (GATE-04)", () => {
   it("fires on the forbidden shape: spawn(cmd, args, { stdio: \"ignore\" })", async () => {
     const eslint = buildEslint();
-    const fixture = `
-import { spawn } from "node:child_process";
-spawn("rec", [], { stdio: "ignore" });
-`;
-    const results = await eslint.lintText(fixture, {
-      filePath: resolve(__dirname, "..", "src", "fixture-forbidden.ts"),
-    });
+    const results = await eslint.lintFiles([FIXTURE_FORBIDDEN]);
     expect(results.length).toBeGreaterThan(0);
     const messages = (results[0]?.messages ?? []).filter(
       (m) => m.ruleId === "no-restricted-syntax",
@@ -57,13 +88,7 @@ spawn("rec", [], { stdio: "ignore" });
 
   it("stays silent on the sanctioned shape: spawn(cmd, args, { stdio: \"inherit\" })", async () => {
     const eslint = buildEslint();
-    const fixture = `
-import { spawn } from "node:child_process";
-spawn("rec", [], { stdio: "inherit" });
-`;
-    const results = await eslint.lintText(fixture, {
-      filePath: resolve(__dirname, "..", "src", "fixture-sanctioned.ts"),
-    });
+    const results = await eslint.lintFiles([FIXTURE_SANCTIONED]);
     const messages = (results[0]?.messages ?? []).filter(
       (m) => m.ruleId === "no-restricted-syntax",
     );
@@ -77,13 +102,7 @@ spawn("rec", [], { stdio: "inherit" });
     // array). We use ["pipe","pipe","pipe"] which is the v1.3 mic-sox
     // shape and must not be flagged.
     const eslint = buildEslint();
-    const fixture = `
-import { spawn } from "node:child_process";
-spawn("rec", [], { stdio: ["pipe", "pipe", "pipe"] });
-`;
-    const results = await eslint.lintText(fixture, {
-      filePath: resolve(__dirname, "..", "src", "fixture-array.ts"),
-    });
+    const results = await eslint.lintFiles([FIXTURE_ARRAY]);
     const messages = (results[0]?.messages ?? []).filter(
       (m) => m.ruleId === "no-restricted-syntax",
     );

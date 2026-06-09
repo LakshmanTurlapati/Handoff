@@ -250,8 +250,8 @@ function createStubSession(initial: {
     emitSessionEvent: (ev: unknown) => void;
   };
   const ring = new Float32Array(80);
-  let writeIndex = 0;
-  let ringSnapshot = { ring, writeIndex };
+  const writeIndex = 0;
+  const ringSnapshot = { ring, writeIndex };
   Object.defineProperty(emitter, "currentState", {
     get: () => initial.state,
   });
