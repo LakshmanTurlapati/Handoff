@@ -11,11 +11,11 @@ Requirements for the v1.3 release. Each maps to roadmap phases 15-20.
 ### Distribution (DIST)
 
 - [ ] **DIST-01**: User can install Achilles globally via `npm install -g achilles` or invoke ad-hoc via `bunx achilles voice` without prior install
-- [ ] **DIST-02**: Per-platform Bun-compiled binary (`@achilles/cli-{darwin-arm64,darwin-x64,linux-x64,linux-arm64,win32-x64}`) auto-selected via `optionalDependencies`; a pure-JS bin shim falls back to a bundled Node entrypoint when no platform binary matches
+- [ ] **DIST-02**: Per-platform Bun-compiled binary (`@achilles/cli-{linux-x64,linux-arm64,win32-x64}`) auto-selected via `optionalDependencies`; a pure-JS bin shim falls back to a bundled JS entrypoint executed under Bun (preferred) or Node 22+ when no platform binary matches. macOS (darwin-arm64, darwin-x64) is served exclusively by the JS-fallback path under Bun runtime — no compiled darwin binary ships in v1.3 (Option 3 lock from `.planning/research/v1.3-terminal-pivot.md` §10.2).
 - [ ] **DIST-03**: User runs `achilles install-skill [--force]` to register the Claude Code skill via the npm-bundled `SKILL.md` (one-line `achilles launch` → `achilles voice` diff in the skill body)
 - [ ] **DIST-04**: User running `/achilles` from Claude Code launches the same binary as the npm CLI path; the embedded `companion.md` is SHA-256-verified at build time against the source of truth
-- [ ] **DIST-05**: Cold-start latency from skill body invocation to first TUI render is <50ms on supported platforms with the native binary, and <200ms on the JS fallback path
-- [ ] **DIST-06**: macOS users on signed builds bypass Gatekeeper without `xattr -dr com.apple.quarantine` workaround (gated on Apple Developer ID acquisition; unsigned beta fallback documented with explicit xattr instructions if cert is unavailable at ship time)
+- [ ] **DIST-05**: Cold-start latency from skill body invocation to first TUI render is <50ms on linux-x64, linux-arm64, and win32-x64 with the native compiled binary; on macOS (darwin-arm64, darwin-x64) the JS-fallback path under Bun must render in <500ms cold-start (documented and accepted as the explicit Option 3 trade-off vs sub-50ms compiled-binary)
+- [ ] **DIST-06**: macOS users install via `npm install -g achilles` or invoke ad-hoc via `bunx achilles`; the bin shim runs the JS-fallback bundle under Bun (preferred) or Node 22+ — no compiled darwin binary, no Apple Developer ID, no `codesign`/`notarytool`/`spctl` pipeline, no Gatekeeper quarantine prompt, no `xattr -dr com.apple.quarantine` workaround. Verified end-to-end on macOS Sonoma 14+ from a fresh user account (init wizard -> first `achilles voice` -> speak -> spoken summary -> Ctrl-C clean exit) with <500ms cold-start documented as the accepted Option 3 trade-off vs the sub-50ms compiled-binary path on linux/win32.
 
 ### Terminal UI (TUI)
 
@@ -83,10 +83,10 @@ Requirements for the v1.3 release. Each maps to roadmap phases 15-20.
 
 ### Ship Gate — Real-Binary Verification (GATE)
 
-- [ ] **GATE-01**: Three real-binary asciicasts (RBS-1 darwin-arm64, RBS-2 linux-x64, RBS-3 win32-x64) captured from fresh OS user accounts running the published binary end-to-end (init wizard → first `achilles voice` → speak → spoken summary → Ctrl-C clean exit) and committed to `.planning/milestones/v1.3-evidence/`; auditor cannot pass v1.3 without all three
+- [ ] **GATE-01**: Three real-artifact asciicasts (RBS-1 darwin-arm64 JS-fallback under Bun, RBS-2 linux-x64 compiled binary, RBS-3 win32-x64 compiled binary) captured from fresh OS user accounts running the published distribution end-to-end (init wizard -> first `achilles voice` -> speak -> spoken summary -> Ctrl-C clean exit) and committed to `.planning/milestones/v1.3-evidence/`; auditor cannot pass v1.3 without all three. Under Option 3 the darwin path has no compiled binary — RBS-1 captures the JS-fallback bundle running under Bun runtime, with a supplemental capture under Node 22 LTS.
 - [ ] **GATE-02**: One asciicast captured from inside VS Code's integrated terminal on macOS Sequoia 15.4+ covering the TCC parent-emulator attribution path (microsoft/vscode#307364 worst case)
 - [ ] **GATE-03**: Noisy-environment field test at 65 dBA confirming VAD does not false-fire on background noise (music + typing + nearby voices)
-- [ ] **GATE-04**: ESLint rule forbidding `stdio: "ignore"` on the launch path (prevents v1.2 detached-stdio regression); Bun 1.3+ + Node 22+ dual-runtime CI matrix runs the full vitest suite green on every commit
+- [ ] **GATE-04**: ESLint rule forbidding `stdio: "ignore"` on the launch path (prevents v1.2 detached-stdio regression); Bun 1.3+ + Node 22+ dual-runtime CI matrix runs the full vitest suite green on every commit, with the Bun lane covering the macOS JS-fallback path that ships as the only darwin distribution channel in v1.3 (Option 3)
 
 ## v2 Requirements
 
@@ -146,7 +146,7 @@ Each v1.3 requirement maps to exactly one phase (15-20). Filled by the gsd-roadm
 
 | Category | Phase(s) | Reasoning |
 |----------|----------|-----------|
-| DIST | 15 (scaffold + build pipeline: DIST-01,02,05) + 19 (publish + skill rewire: DIST-03,04,06) | Scaffold establishes binary path; publish actually ships |
+| DIST | 15 (scaffold + build pipeline: DIST-01,02,05) + 19 (publish + skill rewire + macOS JS-fallback verification: DIST-03,04,06) | Scaffold establishes binary path; publish actually ships; Phase 19 verifies the macOS-on-Bun JS-fallback install from a fresh user account (no codesign pipeline under Option 3) |
 | TUI | 16 (TUI shell + state machine port) | Single phase owns the Ink + blob + sparkline + state machine port |
 | ACC | 16 (TUI shell) | Shares render-tree code with TUI |
 | CAP | 16 (sox child + adaptive VAD) | Sox child + VAD live alongside the state machine |
@@ -214,7 +214,7 @@ Each v1.3 requirement maps to exactly one phase (15-20). Filled by the gsd-roadm
 - v1.3 requirements: 50 total
 - Mapped to phases: 50 (100% coverage)
 - Unmapped: 0
-- Phase distribution: Phase 15 (5 reqs: DIST-01, DIST-02, DIST-05, INIT-07, GATE-04 half) + Phase 16 (12 reqs: TUI-01..06, ACC-01,02, CAP-01..04) + Phase 17 (12 reqs: PLAY-01,02, LOOP-01..07, ERR-02, ERR-05, ERR-06) + Phase 18 (12 reqs: INIT-01..06, SAFE-01..04, ERR-04, ERR-07) + Phase 19 (6 reqs: DIST-03, DIST-04, DIST-06, ERR-01, ERR-03, ERR-08) + Phase 20 (3 reqs: GATE-01, GATE-02, GATE-03) + GATE-04 spans Phase 15 (CI matrix scaffold) and Phase 20 (final-green ship gate)
+- Phase distribution: Phase 15 (5 reqs: DIST-01, DIST-02, DIST-05, INIT-07, GATE-04 half) + Phase 16 (12 reqs: TUI-01..06, ACC-01,02, CAP-01..04) + Phase 17 (12 reqs: PLAY-01,02, LOOP-01..07, ERR-02, ERR-05, ERR-06) + Phase 18 (12 reqs: INIT-01..06, SAFE-01..04, ERR-04, ERR-07) + Phase 19 (6 reqs: DIST-03, DIST-04, DIST-06 (macOS JS-fallback verification — no codesign under Option 3), ERR-01, ERR-03, ERR-08) + Phase 20 (3 reqs: GATE-01, GATE-02, GATE-03) + GATE-04 spans Phase 15 (CI matrix scaffold) and Phase 20 (final-green ship gate)
 
 **Note on count:** Initial scoping document referred to "48 requirements"; the actual v1.3 requirement set as enumerated above is 50 (DIST × 6, TUI × 6, ACC × 2, CAP × 4, PLAY × 2, LOOP × 7, INIT × 7, SAFE × 4, ERR × 8, GATE × 4 = 50). All 50 are mapped.
 

@@ -43,10 +43,10 @@ Inside scope:
 - Update SKILL.md (`packages/achilles-skill/skill/SKILL.md` — NOT companion.md; SKILL.md is the user-facing surface that Phase 19 will rewrite further) — Phase 18 may need to add `Bash(achilles init *)` and `Bash(achilles config *)` and `Bash(achilles transcripts *)` and `Bash(achilles latency *)` to the allowed-tools narrowing. **Confirm whether SKILL.md edits are LOOP-02-locked** — companion.md is the LOOP-02 invariant; SKILL.md may be editable. If not, defer to Phase 19's skill rewire.
 
 Outside scope (defer):
-- macOS codesigning + notarytool (Phase 19)
+- macOS codesigning + notarytool: OUT OF SCOPE for v1.3 per the Option 3 lock (`.planning/research/v1.3-terminal-pivot.md` §10.2) — no compiled darwin binary ships; macOS runs JS-fallback under Bun runtime
 - npm publish (Phase 19)
 - Real-binary asciicast capture across 3 platforms (Phase 20)
-- Real Apple Developer ID acquisition (operator gate before Phase 19)
+- Real Apple Developer ID acquisition: NOT REQUIRED per the v1.3 Option 3 lock — macOS ships via JS-fallback only
 - VS Code-integrated-terminal asciicast under macOS Sequoia 15.4+ (Phase 20)
 - Field test at 65 dBA (Phase 20)
 - Dual-runtime CI matrix final-green (Phase 20 ratifies)
@@ -214,7 +214,7 @@ Outside scope (defer):
 - Language picker for STT — v1.4
 - `~/.achilles/sessions/<sid>.json` enumeration UX (Phase 17 wrote the files; Phase 18 reads via --resume; richer UX defer)
 - Real `bun build --compile` against the new wizard module — Phase 19 publish
-- Real signed binary smoke test — Phase 19/20
+- Real binary smoke test (linux-x64 / linux-arm64 / win32-x64 unsigned compiled binaries; darwin captured via JS-fallback bundle under Bun per Option 3) — Phase 19/20
 - TCC parent-emulator validation across all 7 emulators — Phase 20 asciicast capture
 
 </deferred>

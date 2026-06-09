@@ -25,7 +25,7 @@ Outside scope (defer to later v1.3 phases):
 - sox / ffplay / VAD wiring (Phase 16/17)
 - voice-stt / voice-tts / claude-code-bridge integration (Phase 17)
 - Init wizard (Phase 18)
-- npm publish / Gatekeeper / signing (Phase 19)
+- npm publish (Phase 19); macOS Gatekeeper / codesign / notarytool / Apple Developer ID OUT OF SCOPE per the v1.3 Option 3 lock (`.planning/research/v1.3-terminal-pivot.md` §10.2) — macOS ships via JS-fallback bundle under Bun runtime
 - Real-binary asciicast evidence (Phase 20)
 
 </domain>

@@ -28,7 +28,7 @@ Outside scope (defer to later v1.3 phases):
 - Ctrl-C cancel chain through claude-code-bridge (Phase 17 — only TUI-side SIGINT handler in Phase 16)
 - Init wizard / API key resolution / ambient calibration (Phase 18)
 - Single-instance lock (Phase 18)
-- npm publish / signing (Phase 19)
+- npm publish (Phase 19); macOS codesign / Apple Developer ID OUT OF SCOPE per the v1.3 Option 3 lock — macOS ships via JS-fallback bundle under Bun runtime
 - Real-binary asciicasts (Phase 20)
 
 </domain>

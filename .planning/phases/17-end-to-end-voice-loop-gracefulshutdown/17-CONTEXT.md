@@ -42,10 +42,10 @@ Outside scope (defer to later v1.3 phases):
 - `achilles config` settings menu (Phase 18)
 - Single-instance `~/.achilles/voice.lock` enforcement at startup (Phase 18; Phase 17 wires the file but startup-time conflict resolution is Phase 18)
 - Encrypted `~/.achilles/key.enc` (Phase 18)
-- macOS codesigning + notarytool (Phase 19)
+- macOS codesigning + notarytool: OUT OF SCOPE for v1.3 per the Option 3 lock (`.planning/research/v1.3-terminal-pivot.md` §10.2) — no compiled darwin binary ships; macOS runs JS-fallback under Bun runtime
 - npm publish (Phase 19)
 - Real-binary asciicast capture across 3 platforms (Phase 20)
-- Apple Developer ID acquisition (operator gate before Phase 19 — Phase 17 doesn't touch signing)
+- Apple Developer ID acquisition: NOT REQUIRED per the v1.3 Option 3 lock — macOS ships via JS-fallback only; no codesign pipeline (Phase 17 doesn't touch signing either way)
 
 </domain>
 
@@ -246,8 +246,8 @@ Outside scope (defer to later v1.3 phases):
 
 - macOS Sequoia 15.4+ VS Code-integrated-terminal TCC validation — Phase 20 asciicast capture
 - Real-binary asciicast capture across darwin-arm64 / linux-x64 / win32-x64 — Phase 20
-- Apple Developer ID + notarytool — Phase 19 (operator gate)
-- npm publish + Gatekeeper bypass test — Phase 19
+- Apple Developer ID + notarytool: dropped per the v1.3 Option 3 lock; revisit only if a compiled macOS binary is reintroduced post-v1.3
+- npm publish — Phase 19 (Gatekeeper bypass test no longer applicable under Option 3 — no compiled darwin binary exists to dequarantine)
 - Persistent latency JSON + report subcommand polish — partially landed (ERR-07), refinement Phase 18
 - Init wizard ambient calibration (5-second pre-flight) → seeds the VAD EWMA noise floor — Phase 18
 - Encrypted API key in `~/.achilles/key.enc` — Phase 18

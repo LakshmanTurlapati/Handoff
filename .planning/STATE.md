@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** A developer can hand off intent to their terminal coding agent through the most natural surface available — phone screen (Handoff) or voice (Achilles) — without leaving their local environment behind.
-**Current focus:** Phase 19 — distribution + publishing + gatekeeper + skill rewire
+**Current focus:** Phase 19 — distribution + publishing + skill rewire (macOS ships exclusively via JS-fallback bundle under Bun runtime per Option 3 lock; no codesign/notarytool/Gatekeeper pipeline, no Apple Developer ID requirement)
 
 ## Current Position
 
@@ -59,16 +59,16 @@ Decisions are logged in PROJECT.md Key Decisions table. v1.3-specific decisions 
 - Phase 16: Ink 7.0.5 + React 19.2.7 (supersedes the v1.3-terminal-pivot.md Ink 6 reference) + energy-threshold VAD with adaptive EWMA (silero deferred to v1.4 behind same `VadHandle` interface)
 - Phase 17: All four voice packages (`voice-protocol`, `voice-stt`, `voice-tts`, `claude-code-bridge`) stay byte-for-byte unchanged across the entire milestone (LOOP-02 constraint)
 - Phase 18: API key hierarchy env → `@napi-rs/keyring` → encrypted file (libsodium secretbox 0o600); keytar explicitly forbidden (archived March 2026)
-- Phase 19: Apple Developer ID acquisition is the phase-start release gate (signed v1.3.0 vs unsigned v1.3.0-beta with xattr workaround — both paths planned for)
+- Phase 19: macOS ships via the JS-fallback bundle under Bun runtime (Node 22 LTS fallback) per Option 3 from `.planning/research/v1.3-terminal-pivot.md` §10.2 — no compiled darwin binary, no codesign/notarytool/Gatekeeper pipeline, no Apple Developer ID requirement, no `xattr -dr com.apple.quarantine` workaround. Compiled binaries cover linux-x64, linux-arm64, win32-x64 only (3 platform packages instead of the originally scaffolded 5; the 2 darwin sibling packages are dropped or kept as no-op shims in Phase 19). Decision locked 2026-06-09 in `/gsd-progress` session.
 - Phase 20: Three RBS asciicasts (RBS-1/2/3) + VS Code-integrated-terminal asciicast + 65 dBA noisy-environment field test are non-optional ship gate criteria — auditor cannot mark v1.3 anything but `tech_debt` without them
 
 ### Pending Todos
 
-- (v1.3 Phase 19) Apple Developer ID acquisition decision before Phase 19 starts (release-operator owned; surface explicitly to release operator)
+- (v1.3 Phase 19) Confirm macOS JS-fallback bundle ships clean under Bun 1.3+ and Node 22 LTS on a fresh macOS account; verify the parent npm install on darwin resolves to the JS bundle (no `@achilles/cli-darwin-*` optional dependency installs a binary); decide between dropping the 2 darwin sibling packages entirely vs publishing them as no-op shims
 - (v1.3 Phase 16) Adaptive VAD EWMA tuning against representative noisy-room recordings before locking thresholds (NEEDS RESEARCH flag from research/SUMMARY.md)
 - (v1.3 Phase 17) ffplay low-latency flag benchmark (100 trials of representative TTS chunks) before locking flags; Bun-on-tmux SIGTERM propagation verification on 3 OSes (NEEDS RESEARCH flag)
 - (v1.3 Phase 20) asciinema + audio-capture tooling per platform; noisy-environment SC pass criteria (NEEDS RESEARCH flag)
-- (v1.2 release operator) Live-environment validation — cross-OS fresh install, macOS code-signing identity acquisition, real ElevenLabs + Claude round-trip, real OS suspend/resume + device hot-swap, real LOOP-06 latency budget measurement (carryover from v1.2 audit)
+- (v1.2 release operator) Live-environment validation — cross-OS fresh install, real ElevenLabs + Claude round-trip, real OS suspend/resume + device hot-swap, real LOOP-06 latency budget measurement (carryover from v1.2 audit; macOS code-signing identity acquisition descoped under the v1.3 Option 3 lock — no compiled darwin binary ships in v1.3)
 
 ### Milestone v1.2 Outcomes (carryover)
 
@@ -79,7 +79,7 @@ Decisions are logged in PROJECT.md Key Decisions table. v1.3-specific decisions 
 
 ### Blockers/Concerns
 
-- **Apple Developer ID acquisition** (release-operator owned): if not acquired before Phase 19 start, v1.3 ships as v1.3.0-beta unsigned with documented xattr workaround. Surface decision explicitly to release operator at Phase 19 kickoff.
+- **macOS JS-fallback bundle parity** (engineering-owned, Phase 19): under the Option 3 lock macOS ships exclusively via the JS-fallback bundle under Bun runtime (Node 22 LTS fallback) — no compiled darwin binary, no codesign/notarytool/Gatekeeper pipeline, no Apple Developer ID requirement. Phase 19 must verify the parent npm install on darwin deterministically resolves to the JS bundle (no `@achilles/cli-darwin-*` optional dependency installs a binary) and Phase 20 RBS-1 must capture the JS-fallback path on darwin-arm64. The previous "signed v1.3.0 vs unsigned v1.3.0-beta" branching is dissolved — only a single v1.3.0 release shape exists.
 - **VS Code integrated-terminal TCC silent failure** on macOS Sequoia (microsoft/vscode#307364): mitigated by Phase 18 per-emulator remediation script + Phase 20 RBS-2 VS Code asciicast — but the underlying VS Code bug is outside our control.
 
 ## Deferred Items
