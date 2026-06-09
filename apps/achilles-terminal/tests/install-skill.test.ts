@@ -411,7 +411,7 @@ describe("T-IS-06: Windows EPERM fallback copies the skill directory", () => {
     let cpCount = 0;
     const fs: InstallSkillSymlinkFs = {
       mkdirSync: () => undefined,
-      lstatSync: (_path) => {
+      lstatSync: () => {
         // No existing destination.
         const err = new Error("ENOENT");
         (err as unknown as { code: string }).code = "ENOENT";
