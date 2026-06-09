@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-06-09T21:39:02.919Z",
+  "phase": "19",
+  "phase_name": "Distribution + Publishing + Skill Rewire",
+  "phase_dir": ".planning/phases/19-distribution-publishing-skill-rewire",
+  "plan": 4,
+  "task": 1,
+  "total_tasks": 3,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": "19-01", "name": "Pre-publish prep (darwin drop + achilles-skill flip + SKILL.md rewrite)", "status": "done", "commit": "b7c68652", "tests": "3 contract tests + 19 assertions GREEN"},
+    {"id": "19-02", "name": "Runtime hardening (ERR-01 Banner + error-classifier + ERR-03 dual watchdog + ERR-08 logger fan-out + GATE-04 ESLint + install-skill port)", "status": "done", "commit": "merged via Wave 2 worktree", "tests": "49 new tests GREEN across 7 test files"},
+    {"id": "19-03", "name": "Distribution scripts + publish workflow (tarball-no-secrets port + source-of-truth wider arm + prepublishOnly + achilles-release.yml)", "status": "done", "commit": "merged via Wave 3 worktree", "tests": "15 vitest + 9 node:test cases GREEN"}
+  ],
+  "remaining_tasks": [
+    {"id": "19-04-T1", "name": "Operator checkpoint: verify all 5 npm view assertions succeed (achilles@1.3.0 + 3 platform siblings + achilles-skill@1.3.0)", "status": "blocked_on_operator", "type": "checkpoint:human-verify"},
+    {"id": "19-04-T2", "name": "Reachability grep: zero importers of apps/achilles-cli/** remain from outside the directory", "status": "not_started"},
+    {"id": "19-04-T3", "name": "Atomic deletion of apps/achilles (Electron tree, 132 files) + apps/achilles-cli/src/commands/launch.ts + paired test + verified-dead apps/achilles-cli files", "status": "not_started"}
+  ],
+  "blockers": [
+    {
+      "description": "npm publish has not happened; Plan 19-04 deletion would orphan workspace if publish failed (violates D-08 publish-then-cut)",
+      "type": "human_action",
+      "workaround": "Operator triggers .github/workflows/achilles-release.yml workflow_dispatch with version 1.3.0; waits for build + 3 publish jobs + macos-smoke to all green; runs 5 npm view assertions locally to confirm npm CDN propagation"
+    }
+  ],
+  "human_actions_pending": [
+    {
+      "action": "Trigger .github/workflows/achilles-release.yml via GitHub Actions UI with input version=1.3.0",
+      "context": "Workflow exists at .github/workflows/achilles-release.yml (commit 35096dad from Wave 3); only triggers on workflow_dispatch (no auto-push). Requires NODE_AUTH_TOKEN secret to be set in repo settings.",
+      "blocking": true
+    },
+    {
+      "action": "Run 5 npm view assertions after publish job goes green",
+      "context": "Commands: npm view achilles@1.3.0 name version | npm view @achilles/cli-linux-x64@1.3.0 name version | npm view @achilles/cli-linux-arm64@1.3.0 name version | npm view @achilles/cli-win32-x64@1.3.0 name version | npm view @achilles/achilles-skill@1.3.0 name version. All 5 must return non-empty name+version. Allow 30-45s for npm CDN propagation after publish job completes.",
+      "blocking": true
+    },
+    {
+      "action": "Resume with /gsd:execute-phase 19 once publish-confirmed",
+      "context": "Plan 19-04 will pick up at the checkpoint:human-verify gate; respond 'publish-confirmed' to unblock; then reachability grep + atomic deletion commit B lands. Single git revert HEAD rollback story.",
+      "blocking": false
+    }
+  ],
+  "decisions": [
+    {"decision": "macOS Option 3 lock (JS-fallback bundle under Bun; no codesign / Apple Dev ID / Gatekeeper)", "rationale": "Picked by user 2026-06-09 during /gsd-progress; persisted in memory v1.3-macos-option-3.md", "phase": "v1.3 milestone-wide"},
+    {"decision": "Drop 2 darwin sibling packages entirely (no no-op shim)", "rationale": "Private @achilles npm scope means no squat risk; bin shim existsSync fallback handles missing-platform deterministically; 2 fewer packages to version-bump per release", "phase": "19 / D-01"},
+    {"decision": "Full SKILL.md rewrite to terminal-only model (not one-line diff)", "rationale": "v1.2 SKILL.md described Electron + floating UI + askForMediaAccess + X-forwarding — all wrong under v1.3; leaving any of it in place lied to operators reading the manifest", "phase": "19 / D-03"},
+    {"decision": "Single cleanup commit AFTER publish-success (not 2-stage; not CI-gated PR)", "rationale": "Simplest mental model; publish first, then cut; atomic rollback via git revert HEAD", "phase": "19 / D-08"},
+    {"decision": "ERR-01 banner pre-empts ABOVE the status row (both rows visible during cascading failures)", "rationale": "User wants to see WHAT went wrong AND WHAT state they're in simultaneously; ARIA priority handles screen reader (banner=assertive, status row=polite)", "phase": "19 / D-10/D-11"},
+    {"decision": "Siblings publish BEFORE parent in achilles-release.yml", "rationale": "Avoid the window where users running npm install -g achilles between parent-publish and sibling-publish would hit missing optionalDependencies (warnings, ugly UX)", "phase": "19 / RESEARCH Pattern 2"},
+    {"decision": "Rollback story is npm deprecate (not npm unpublish)", "rationale": "npm policy: unpublish only allowed within 72h AND no dependents; deprecate is always available and idempotent", "phase": "19 / RESEARCH"},
+    {"decision": "Workflow trigger is workflow_dispatch ONLY (no auto-push trigger)", "rationale": "User's global CLAUDE.md rule: never auto-run applications; operator must manually trigger releases", "phase": "19 / D-02 PRE-publish ordering"}
+  ],
+  "uncommitted_files": [],
+  "next_action": "Operator triggers .github/workflows/achilles-release.yml workflow_dispatch with version=1.3.0; waits for green; runs 5 npm view assertions; then runs /gsd:execute-phase 19 (or types 'publish-confirmed' at the resumed checkpoint). All work for Waves 1-3 is committed and merged to Achilles branch; resume is non-destructive.",
+  "context_notes": "Phase 19 is 3/4 plans complete. Plan 19-04 is autonomous: false by design (operator-gated). The release operator owns the actual npm publish step; this orchestrator session cannot publish (CLAUDE.md never-auto-run rule + user has no NODE_AUTH_TOKEN in scope here). The hardest scope decision of the milestone — the macOS Option 3 lock — landed earlier in this session and persists in memory. Phase 20 (RBS asciicasts) is the remaining v1.3 work after Phase 19 closes."
+}
