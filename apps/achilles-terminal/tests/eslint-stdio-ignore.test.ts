@@ -1,0 +1,92 @@
+/**
+ * Phase 19, Plan 02, Task 2 — GATE-04 ESLint stdio:"ignore" forbid rule.
+ *
+ * Programmatic ESLint API test: instantiates ESLint with
+ * `overrideConfigFile` pointing at
+ * apps/achilles-terminal/eslint.config.js and runs `lintText` against
+ * two synthetic fixture strings:
+ *
+ *   - Forbidden: contains `spawn(cmd, args, { stdio: "ignore" })` —
+ *     the v1.2 silent-launch shape. The rule MUST fire and produce
+ *     at least one `no-restricted-syntax` message.
+ *   - Sanctioned: contains `spawn(cmd, args, { stdio: "inherit" })` —
+ *     the v1.3 foreground shape. The rule MUST stay silent (zero
+ *     `no-restricted-syntax` messages from this rule).
+ *
+ * RESEARCH Section Pitfall 8: the AST selector matches the LITERAL
+ * `{ stdio: "ignore" }` object form only. The accepted false-negatives
+ * (variable indirection, array form like `[ "ignore", "pipe", "pipe" ]`)
+ * are documented but NOT covered by this rule.
+ *
+ * No emojis (CLAUDE.md global).
+ */
+import { describe, it, expect } from "vitest";
+import { ESLint } from "eslint";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ESLINT_CONFIG = resolve(__dirname, "..", "eslint.config.js");
+
+/**
+ * Build an ESLint instance bound to the workspace eslint.config.js.
+ */
+function buildEslint(): ESLint {
+  return new ESLint({
+    cwd: resolve(__dirname, ".."),
+    overrideConfigFile: ESLINT_CONFIG,
+  });
+}
+
+describe("ESLint stdio:\"ignore\" forbid rule (GATE-04)", () => {
+  it("fires on the forbidden shape: spawn(cmd, args, { stdio: \"ignore\" })", async () => {
+    const eslint = buildEslint();
+    const fixture = `
+import { spawn } from "node:child_process";
+spawn("rec", [], { stdio: "ignore" });
+`;
+    const results = await eslint.lintText(fixture, {
+      filePath: resolve(__dirname, "..", "src", "fixture-forbidden.ts"),
+    });
+    expect(results.length).toBeGreaterThan(0);
+    const messages = (results[0]?.messages ?? []).filter(
+      (m) => m.ruleId === "no-restricted-syntax",
+    );
+    expect(messages.length).toBeGreaterThan(0);
+  });
+
+  it("stays silent on the sanctioned shape: spawn(cmd, args, { stdio: \"inherit\" })", async () => {
+    const eslint = buildEslint();
+    const fixture = `
+import { spawn } from "node:child_process";
+spawn("rec", [], { stdio: "inherit" });
+`;
+    const results = await eslint.lintText(fixture, {
+      filePath: resolve(__dirname, "..", "src", "fixture-sanctioned.ts"),
+    });
+    const messages = (results[0]?.messages ?? []).filter(
+      (m) => m.ruleId === "no-restricted-syntax",
+    );
+    expect(messages.length).toBe(0);
+  });
+
+  it("stays silent on the sanctioned array shape: spawn(cmd, args, { stdio: [\"pipe\", \"pipe\", \"pipe\"] })", async () => {
+    // RESEARCH Section Pitfall 8 documents this as an accepted false
+    // negative for the literal-only selector; the test asserts the rule
+    // does NOT fire on the array form (any of pipe/inherit/ignore in an
+    // array). We use ["pipe","pipe","pipe"] which is the v1.3 mic-sox
+    // shape and must not be flagged.
+    const eslint = buildEslint();
+    const fixture = `
+import { spawn } from "node:child_process";
+spawn("rec", [], { stdio: ["pipe", "pipe", "pipe"] });
+`;
+    const results = await eslint.lintText(fixture, {
+      filePath: resolve(__dirname, "..", "src", "fixture-array.ts"),
+    });
+    const messages = (results[0]?.messages ?? []).filter(
+      (m) => m.ruleId === "no-restricted-syntax",
+    );
+    expect(messages.length).toBe(0);
+  });
+});
