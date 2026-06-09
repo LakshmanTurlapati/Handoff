@@ -105,7 +105,7 @@
   5. **Publish-then-cut ordering enforced:** `apps/achilles` (Electron tree) and `apps/achilles-cli/src/commands/launch.ts` delete AFTER `npm publish` succeeds for the parent `achilles` package + the 3 platform siblings (linux-x64, linux-arm64, win32-x64); the 2 darwin sibling packages (`@achilles/cli-darwin-arm64`, `@achilles/cli-darwin-x64`) are either dropped from `optionalDependencies` entirely or kept as no-op shim packages that force JS-fallback resolution — decided as part of Phase 19 implementation; deletion lands in a separate commit so a publish failure does not orphan the workspace; ESLint rule forbidding `stdio:"ignore"` on the launch path is active and CI fails the build if the pattern appears (prevents v1.2 detached-stdio regression)
 **Plans**: 4 plans
   - [x] 19-01-PLAN.md — Pre-publish prep: darwin sibling drop + achilles-skill publish-config flip + SKILL.md rewrite + 3 contract tests (DIST-03 skill manifest part)
-  - [ ] 19-02-PLAN.md — Runtime hardening: ERR-01 Banner + error-classifier + VoiceShell wiring + ERR-03 sox/ffplay watchdog wiring in session.ts + ERR-08 unconditional logger fan-out + GATE-04 ESLint activation + install-skill subcommand port (ERR-01, ERR-03, ERR-08, DIST-03 install-skill part)
+  - [x] 19-02-PLAN.md — Runtime hardening: ERR-01 Banner + error-classifier + VoiceShell wiring + ERR-03 sox/ffplay watchdog wiring in session.ts + ERR-08 unconditional logger fan-out + GATE-04 ESLint activation + install-skill subcommand port (ERR-01, ERR-03, ERR-08, DIST-03 install-skill part)
   - [ ] 19-03-PLAN.md — Distribution scripts + publish workflow: tarball secret-scan port + source-of-truth wider-arm test + prepublishOnly hook + root scripts repath + .github/workflows/achilles-release.yml with matrix build + sequential publish + macOS smoke + --provenance (DIST-03 SHA-256 part, DIST-04, DIST-06)
   - [ ] 19-04-PLAN.md — Post-publish deletion (commit B, operator-gated): check-deletion-reachability.sh + atomic delete of apps/achilles + launch.ts + (conditional) apps/achilles-cli (D-08/D-09; DIST-03/04 architectural completion)
 
@@ -145,5 +145,5 @@ Phase 19's deletion of `apps/achilles` + `apps/achilles-cli/src/commands/launch.
 | 16. TUI Shell + State Machine + sox + VAD | v1.3 | 4/4 | Complete   | 2026-06-08 |
 | 17. End-to-end Voice Loop + gracefulShutdown | v1.3 | 5/5 | Complete   | 2026-06-08 |
 | 18. Init Wizard + Config + Transcripts | v1.3 | 4/4 | Complete    | 2026-06-09 |
-| 19. Distribution + Publishing + Skill Rewire | v1.3 | 1/4 | In Progress|  |
+| 19. Distribution + Publishing + Skill Rewire | v1.3 | 2/4 | In Progress|  |
 | 20. Hardening + Ship Gate (RBS Asciicasts) | v1.3 | 0/TBD | Not started | - |
