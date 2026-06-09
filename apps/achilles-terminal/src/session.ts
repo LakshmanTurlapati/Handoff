@@ -818,6 +818,20 @@ export class Session extends EventEmitter {
   }
 
   /**
+   * Phase 18 Plan 03 (ERR-04) public entry point for typed-input fallback.
+   * Routes a typed transcript through the same pipeline as a voice
+   * transcript (state-machine dispatch -> sandwich-wrap -> claudeBridge).
+   * The typed-input fallback (src/typed-input.ts) calls this when the STT
+   * circuit breaker is in "open" state so the typed input flows through
+   * the same single-pipeline commit path SC-5 requires.
+   *
+   * @public
+   */
+  public async submitTranscript(text: string): Promise<void> {
+    await this.driveClaudeForUtterance(text);
+  }
+
+  /**
    * Handle SessionEvent variants emitted by the Wave 2 modules. This
    * is the closed-loop that drives the state machine transitions
    * from the typed event stream.
@@ -1071,6 +1085,10 @@ export async function runVoice(argv: string[]): Promise<void> {
       "--debug",
       "enable verbose latency-probe + line-trace logging",
     )
+    .option(
+      "--save-transcripts",
+      "opt in to JSONL transcript recording at ~/.achilles/transcripts/ (SAFE-02 default OFF; 7-regex redacted; 30-day retention)",
+    )
     .action(
       async (opts: {
         mock?: boolean;
@@ -1078,6 +1096,7 @@ export async function runVoice(argv: string[]): Promise<void> {
         plain?: boolean;
         resume?: string;
         debug?: boolean;
+        saveTranscripts?: boolean;
       }) => {
         const usePlain = (opts.plain ?? false) || !process.stdout.isTTY;
 
@@ -1167,6 +1186,78 @@ export async function runVoice(argv: string[]): Promise<void> {
 
         const session = createSession(sessionOpts);
         session.start();
+
+        // Phase 18 Plan 03 (SAFE-02) — opt-in JSONL transcripts.
+        // INIT-07 preserved: dynamic-imported only when --save-transcripts
+        // is set. The store applies the 7-regex DEFAULT_REDACT_PATTERNS to
+        // every line and writes to ~/.achilles/transcripts/<sid>.jsonl at
+        // 0o600. The dispose() registration into process.once("exit")
+        // appends the session_end system entry and stacks with the
+        // graceful-shutdown lock-file unlink (both are once-handlers and
+        // do not race).
+        let transcriptDispose: (() => void) | null = null;
+        if (opts.saveTranscripts === true) {
+          const { createTranscriptStore } = await import(
+            "./transcripts/store.js"
+          );
+          const transcriptSid =
+            resumeSid ?? `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+          const transcriptStore = createTranscriptStore(transcriptSid);
+          // Subscribe via the discriminated SessionEvent channel so we
+          // capture committed user transcripts + claude ack + claude
+          // spoken-summary at one canonical site.
+          const onEvent = (ev: SessionEvent): void => {
+            if (ev.type === "stt_committed") {
+              transcriptStore.append({
+                t: ev.timestamp,
+                type: "user",
+                text: ev.payload.text,
+                session_id: transcriptSid,
+              });
+            } else if (ev.type === "claude_ack" || ev.type === "claude_summary") {
+              transcriptStore.append({
+                t: ev.timestamp,
+                type: "assistant",
+                text: ev.payload.text,
+                session_id: transcriptSid,
+              });
+            }
+          };
+          session.on("event", onEvent);
+          transcriptDispose = (): void => {
+            session.off("event", onEvent);
+            transcriptStore.dispose();
+          };
+          process.once("exit", () => {
+            transcriptDispose?.();
+          });
+        }
+
+        // Phase 18 Plan 03 (ERR-04) — typed-input fallback.
+        // INIT-07 preserved: dynamic-imported only on the production loop
+        // path (mock mode skips it since the mock STT bridge never opens
+        // its circuit-breaker). The fallback polls session.sttCircuit
+        // every 1s; on open, presents @clack/prompts.text() and routes
+        // the typed string through session.submitTranscript() so it
+        // shares the sandwich-wrap single-pipeline entry per SC-5.
+        let typedInputDispose: (() => void) | null = null;
+        if (!isMock) {
+          const { createTypedInputFallback } = await import(
+            "./typed-input.js"
+          );
+          const typedInputHandle = createTypedInputFallback(
+            session.sttCircuit,
+            async (typed: string): Promise<void> => {
+              await session.submitTranscript(typed);
+            },
+          );
+          typedInputDispose = (): void => {
+            typedInputHandle.dispose();
+          };
+          process.once("exit", () => {
+            typedInputDispose?.();
+          });
+        }
 
         // Register the graceful-shutdown handler (Plan 04 Task 2).
         // The handler owns the 7-step teardown in under 1.5s, the
