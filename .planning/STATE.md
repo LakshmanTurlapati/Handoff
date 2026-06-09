@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Terminal-only Achilles
-status: ready_to_plan
-stopped_at: Phase 18 complete (4/4) — ready to discuss Phase 19
-last_updated: 2026-06-09T03:13:45.997Z
-last_activity: 2026-06-08 -- Phase 18 execution started
+status: planning
+stopped_at: Phase 19 context gathered
+last_updated: "2026-06-09T16:52:08.114Z"
+last_activity: 2026-06-09
 progress:
   total_phases: 6
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 17
-  completed_plans: 44
-  percent: 50
+  completed_plans: 17
+  percent: 67
 ---
 
 # Project State
@@ -64,7 +64,7 @@ Decisions are logged in PROJECT.md Key Decisions table. v1.3-specific decisions 
 
 ### Pending Todos
 
-- (v1.3 Phase 19) Confirm macOS JS-fallback bundle ships clean under Bun 1.3+ and Node 22 LTS on a fresh macOS account; verify the parent npm install on darwin resolves to the JS bundle (no `@achilles/cli-darwin-*` optional dependency installs a binary); decide between dropping the 2 darwin sibling packages entirely vs publishing them as no-op shims
+- (v1.3 Phase 19) Confirm macOS JS-fallback bundle ships clean under Bun 1.3+ and Node 22 LTS on a fresh macOS account; verify the parent npm install on darwin resolves to the JS bundle (no `@achilles/cli-darwin-*` optional dependency installs a binary). Darwin sibling disposition resolved in 19-CONTEXT.md D-01: drop entirely (delete `apps/cli-darwin-arm64/` + `apps/cli-darwin-x64/` directories and remove from `apps/achilles-terminal/package.json` optionalDependencies as PRE-publish Phase 19 work).
 - (v1.3 Phase 16) Adaptive VAD EWMA tuning against representative noisy-room recordings before locking thresholds (NEEDS RESEARCH flag from research/SUMMARY.md)
 - (v1.3 Phase 17) ffplay low-latency flag benchmark (100 trials of representative TTS chunks) before locking flags; Bun-on-tmux SIGTERM propagation verification on 3 OSes (NEEDS RESEARCH flag)
 - (v1.3 Phase 20) asciinema + audio-capture tooling per platform; noisy-environment SC pass criteria (NEEDS RESEARCH flag)
@@ -102,6 +102,6 @@ Items acknowledged and carried forward — tracked in REQUIREMENTS.md v2 section
 
 ## Session Continuity
 
-Last session: 2026-06-08 — v1.3 milestone roadmap created (Phases 15-20)
-Stopped at: ROADMAP.md, REQUIREMENTS.md traceability, and STATE.md written; awaiting `/gsd:plan-phase 15`
-Resume file: None (next action is plan-phase, not resume)
+Last session: 2026-06-09T16:52:08.110Z
+Stopped at: Phase 19 context gathered
+Resume file: .planning/phases/19-distribution-publishing-skill-rewire/19-CONTEXT.md
