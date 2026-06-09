@@ -28,8 +28,8 @@
     "test:phase-11:quick": "vitest run --project phase-11-unit",
     "test:phase-11:full": "vitest run --project phase-11-unit && playwright test --project=achilles-renderer",
     "test:phase-13:quick": "vitest run --project phase-13-unit",
-    "check:source-of-truth": "node apps/achilles-cli/scripts/check-source-of-truth.mjs",
-    "check:tarball:secrets": "node apps/achilles-cli/scripts/check-tarball-no-secrets.mjs",
+    "check:source-of-truth": "node apps/achilles-terminal/scripts/check-source-of-truth.mjs",
+    "check:tarball:secrets": "node apps/achilles-terminal/scripts/check-tarball-no-secrets.mjs",
     "check:dist": "npm run check:source-of-truth && npm run check:tarball:secrets",
     "db:generate": "npm run db:generate --workspace packages/db"
   },
